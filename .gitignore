@@ -1,0 +1,101 @@
+# ──────────────────────────────────────────────
+# AI Console .gitignore — 加寬排除
+# ──────────────────────────────────────────────
+
+# === Go 建置產物 ===
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/build/
+/bin/
+
+# === Wails ===
+/build/bin/
+
+# === Frontend 依賴 ===
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# === 備份檔 / 歷史殘留 ===
+# SEC-W11 第二刀（2026-05-24）：避免 *.bak2 等備份檔再被 commit
+*.bak
+*.bak2
+*.backup
+*.orig
+
+# === IDE / 編輯器 ===
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
+.settings/
+
+# === OS 檔案 ===
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# === Spec 禁止外流檔案 ===
+# §9 來源信任日誌（含敏感 hash）
+source_trust_logs/
+allowlist_audit/
+
+# §11 LLM context 暫存
+llm_context_cache/
+context_payloads/
+
+# 記憶系統暫存
+memory/talk_full_archive/
+memory/*.tmp
+threat_log.jsonl
+
+# DAG 執行暫存
+dag_runs/
+dag_critical_nodes/
+
+# 憑證存放（絕對不得提交）
+credential_store/
+*.credential
+*.keystore
+
+# 沙盒草稿
+draft_sandbox_runs/
+
+# Purge manifest（本地審計用）
+purge_manifests/
+
+# === Runtime 暫存 ===
+runtime/
+*.tmp
+*.log
+crash_recovery/
+temp_sessions/
+
+# === 測試產物 ===
+coverage.out
+coverage.html
+*.test.log
+
+# === 環境設定 ===
+.env
+.env.local
+.env.*.local
+
+# === Visual Learning 暫存 ===
+visual_learning/processed_temp/

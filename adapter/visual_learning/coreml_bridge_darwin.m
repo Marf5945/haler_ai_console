@@ -19,6 +19,7 @@
 #import <CoreML/CoreML.h>
 #import <Vision/Vision.h>
 #import <CoreGraphics/CoreGraphics.h>
+#import <CoreVideo/CoreVideo.h>
 #include <stdlib.h>
 #include <string.h>
 #include "coreml_bridge_darwin.h"
@@ -138,7 +139,7 @@ int CoreML_Infer(CoreMLHandle handle,
         }
 
         CoreMLSession* session = (CoreMLSession*)handle;
-        VNCoreMLModel* vnModel = (__bridge VNCoreMLModel*)session->vnModel;
+        MLModel* model = (__bridge MLModel*)session->model;
 
         // ════════════════════════════════════════
         // Step 1: RGBA bytes → CGImage
@@ -176,53 +177,101 @@ int CoreML_Infer(CoreMLHandle handle,
         }
 
         // ════════════════════════════════════════
-        // Step 2: Vision framework 推論
+        // Step 2: CGImage → CVPixelBuffer → MLModel prediction
         // ════════════════════════════════════════
-        // VNCoreMLRequest 自動：
-        //   - 將 CGImage 縮放到模型輸入尺寸
-        //   - 轉換色彩空間
-        //   - 執行 MLModel prediction
-        __block MLMultiArray* outputArray = nil;
-        __block NSError* inferError = nil;
-
-        VNCoreMLRequest* request = [[VNCoreMLRequest alloc]
-            initWithModel:vnModel
-            completionHandler:^(VNRequest* req, NSError* err) {
-                if (err) {
-                    inferError = err;
-                    return;
-                }
-                // 從結果中找到第一個 MLMultiArray 輸出。
-                // YOLOv5 nano 通常只有一個輸出 tensor。
-                for (VNCoreMLFeatureValueObservation* obs in req.results) {
-                    if ([obs isKindOfClass:[VNCoreMLFeatureValueObservation class]] &&
-                        obs.featureValue.type == MLFeatureTypeMultiArray) {
-                        outputArray = obs.featureValue.multiArrayValue;
-                        break;
-                    }
-                }
-            }];
-
-        // ScaleFill：填滿整個輸入區域，不留黑邊。
-        // YOLO 期望完整影像，letterbox padding 在模型轉換時已處理。
-        request.imageCropAndScaleOption = VNImageCropAndScaleOptionScaleFill;
-
-        VNImageRequestHandler* handler = [[VNImageRequestHandler alloc]
-            initWithCGImage:cgImage options:@{}];
-
-        NSError* runError = nil;
-        BOOL success = [handler performRequests:@[request] error:&runError];
-
-        // CGImage 不再需要，立即釋放
-        CGImageRelease(cgImage);
-
-        if (!success || runError) {
-            if (errMsg) *errMsg = copyErrString(runError);
+        // 直接呼叫 MLModel，避開 VNCoreMLRequest 對部分匯出模型的
+        // VNCoreMLTransform 限制。模型的 ImageType input 會接收
+        // CVPixelBuffer，scale/bias 已寫在 .mlmodel 內。
+        NSString* inputName = model.modelDescription.inputDescriptionsByName.allKeys.firstObject;
+        if (!inputName) {
+            CGImageRelease(cgImage);
+            if (errMsg) *errMsg = makeCString("model has no input feature");
             return -1;
         }
-        if (inferError) {
-            if (errMsg) *errMsg = copyErrString(inferError);
+
+        MLFeatureDescription* inputDesc = model.modelDescription.inputDescriptionsByName[inputName];
+        NSInteger targetWidth = 416;
+        NSInteger targetHeight = 416;
+        if (inputDesc.imageConstraint) {
+            if (inputDesc.imageConstraint.pixelsWide > 0) {
+                targetWidth = inputDesc.imageConstraint.pixelsWide;
+            }
+            if (inputDesc.imageConstraint.pixelsHigh > 0) {
+                targetHeight = inputDesc.imageConstraint.pixelsHigh;
+            }
+        }
+
+        NSDictionary* attrs = @{
+            (NSString*)kCVPixelBufferCGImageCompatibilityKey: @YES,
+            (NSString*)kCVPixelBufferCGBitmapContextCompatibilityKey: @YES
+        };
+        CVPixelBufferRef pixelBuffer = NULL;
+        CVReturn cvErr = CVPixelBufferCreate(
+            kCFAllocatorDefault,
+            (size_t)targetWidth,
+            (size_t)targetHeight,
+            kCVPixelFormatType_32BGRA,
+            (__bridge CFDictionaryRef)attrs,
+            &pixelBuffer);
+        if (cvErr != kCVReturnSuccess || !pixelBuffer) {
+            CGImageRelease(cgImage);
+            if (errMsg) *errMsg = makeCString("failed to create CVPixelBuffer");
             return -1;
+        }
+
+        CVPixelBufferLockBaseAddress(pixelBuffer, 0);
+        void* baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer);
+        size_t bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer);
+        CGColorSpaceRef pixelColorSpace = CGColorSpaceCreateDeviceRGB();
+        CGContextRef pixelCtx = CGBitmapContextCreate(
+            baseAddress,
+            (size_t)targetWidth,
+            (size_t)targetHeight,
+            8,
+            bytesPerRow,
+            pixelColorSpace,
+            kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
+        if (pixelColorSpace) {
+            CGColorSpaceRelease(pixelColorSpace);
+        }
+        if (!pixelCtx) {
+            CVPixelBufferUnlockBaseAddress(pixelBuffer, 0);
+            CVPixelBufferRelease(pixelBuffer);
+            CGImageRelease(cgImage);
+            if (errMsg) *errMsg = makeCString("failed to create pixel buffer bitmap context");
+            return -1;
+        }
+        CGContextDrawImage(pixelCtx, CGRectMake(0, 0, targetWidth, targetHeight), cgImage);
+        CGContextRelease(pixelCtx);
+        CVPixelBufferUnlockBaseAddress(pixelBuffer, 0);
+        CGImageRelease(cgImage);
+
+        NSError* featureError = nil;
+        MLFeatureValue* imageValue = [MLFeatureValue featureValueWithPixelBuffer:pixelBuffer];
+        MLDictionaryFeatureProvider* provider = [[MLDictionaryFeatureProvider alloc]
+            initWithDictionary:@{ inputName: imageValue }
+                          error:&featureError];
+        if (!provider || featureError) {
+            CVPixelBufferRelease(pixelBuffer);
+            if (errMsg) *errMsg = copyErrString(featureError);
+            return -1;
+        }
+
+        NSError* predError = nil;
+        id<MLFeatureProvider> prediction = [model predictionFromFeatures:provider error:&predError];
+        CVPixelBufferRelease(pixelBuffer);
+        if (!prediction || predError) {
+            if (errMsg) *errMsg = copyErrString(predError);
+            return -1;
+        }
+
+        MLMultiArray* outputArray = nil;
+        for (NSString* featureName in prediction.featureNames) {
+            MLFeatureValue* value = [prediction featureValueForName:featureName];
+            if (value.type == MLFeatureTypeMultiArray) {
+                outputArray = value.multiArrayValue;
+                break;
+            }
         }
         if (!outputArray) {
             if (errMsg) *errMsg = makeCString("no MLMultiArray output found in model results");

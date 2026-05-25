@@ -33,7 +33,7 @@ package visual_learning
 
 /*
 #cgo CFLAGS: -fobjc-arc
-#cgo LDFLAGS: -framework CoreML -framework Foundation -framework Vision -framework CoreGraphics
+#cgo LDFLAGS: -framework CoreML -framework Foundation -framework Vision -framework CoreGraphics -framework CoreVideo
 #include "coreml_bridge_darwin.h"
 #include <stdlib.h>
 */
@@ -63,10 +63,10 @@ const (
 // 每個請求攜帶專屬的 resp channel，確保 caller 能收到對應的回應。
 type coremlRequest struct {
 	kind      coremlReqKind
-	modelPath string             // coremlReqLoad: .mlmodelc 目錄完整路徑
-	rgba      []byte             // coremlReqInfer: RGBA 影像原始位元組
-	width     int                // coremlReqInfer: 影像寬度（pixels）
-	height    int                // coremlReqInfer: 影像高度（pixels）
+	modelPath string              // coremlReqLoad: .mlmodelc 目錄完整路徑
+	rgba      []byte              // coremlReqInfer: RGBA 影像原始位元組
+	width     int                 // coremlReqInfer: 影像寬度（pixels）
+	height    int                 // coremlReqInfer: 影像高度（pixels）
 	resp      chan coremlResponse // caller 等待此 channel 接收回應
 }
 
@@ -93,10 +93,10 @@ type coremlResponse struct {
 //	Close()              → 透過 channel 請求 worker 釋放資源並結束
 type coremlEngine struct {
 	reqCh  chan coremlRequest // 發送請求到 worker
-	wg     sync.WaitGroup    // 等待 worker goroutine 結束
-	mu     sync.Mutex        // 保護 closed / loaded 狀態
-	closed bool              // 引擎是否已關閉
-	loaded bool              // 模型是否已成功載入
+	wg     sync.WaitGroup     // 等待 worker goroutine 結束
+	mu     sync.Mutex         // 保護 closed / loaded 狀態
+	closed bool               // 引擎是否已關閉
+	loaded bool               // 模型是否已成功載入
 }
 
 // NewInferenceEngine 建立 macOS CoreML 推論引擎。
@@ -276,8 +276,7 @@ func (e *coremlEngine) handleInfer(req coremlRequest, handle C.CoreMLHandle) {
 //
 // 流程：
 //  1. 檢查引擎狀態（已關閉 → ErrEngineAlreadyClosed）
-//  2. TODO(§14.6.6): ModelVerifier.Verify() SHA256 驗證
-//     — 待 model_hashes.json manifest 建立後啟用
+//  2. SHA256 驗證（§14.6.6）— hash 來自 //go:embed model_hashes.json
 //  3. 透過 channel 發送 load 請求到 LockOSThread worker
 //  4. Worker 呼叫 CoreML_LoadModel()（Obj-C 端）
 //  5. CoreML 載入失敗 → ErrInferenceUnavailable（使用者原則 #3）
@@ -289,16 +288,16 @@ func (e *coremlEngine) LoadModel(path string) error {
 		return ErrEngineAlreadyClosed
 	}
 
-	// TODO(§14.6.6): 啟用 SHA256 模型完整性驗證。
-	// 待 model_hashes.json manifest 建立後，取消以下註解：
-	//
-	//   verifier, vErr := NewModelVerifier(embeddedModelHashes)
-	//   if vErr != nil {
-	//       return fmt.Errorf("%w: manifest error — %v", ErrInferenceUnavailable, vErr)
-	//   }
-	//   if err := verifier.Verify(path); err != nil {
-	//       return err // ErrModelIntegrityMismatch
-	//   }
+	// §14.6.6：SHA256 模型完整性驗證。
+	// hash manifest 由 //go:embed 嵌入（model_hashes_embed.go），
+	// 攻擊者無法同時替換模型和 manifest。
+	verifier, vErr := NewModelVerifier(embeddedModelHashes)
+	if vErr != nil {
+		return fmt.Errorf("%w: manifest parse error — %v", ErrInferenceUnavailable, vErr)
+	}
+	if err := verifier.Verify(path); err != nil {
+		return err // ErrModelIntegrityMismatch — 拒絕載入，不降級
+	}
 
 	// 發送 load 請求到 worker
 	resp := make(chan coremlResponse, 1)

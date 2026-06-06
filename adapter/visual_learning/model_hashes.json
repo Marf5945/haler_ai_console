@@ -1,0 +1,6 @@
+﻿{
+    "_note":  "Trusted model SHA256 manifest. YOLOX is Apache-2.0; do not add AGPL/GPL model artifacts here.",
+    "models":  {
+                   "yolox_button_s.onnx":  "sha256:52897f751ad6ec6ae7e98a662a29eeddeff36566dc983079f4d8a7a6f3313efc"
+               }
+}

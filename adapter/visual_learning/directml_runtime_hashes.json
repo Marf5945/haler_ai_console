@@ -1,0 +1,11 @@
+{
+  "_note": "Trusted ONNX Runtime DirectML DLL SHA256 manifest. Keep empty until the 1.24.4 win-x64 DLLs are bundled; unpinned DLLs force OpenCV-only.",
+  "runtime": "onnxruntime-directml",
+  "version": "1.24.4",
+  "rid": "win-x64",
+  "files": {
+    "onnxruntime.dll": "sha256:e7eedec6a6f26dc39dc948276a75ef6d2bee3fff944d874ceed0bbd3b97bff40",
+    "onnxruntime_providers_shared.dll": "sha256:265c8daf29637cb259cac8be9f08f2cd45f3883f0f0e4949cbfddd5b4cbec3b6",
+    "DirectML.dll": "sha256:9c9e6d822561c6c41b90e6994b3e8857cf1d66dbfb1e0c4c799c7c89b4e92da1"
+  }
+}

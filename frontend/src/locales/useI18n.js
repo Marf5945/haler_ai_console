@@ -87,6 +87,12 @@ function resolveTranslation(translations, fallback, language, key, params) {
 const _initialLanguage = getCurrentLanguage();
 const _initialTranslations = TRANSLATION_MAP[_initialLanguage] ?? {};
 
+function applyDocumentLanguage(lang) {
+  if (typeof document === 'undefined') return;
+  document.documentElement.lang = lang;
+  document.documentElement.dir = RTL_LANGUAGES.includes(lang) ? 'rtl' : 'ltr';
+}
+
 // ----------------------------------------------------------
 // Zustand Store
 // ----------------------------------------------------------
@@ -101,10 +107,14 @@ const useI18n = create((set, get) => ({
     return resolveTranslation(translations, fallback, language, key, params);
   },
 
-  /* setLanguage(lang)：切換語系並重載頁面 */
+  /* setLanguage(lang)：切換語系，不重載 UI */
   setLanguage: (lang) => {
     try { localStorage.setItem('i18n_language', lang); } catch {}
-    window.location.reload();
+    set({
+      language: lang,
+      translations: TRANSLATION_MAP[lang] ?? {},
+    });
+    applyDocumentLanguage(lang);
   },
 
   /* getDirection()：文字方向（預留 RTL） */

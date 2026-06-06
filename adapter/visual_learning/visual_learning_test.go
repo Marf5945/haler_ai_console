@@ -57,6 +57,36 @@ func TestRecordEventRequiresActiveMode(t *testing.T) {
 	}
 }
 
+func TestOperationRiskNativeManualNonDangerousIsMedium(t *testing.T) {
+	steps := []LearningReplayStep{}
+	for i := 0; i < 6; i++ {
+		steps = append(steps, LearningReplayStep{
+			Source:          "native",
+			CoordinateSpace: "screen",
+			WindowsAnchor:   &WindowsClickAnchorResult{NeedsReview: true},
+		})
+	}
+	risk := operationRisk(&LearningRun{Title: "open Chrome and browse YouTube"}, steps)
+	if risk.Level != "medium" {
+		t.Fatalf("risk level = %q, want medium; score=%d reasons=%v", risk.Level, risk.Score, risk.Reasons)
+	}
+}
+
+func TestOperationRiskDangerousKeywordsCanBeHigh(t *testing.T) {
+	steps := []LearningReplayStep{}
+	for i := 0; i < 6; i++ {
+		steps = append(steps, LearningReplayStep{
+			Source:          "native",
+			CoordinateSpace: "screen",
+			WindowsAnchor:   &WindowsClickAnchorResult{NeedsReview: true},
+		})
+	}
+	risk := operationRisk(&LearningRun{Title: "submit payment checkout"}, steps)
+	if risk.Level != "high" {
+		t.Fatalf("risk level = %q, want high; score=%d reasons=%v", risk.Level, risk.Score, risk.Reasons)
+	}
+}
+
 // TestSafeExportAllowlist verifies only whitelisted sections pass.
 func TestSafeExportAllowlist(t *testing.T) {
 	dir := tmpLearnDir(t)

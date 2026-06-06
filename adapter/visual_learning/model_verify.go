@@ -13,17 +13,19 @@
 //
 //	{
 //	  "models": {
-//	    "yolo_nano.mlmodelc": "sha256:abcdef1234...",
-//	    "yolo_nano.onnx": "sha256:fedcba4321..."
+//	    "yolox_nano.mlmodelc": "sha256:abcdef1234...",
+//	    "yolox_nano.onnx": "sha256:fedcba4321..."
 //	  }
 //	}
 //
 // 安全性考量：
-//   manifest 使用 //go:embed 嵌入二進位，攻擊者無法同時替換模型和 manifest。
-//   如果需要更新模型，必須重新編譯 app（manifest 跟著更新）。
+//
+//	manifest 使用 //go:embed 嵌入二進位，攻擊者無法同時替換模型和 manifest。
+//	如果需要更新模型，必須重新編譯 app（manifest 跟著更新）。
 package visual_learning
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -61,6 +63,7 @@ type ModelVerifier struct {
 // manifestJSON 應來自 //go:embed model_hashes.json。
 func NewModelVerifier(manifestJSON []byte) (*ModelVerifier, error) {
 	var m ModelHashManifest
+	manifestJSON = bytes.TrimPrefix(manifestJSON, []byte{0xEF, 0xBB, 0xBF})
 	if err := json.Unmarshal(manifestJSON, &m); err != nil {
 		return nil, fmt.Errorf("model verifier: failed to parse manifest — %w", err)
 	}
@@ -72,7 +75,7 @@ func NewModelVerifier(manifestJSON []byte) (*ModelVerifier, error) {
 
 // Verify 驗證指定路徑的模型檔 SHA256 是否與 manifest 一致。
 //
-// modelPath: 模型檔的完整路徑（例如 "assets/models/yolo_nano.onnx"）
+// modelPath: 模型檔的完整路徑（例如 "assets/models/yolox_nano.onnx"）
 //
 // 驗證流程：
 //  1. 從路徑取得檔名

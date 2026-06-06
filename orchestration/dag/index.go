@@ -28,7 +28,7 @@ import (
 // DAGRunSummary index 中的單筆 entry。
 type DAGRunSummary struct {
 	RunID           string `json:"run_id"`
-	Status          string `json:"status"`            // succeeded|failed|running|blocked|cancelled
+	Status          string `json:"status"` // succeeded|failed|running|blocked|cancelled
 	StartedAt       string `json:"started_at"`
 	EndedAt         string `json:"ended_at,omitempty"`
 	DurationMs      int64  `json:"duration_ms,omitempty"`
@@ -91,13 +91,16 @@ func AppendRunIndex(projectRoot string, summary DAGRunSummary) error {
 	return saveIndex(projectRoot, data)
 }
 
-// UpdateRunIndex 更新指定 run 的 status / ended_at / duration / error。
-func UpdateRunIndex(projectRoot string, runID string, status string, endedAt string, durationMs int64, failedNodeCount int, errorSummary string) error {
+// UpdateRunIndex 更新指定 run 的 status / node count / ended_at / duration / error。
+func UpdateRunIndex(projectRoot string, runID string, status string, endedAt string, durationMs int64, nodeCount int, failedNodeCount int, errorSummary string) error {
 	data := loadIndex(projectRoot)
 
 	for i := range data.Runs {
 		if data.Runs[i].RunID == runID {
 			data.Runs[i].Status = status
+			if nodeCount > 0 {
+				data.Runs[i].NodeCount = nodeCount
+			}
 			if endedAt != "" {
 				data.Runs[i].EndedAt = endedAt
 			}

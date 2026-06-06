@@ -2,12 +2,14 @@
 // It replaces the legacy WebSocket event log with typed, in-process event dispatch.
 //
 // Usage (Go side):
-//   bus := eventbus.New(ctx)  // ctx from app.startup
-//   bus.Emit(EventAdapterStatusChanged, payload)
+//
+//	bus := eventbus.New(ctx)  // ctx from app.startup
+//	bus.Emit(EventAdapterStatusChanged, payload)
 //
 // Usage (Frontend):
-//   import { EventsOn } from '../wailsjs/runtime/runtime';
-//   EventsOn("adapter:status_changed", (payload) => { ... });
+//
+//	import { EventsOn } from '../wailsjs/runtime/runtime';
+//	EventsOn("adapter:status_changed", (payload) => { ... });
 //
 // Event naming convention: "domain:action" (e.g. "dag:node_completed", "review:card_added").
 // All events are fire-and-forget; subscribers receive a JSON-serializable payload.
@@ -57,6 +59,16 @@ const (
 
 	// Digest events (#I-1001)
 	EventDigestAutoArchived = "digest:auto_archived"
+
+	// Embedding events (Phase B M3)
+	EventEmbeddingConfigMissing = "embedding:config_missing"
+	EventEmbeddingPullStarted   = "embedding:pull_started"
+	EventEmbeddingPullProgress  = "embedding:pull_progress"
+	EventEmbeddingPullDone      = "embedding:pull_done"
+	EventEmbeddingPullFailed    = "embedding:pull_failed"
+
+	// Web search setup
+	EventWebSearchConfigRequired = "web_search:config_required"
 )
 
 // Bus is the central event dispatcher. Holds the Wails context for EventsEmit.

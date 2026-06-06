@@ -1,13 +1,16 @@
 // xlsx_rw.go — Excel .xlsx 讀寫。
 // .xlsx = zip 檔案，主要內容：
-//   xl/sharedStrings.xml — 字串表（所有儲存格文字集中在這）
-//   xl/worksheets/sheet1.xml — 工作表（儲存格用 <v> 索引指向字串表）
+//
+//	xl/sharedStrings.xml — 字串表（所有儲存格文字集中在這）
+//	xl/worksheets/sheet1.xml — 工作表（儲存格用 <v> 索引指向字串表）
+//
 // Import：抽取所有字串。Export：產生最小單工作表 xlsx。
 package builtin
 
 import (
 	"fmt"
 	"html"
+	"sort"
 	"strings"
 )
 
@@ -46,17 +49,50 @@ func extractXlsxFromSheet(path string) (string, error) {
 // GenerateXlsx 從純文字產生最小 .xlsx 檔案。
 // content 格式：tab 分隔欄位，\n 分隔列。
 func GenerateXlsx(content string, destPath string) error {
-	lines := strings.Split(content, "\n")
+	return GenerateStyledXlsx(XlsxSpec{Rows: tsvToXlsxRows(content)}, destPath)
+}
+
+// XlsxSpec 是結構化 .xlsx 產生格式。Rows 適合表格資料，Cells 適合指定 A1 儲存格。
+type XlsxSpec struct {
+	SheetName string               `json:"sheet_name,omitempty"`
+	Rows      [][]XlsxCell         `json:"rows,omitempty"`
+	Cells     map[string]XlsxCell  `json:"cells,omitempty"`
+	Styles    map[string]XlsxStyle `json:"styles,omitempty"`
+	ColWidths map[string]float64   `json:"col_widths,omitempty"`
+}
+
+type XlsxCell struct {
+	Value interface{} `json:"value"`
+	Style string      `json:"style,omitempty"`
+}
+
+type XlsxStyle struct {
+	Bold      bool   `json:"bold,omitempty"`
+	FontColor string `json:"font_color,omitempty"`
+	FillColor string `json:"fill_color,omitempty"`
+	Align     string `json:"align,omitempty"`
+	NumFmt    string `json:"num_fmt,omitempty"`
+}
+
+// GenerateStyledXlsx 從結構化資料產生單工作表 .xlsx，支援基本樣式與欄寬。
+func GenerateStyledXlsx(spec XlsxSpec, destPath string) error {
+	lines, err := xlsxSpecRows(spec)
+	if err != nil {
+		return err
+	}
 
 	// 收集所有唯一字串（建立 sharedStrings）
 	var sharedStrings []string
 	ssIndex := map[string]int{}
-	for _, line := range lines {
-		for _, cell := range strings.Split(line, "\t") {
-			if _, exists := ssIndex[cell]; !exists {
-				ssIndex[cell] = len(sharedStrings)
-				sharedStrings = append(sharedStrings, cell)
+	cellCount := 0
+	for _, row := range lines {
+		for _, cell := range row {
+			value := xlsxCellValueString(cell.Value)
+			if _, exists := ssIndex[value]; !exists {
+				ssIndex[value] = len(sharedStrings)
+				sharedStrings = append(sharedStrings, value)
 			}
+			cellCount++
 		}
 	}
 
@@ -64,43 +100,280 @@ func GenerateXlsx(content string, destPath string) error {
 	var ssXML strings.Builder
 	ssXML.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
 	fmt.Fprintf(&ssXML, `<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="%d" uniqueCount="%d">`,
-		countCells(lines), len(sharedStrings))
+		cellCount, len(sharedStrings))
 	for _, s := range sharedStrings {
 		ssXML.WriteString(`<si><t>` + html.EscapeString(s) + `</t></si>`)
 	}
 	ssXML.WriteString(`</sst>`)
 
+	styleXML, styleIDs := buildXlsxStyles(spec.Styles)
+
 	// 建立 sheet1.xml
 	var sheetXML strings.Builder
 	sheetXML.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
 	sheetXML.WriteString(`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`)
+	writeXlsxColumns(&sheetXML, spec.ColWidths)
 	sheetXML.WriteString(`<sheetData>`)
-	for rowIdx, line := range lines {
+	for rowIdx, row := range lines {
 		fmt.Fprintf(&sheetXML, `<row r="%d">`, rowIdx+1)
-		cells := strings.Split(line, "\t")
-		for colIdx, cell := range cells {
-			colLetter := string(rune('A' + colIdx)) // A-Z 足夠第一版
-			if colIdx > 25 {
-				colLetter = "Z"
-			}
+		for colIdx, cell := range row {
+			colLetter := xlsxColumnName(colIdx)
 			ref := fmt.Sprintf("%s%d", colLetter, rowIdx+1)
-			idx := ssIndex[cell]
-			fmt.Fprintf(&sheetXML, `<c r="%s" t="s"><v>%d</v></c>`, ref, idx)
+			idx := ssIndex[xlsxCellValueString(cell.Value)]
+			styleAttr := ""
+			if styleID, ok := styleIDs[cell.Style]; ok && styleID > 0 {
+				styleAttr = fmt.Sprintf(` s="%d"`, styleID)
+			}
+			fmt.Fprintf(&sheetXML, `<c r="%s" t="s"%s><v>%d</v></c>`, ref, styleAttr, idx)
 		}
 		sheetXML.WriteString(`</row>`)
 	}
 	sheetXML.WriteString(`</sheetData></worksheet>`)
 
 	entries := map[string]string{
-		"[Content_Types].xml":            xlsxContentTypes,
-		"_rels/.rels":                    xlsxRels,
-		"xl/_rels/workbook.xml.rels":     xlsxWorkbookRels,
-		"xl/workbook.xml":               xlsxWorkbook,
-		"xl/styles.xml":                 xlsxStyles,
-		"xl/sharedStrings.xml":          ssXML.String(),
-		"xl/worksheets/sheet1.xml":      sheetXML.String(),
+		"[Content_Types].xml":        xlsxContentTypes,
+		"_rels/.rels":                xlsxRels,
+		"xl/_rels/workbook.xml.rels": xlsxWorkbookRels,
+		"xl/workbook.xml":            xlsxWorkbookXML(spec.SheetName),
+		"xl/styles.xml":              styleXML,
+		"xl/sharedStrings.xml":       ssXML.String(),
+		"xl/worksheets/sheet1.xml":   sheetXML.String(),
 	}
 	return writeMinimalZip(destPath, entries)
+}
+
+func tsvToXlsxRows(content string) [][]XlsxCell {
+	lines := strings.Split(content, "\n")
+	rows := make([][]XlsxCell, 0, len(lines))
+	for _, line := range lines {
+		parts := strings.Split(line, "\t")
+		row := make([]XlsxCell, 0, len(parts))
+		for _, cell := range parts {
+			row = append(row, XlsxCell{Value: cell})
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func xlsxSpecRows(spec XlsxSpec) ([][]XlsxCell, error) {
+	rows := make([][]XlsxCell, len(spec.Rows))
+	for i, row := range spec.Rows {
+		rows[i] = append([]XlsxCell(nil), row...)
+	}
+	refs := make([]string, 0, len(spec.Cells))
+	for ref := range spec.Cells {
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+	for _, ref := range refs {
+		rowIdx, colIdx, err := parseXlsxA1CellRef(ref)
+		if err != nil {
+			return nil, err
+		}
+		for len(rows) <= rowIdx {
+			rows = append(rows, nil)
+		}
+		for len(rows[rowIdx]) <= colIdx {
+			rows[rowIdx] = append(rows[rowIdx], XlsxCell{})
+		}
+		rows[rowIdx][colIdx] = spec.Cells[ref]
+	}
+	if len(rows) == 0 {
+		return [][]XlsxCell{{}}, nil
+	}
+	return rows, nil
+}
+
+func parseXlsxA1CellRef(ref string) (int, int, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return 0, 0, fmt.Errorf("xlsx_rw: empty cell ref")
+	}
+	i := 0
+	col := 0
+	for i < len(ref) {
+		ch := ref[i]
+		if ch >= 'a' && ch <= 'z' {
+			ch -= 'a' - 'A'
+		}
+		if ch < 'A' || ch > 'Z' {
+			break
+		}
+		col = col*26 + int(ch-'A'+1)
+		i++
+	}
+	if col == 0 || i == len(ref) {
+		return 0, 0, fmt.Errorf("xlsx_rw: invalid cell ref %q", ref)
+	}
+	row := 0
+	for ; i < len(ref); i++ {
+		ch := ref[i]
+		if ch < '0' || ch > '9' {
+			return 0, 0, fmt.Errorf("xlsx_rw: invalid cell ref %q", ref)
+		}
+		row = row*10 + int(ch-'0')
+	}
+	if row <= 0 {
+		return 0, 0, fmt.Errorf("xlsx_rw: invalid cell ref %q", ref)
+	}
+	return row - 1, col - 1, nil
+}
+
+func xlsxCellValueString(value interface{}) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+func xlsxColumnName(idx int) string {
+	if idx < 0 {
+		return "A"
+	}
+	name := ""
+	for idx >= 0 {
+		name = string(rune('A'+idx%26)) + name
+		idx = idx/26 - 1
+	}
+	return name
+}
+
+func writeXlsxColumns(b *strings.Builder, widths map[string]float64) {
+	if len(widths) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(widths))
+	for key := range widths {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	b.WriteString(`<cols>`)
+	for _, key := range keys {
+		width := widths[key]
+		if width <= 0 {
+			continue
+		}
+		col, err := xlsxColumnIndex(key)
+		if err != nil {
+			continue
+		}
+		fmt.Fprintf(b, `<col min="%d" max="%d" width="%.2f" customWidth="1"/>`, col+1, col+1, width)
+	}
+	b.WriteString(`</cols>`)
+}
+
+func xlsxColumnIndex(ref string) (int, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return 0, fmt.Errorf("xlsx_rw: empty column")
+	}
+	col := 0
+	for _, r := range strings.ToUpper(ref) {
+		if r < 'A' || r > 'Z' {
+			return 0, fmt.Errorf("xlsx_rw: invalid column %q", ref)
+		}
+		col = col*26 + int(r-'A'+1)
+	}
+	return col - 1, nil
+}
+
+func buildXlsxStyles(styles map[string]XlsxStyle) (string, map[string]int) {
+	names := make([]string, 0, len(styles))
+	for name := range styles {
+		if strings.TrimSpace(name) != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+
+	styleIDs := map[string]int{"": 0}
+	var fonts []string
+	var fills []string
+	var xfs []string
+	fonts = append(fonts, `<font><sz val="11"/><name val="Calibri"/></font>`)
+	fills = append(fills,
+		`<fill><patternFill patternType="none"/></fill>`,
+		`<fill><patternFill patternType="gray125"/></fill>`,
+	)
+	xfs = append(xfs, `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>`)
+
+	for _, name := range names {
+		style := styles[name]
+		fontID := len(fonts)
+		fillID := 0
+		fonts = append(fonts, xlsxFontXML(style))
+		if normalizeXlsxColor(style.FillColor) != "" {
+			fillID = len(fills)
+			fills = append(fills, xlsxFillXML(style.FillColor))
+		}
+		attrs := fmt.Sprintf(`numFmtId="0" fontId="%d" fillId="%d" borderId="0" xfId="0"`, fontID, fillID)
+		apply := ` applyFont="1"`
+		if fillID > 0 {
+			apply += ` applyFill="1"`
+		}
+		alignment := xlsxAlignmentXML(style.Align)
+		if alignment != "" {
+			apply += ` applyAlignment="1"`
+			xfs = append(xfs, `<xf `+attrs+apply+`>`+alignment+`</xf>`)
+		} else {
+			xfs = append(xfs, `<xf `+attrs+apply+`/>`)
+		}
+		styleIDs[name] = len(xfs) - 1
+	}
+
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
+	b.WriteString(`<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`)
+	fmt.Fprintf(&b, `<fonts count="%d">%s</fonts>`, len(fonts), strings.Join(fonts, ""))
+	fmt.Fprintf(&b, `<fills count="%d">%s</fills>`, len(fills), strings.Join(fills, ""))
+	b.WriteString(`<borders count="1"><border/></borders>`)
+	b.WriteString(`<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>`)
+	fmt.Fprintf(&b, `<cellXfs count="%d">%s</cellXfs>`, len(xfs), strings.Join(xfs, ""))
+	b.WriteString(`</styleSheet>`)
+	return b.String(), styleIDs
+}
+
+func xlsxFontXML(style XlsxStyle) string {
+	var b strings.Builder
+	b.WriteString(`<font><sz val="11"/><name val="Calibri"/>`)
+	if style.Bold {
+		b.WriteString(`<b/>`)
+	}
+	if color := normalizeXlsxColor(style.FontColor); color != "" {
+		fmt.Fprintf(&b, `<color rgb="%s"/>`, color)
+	}
+	b.WriteString(`</font>`)
+	return b.String()
+}
+
+func xlsxFillXML(color string) string {
+	color = normalizeXlsxColor(color)
+	return `<fill><patternFill patternType="solid"><fgColor rgb="` + color + `"/><bgColor indexed="64"/></patternFill></fill>`
+}
+
+func xlsxAlignmentXML(align string) string {
+	align = strings.ToLower(strings.TrimSpace(align))
+	switch align {
+	case "left", "center", "right":
+		return `<alignment horizontal="` + align + `"/>`
+	case "置中", "居中":
+		return `<alignment horizontal="center"/>`
+	case "靠右":
+		return `<alignment horizontal="right"/>`
+	}
+	return ""
+}
+
+func normalizeXlsxColor(color string) string {
+	color = strings.TrimSpace(strings.TrimPrefix(color, "#"))
+	if len(color) == 6 {
+		return "FF" + strings.ToUpper(color)
+	}
+	if len(color) == 8 {
+		return strings.ToUpper(color)
+	}
+	return ""
 }
 
 // countCells 計算總儲存格數。
@@ -136,10 +409,30 @@ const xlsxWorkbookRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?
 <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
 </Relationships>`
 
-const xlsxWorkbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+func xlsxWorkbookXML(sheetName string) string {
+	sheetName = sanitizeXlsxSheetName(sheetName)
+	return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+<sheets><sheet name="` + html.EscapeString(sheetName) + `" sheetId="1" r:id="rId1"/></sheets>
 </workbook>`
+}
+
+func sanitizeXlsxSheetName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "Sheet1"
+	}
+	replacer := strings.NewReplacer("[", "_", "]", "_", ":", "_", "*", "_", "?", "_", "/", "_", "\\", "_")
+	name = replacer.Replace(name)
+	runes := []rune(name)
+	if len(runes) > 31 {
+		name = string(runes[:31])
+	}
+	if strings.TrimSpace(name) == "" {
+		return "Sheet1"
+	}
+	return name
+}
 
 const xlsxStyles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -149,4 +442,3 @@ const xlsxStyles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cellStyleXfs count="1"><xf/></cellStyleXfs>
 <cellXfs count="1"><xf/></cellXfs>
 </styleSheet>`
-

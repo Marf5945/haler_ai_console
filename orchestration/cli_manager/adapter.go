@@ -42,6 +42,7 @@ type sendMessageParams struct {
 	WorkspaceDir   string                `json:"workspace_dir"`
 	SessionID      string                `json:"session_id"`
 	UserText       string                `json:"user_text"`
+	Model          string                `json:"model,omitempty"` // 使用者於 UI 雙擊選定的 CLI model（空字串=用 CLI 預設）
 	SkillInjection *skill_step.Injection `json:"skill_injection"` // 可為 null
 	TraceID        string                `json:"trace_id"`        // DEBUG_TRACE_REMOVE
 }
@@ -72,6 +73,10 @@ type SidecarCLIAdapter struct {
 	summaryCooldownChars int  // cooldown 結束時的字數門檻
 	summaryTriggered     bool // 是否已觸發過（避免重複）
 	summaryDismissedAt   int  // 使用者點「稍後」時的字數
+
+	// modelProvider：由 app 注入；給定 adapter_id 回傳使用者選的 model。
+	// 為 nil 或回傳空字串時走 CLI 自己的預設。
+	modelProvider func(adapterID string) string
 }
 
 type continuityState struct {
@@ -101,6 +106,11 @@ func NewSidecarCLIAdapter(manager *SidecarManager, workspaceRoot string) *Sideca
 // SetSystemPrompt 設定固定 system prompt（v4.0：不摘要）
 func (a *SidecarCLIAdapter) SetSystemPrompt(prompt string) {
 	a.systemPrompt = prompt
+}
+
+// SetModelProvider 注入 model 選擇器（由 app.go 從 settings.Service 包成 closure 傳入）。
+func (a *SidecarCLIAdapter) SetModelProvider(fn func(adapterID string) string) {
+	a.modelProvider = fn
 }
 
 // SetActionTags 設定當前可用動作 tag（來自 skill/mcp/app/sub）
@@ -197,6 +207,37 @@ func (a *SidecarCLIAdapter) getContinuity(key string) *continuityState {
 	return state
 }
 
+func (a *SidecarCLIAdapter) promptHistorySnapshot(state *continuityState) ([]conversation.Summary, []conversation.Sentence) {
+	if state == nil {
+		return nil, nil
+	}
+	var validSummaries []conversation.Summary
+	for _, s := range state.summaries {
+		if s.Valid && state.sentences.CheckSummaryIntegrity(s.SentenceIDs) {
+			validSummaries = append(validSummaries, s)
+		}
+	}
+	summarizedIDs := make(map[string]bool)
+	for _, s := range validSummaries {
+		for _, id := range s.SentenceIDs {
+			summarizedIDs[id] = true
+		}
+	}
+	var rawSentences []conversation.Sentence
+	for _, sent := range state.sentences.GetAll() {
+		if !summarizedIDs[sent.ID] {
+			rawSentences = append(rawSentences, sent)
+		}
+	}
+	return validSummaries, rawSentences
+}
+
+func isNeedToolJudgeResponse(text string) bool {
+	firstLine := strings.TrimSpace(strings.Split(strings.TrimSpace(text), "\n")[0])
+	firstLine = strings.Trim(firstLine, "。.!！ \t\r\n")
+	return firstLine == "需要工具"
+}
+
 // SendMessage 實作 skill_step.CLIAdapter 介面。
 // v4.0: 在送出前，先合成包含歷史的完整 prompt。
 // 透過 IPC 將合成後的 prompt 與 SkillInjection 傳給 Node。
@@ -209,7 +250,8 @@ func (a *SidecarCLIAdapter) SendMessage(opts skill_step.CLIMessageOptions) (skil
 	}
 
 	// continuityKey 將下方主聊天與上方互動拆成不同歷史桶。
-	isControlMessage := opts.SkipContinuity || isAdapterControlMessage(opts.UserText)
+	isToolJudge := opts.ToolRoutingMode == "judge"
+	isControlMessage := opts.SkipContinuity || isToolJudge || isAdapterControlMessage(opts.UserText)
 	inputSentenceID := ""
 	continuityKey := opts.ContinuityKey
 	if continuityKey == "" {
@@ -227,6 +269,19 @@ func (a *SidecarCLIAdapter) SendMessage(opts skill_step.CLIMessageOptions) (skil
 	synthesizedPrompt := opts.UserText
 	rawSentenceCount := 0
 	validSummaryCount := 0
+	if isToolJudge {
+		validSummaries, rawSentences := a.promptHistorySnapshot(state)
+		rawSentenceCount = len(rawSentences)
+		validSummaryCount = len(validSummaries)
+		judgePrompt := systemPrompt + "\n\n工具判斷規則：只能輸出兩種格式之一：\n1. 需要工具\n2. 閒聊ㄌ<回答>\n若需要搜尋本機文件、讀取資料、開啟/寫入/匯出、排程、已保存螢幕操作、DAG/自動流程或任何系統工具，只輸出「需要工具」。\nReplay / 重現 / 操作 / 開啟 / 關閉 / 點擊 / 已保存示範相關請求必須輸出「需要工具」。\n不要輸出動作清單，不要猜工具名稱，不要直接輸出無前綴自然語言。"
+		synthesizedPrompt = conversation.Synthesize(conversation.SynthesisConfig{
+			SystemPrompt: judgePrompt,
+			Summaries:    validSummaries,
+			RawSentences: rawSentences,
+			CurrentInput: opts.UserText,
+			SanitizeLLM:  true,
+		})
+	}
 
 	// Adapter control messages are health probes or internal commands, not user
 	// conversation. They must not be inserted into the continuity store, or the
@@ -238,29 +293,16 @@ func (a *SidecarCLIAdapter) SendMessage(opts skill_step.CLIMessageOptions) (skil
 		state.counter.Add(len([]rune(opts.UserText)))
 
 		// ── v4.0: 合成完整 prompt ──
-		// 過濾出有效摘要
-		var validSummaries []conversation.Summary
-		for _, s := range state.summaries {
-			if s.Valid && state.sentences.CheckSummaryIntegrity(s.SentenceIDs) {
-				validSummaries = append(validSummaries, s)
+		validSummaries, rawSentences := a.promptHistorySnapshot(state)
+		filteredRawSentences := rawSentences[:0]
+		for _, sent := range rawSentences {
+			if sent.ID != inputSentence.ID {
+				filteredRawSentences = append(filteredRawSentences, sent)
 			}
 		}
-		validSummaryCount = len(validSummaries)
-
-		// 找出未被摘要涵蓋的原始句子
-		summarizedIDs := make(map[string]bool)
-		for _, s := range validSummaries {
-			for _, id := range s.SentenceIDs {
-				summarizedIDs[id] = true
-			}
-		}
-		var rawSentences []conversation.Sentence
-		for _, sent := range state.sentences.GetAll() {
-			if !summarizedIDs[sent.ID] && sent.ID != inputSentence.ID {
-				rawSentences = append(rawSentences, sent)
-			}
-		}
+		rawSentences = filteredRawSentences
 		rawSentenceCount = len(rawSentences)
+		validSummaryCount = len(validSummaries)
 
 		// 組裝合成 prompt
 		if a.sealManager == nil {
@@ -287,12 +329,18 @@ func (a *SidecarCLIAdapter) SendMessage(opts skill_step.CLIMessageOptions) (skil
 	if err != nil {
 		return skill_step.CLIResponse{Error: err.Error()}, err
 	}
+	// 單次呼叫的 model 優先；沒有 override 才讀 UI 雙擊保存的 adapter 設定。
+	chosenModel := strings.TrimSpace(opts.Model)
+	if chosenModel == "" && a.modelProvider != nil {
+		chosenModel = strings.TrimSpace(a.modelProvider(opts.AdapterID))
+	}
 	params := sendMessageParams{
 		AdapterID:      opts.AdapterID,
 		CLIPath:        opts.CLIPath,
 		WorkspaceDir:   workspaceDir,
 		SessionID:      opts.SessionID,
-		UserText:       synthesizedPrompt,   // v4.0: 合成 prompt 取代原始文字
+		UserText:       synthesizedPrompt, // v4.0: 合成 prompt 取代原始文字
+		Model:          chosenModel,
 		SkillInjection: opts.SkillInjection, // nil = 無注入
 		TraceID:        opts.TraceID,
 	}
@@ -308,17 +356,19 @@ func (a *SidecarCLIAdapter) SendMessage(opts skill_step.CLIMessageOptions) (skil
 			params.UserText = synthesizedPrompt + "\n\n" + actionchain.RetryPrompt()
 		}
 		// DEBUG_TRACE_REMOVE: Captures the exact JSON payload before it goes to Node.
-		debugtrace.Record("go.SidecarCLIAdapter.params", opts.TraceID, map[string]interface{}{
+		paramsTrace := map[string]interface{}{
 			"adapter_id":          params.AdapterID,
 			"cli_path":            params.CLIPath,
 			"workspace_dir":       params.WorkspaceDir,
 			"session_id":          params.SessionID,
-			"user_text":           params.UserText,
 			"continuity_key":      continuityKey,
 			"retry_attempt":       attempt,
+			"model":               params.Model,
 			"system_prompt_len":   len([]rune(systemPrompt)),
 			"has_skill_injection": params.SkillInjection != nil,
-		})
+		}
+		addTraceUserText(paramsTrace, opts.TraceID, params.UserText)
+		debugtrace.Record("go.SidecarCLIAdapter.params", opts.TraceID, paramsTrace)
 
 		resp, err := a.manager.Call("sendMessage", params, rpcTimeout)
 		if err != nil {
@@ -379,6 +429,12 @@ func (a *SidecarCLIAdapter) SendMessage(opts skill_step.CLIMessageOptions) (skil
 		log.Printf("[CLI_MONITOR] Go CLIResponse.Text trace=%s source=normal retry=%d text_len=%d text=%s", opts.TraceID, attempt, len(result.Text), result.Text)
 
 		if isControlMessage {
+			if isToolJudge && !isNeedToolJudgeResponse(result.Text) {
+				state.sentences.AddInput(opts.UserText)
+				state.sentences.AddOutput(result.Text)
+				state.counter.Add(len([]rune(opts.UserText)) + len([]rune(result.Text)))
+				a.checkAndEmitSummarizationNeeded()
+			}
 			return skill_step.CLIResponse{Text: result.Text}, nil
 		}
 
@@ -476,6 +532,32 @@ func isAdapterControlMessage(text string) bool {
 	default:
 		return false
 	}
+}
+
+func addTraceUserText(fields map[string]interface{}, traceID, text string) {
+	if isTaskProgressTraceID(traceID) {
+		preview := truncateTraceRunes(text, 360)
+		fields["user_text_len"] = len([]rune(text))
+		fields["user_text_preview"] = preview
+		fields["user_text_compacted"] = len([]rune(text)) > len([]rune(preview))
+		return
+	}
+	fields["user_text"] = text
+}
+
+func isTaskProgressTraceID(traceID string) bool {
+	return strings.HasPrefix(traceID, "task-plan-") || strings.HasPrefix(traceID, "task-plan-repair-") || strings.HasPrefix(traceID, "task-node-")
+}
+
+func truncateTraceRunes(s string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + "..."
 }
 
 func (a *SidecarCLIAdapter) ensureWorkspaceDir(adapterID, continuityKey string) (string, error) {

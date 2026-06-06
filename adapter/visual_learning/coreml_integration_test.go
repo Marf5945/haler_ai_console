@@ -5,7 +5,7 @@
 // 此測試驗證完整的推論 pipeline：
 //   LoadModel → Infer → RawTensor → DecodeYOLOOutput → []RegionProposal
 //
-// 需要真實模型檔案：assets/models/yolo_nano.mlmodelc
+// 需要真實模型檔案：assets/models/yolox_nano.mlmodelc
 // 如果模型不存在，測試自動 skip（不會 fail）。
 //
 // 執行方式：
@@ -35,7 +35,7 @@ func modelBasePath(t *testing.T) string {
 	}
 	// adapter/visual_learning/ → 專案根目錄
 	projectRoot := filepath.Join(filepath.Dir(filename), "..", "..")
-	return filepath.Join(projectRoot, "assets", "models", "yolo_nano")
+	return filepath.Join(projectRoot, "assets", "models", "yolox_nano")
 }
 
 // makeTestRGBA 建立一張純色測試圖片的 RGBA bytes。
@@ -125,7 +125,7 @@ func TestCoreMLInferenceEndToEnd(t *testing.T) {
 	}
 
 	// ── Step 4: YOLO 後處理 ──
-	proposals, decodeErr := DecodeYOLOOutput(raw, width, height, DefaultYOLOv5NanoConfig)
+	proposals, decodeErr := DecodeYOLOOutput(raw, width, height, DefaultYOLOXNanoConfig)
 	if decodeErr != nil {
 		t.Fatalf("DecodeYOLOOutput failed: %v", decodeErr)
 	}

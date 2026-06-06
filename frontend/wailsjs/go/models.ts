@@ -72,8 +72,10 @@ export namespace dag {
 	    target?: string;
 	    executor_type?: string;
 	    risk_class: string;
+	    model_risk_class?: string;
 	    status: string;
 	    dependencies: string[];
+	    parallel_root?: boolean;
 	    block_reason: string;
 	    error: string;
 	    started_at: string;
@@ -102,8 +104,10 @@ export namespace dag {
 	        this.target = source["target"];
 	        this.executor_type = source["executor_type"];
 	        this.risk_class = source["risk_class"];
+	        this.model_risk_class = source["model_risk_class"];
 	        this.status = source["status"];
 	        this.dependencies = source["dependencies"];
+	        this.parallel_root = source["parallel_root"];
 	        this.block_reason = source["block_reason"];
 	        this.error = source["error"];
 	        this.started_at = source["started_at"];
@@ -127,7 +131,9 @@ export namespace dag {
 	    action: string;
 	    target: string;
 	    risk_class: string;
+	    model_risk_class?: string;
 	    dependencies: string[];
+	    parallel_root?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new TaskPlanNode(source);
@@ -142,7 +148,9 @@ export namespace dag {
 	        this.action = source["action"];
 	        this.target = source["target"];
 	        this.risk_class = source["risk_class"];
+	        this.model_risk_class = source["model_risk_class"];
 	        this.dependencies = source["dependencies"];
+	        this.parallel_root = source["parallel_root"];
 	    }
 	}
 	export class TaskPlan {
@@ -230,8 +238,10 @@ export namespace dag {
 	    hook_run_id?: string;
 	    outline_id?: string;
 	    active_node_id?: string;
+	    active_trace_id?: string;
 	    interrupt_reason?: string;
 	    planner?: PlannerMetadata;
+	    schema?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new DAGRun(source);
@@ -249,8 +259,10 @@ export namespace dag {
 	        this.hook_run_id = source["hook_run_id"];
 	        this.outline_id = source["outline_id"];
 	        this.active_node_id = source["active_node_id"];
+	        this.active_trace_id = source["active_trace_id"];
 	        this.interrupt_reason = source["interrupt_reason"];
 	        this.planner = this.convertValues(source["planner"], PlannerMetadata);
+	        this.schema = source["schema"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -620,6 +632,36 @@ export namespace main {
 	        this.doc_id = source["doc_id"];
 	    }
 	}
+	export class EmbedModelInfo {
+	    id: string;
+	    providerId: string;
+	    label: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new EmbedModelInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.providerId = source["providerId"];
+	        this.label = source["label"];
+	    }
+	}
+	export class EmbedPullJob {
+	    jobId: string;
+	    modelId: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new EmbedPullJob(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.jobId = source["jobId"];
+	        this.modelId = source["modelId"];
+	    }
+	}
 	export class FloatingCandidate {
 	    id: string;
 	    label: string;
@@ -681,6 +723,8 @@ export namespace main {
 	    message: string;
 	    persona_id: string;
 	    display_name: string;
+	    drop_target_kind: string;
+	    drop_target_dir: string;
 	    state?: any;
 	
 	    static createFrom(source: any = {}) {
@@ -697,6 +741,8 @@ export namespace main {
 	        this.message = source["message"];
 	        this.persona_id = source["persona_id"];
 	        this.display_name = source["display_name"];
+	        this.drop_target_kind = source["drop_target_kind"];
+	        this.drop_target_dir = source["drop_target_dir"];
 	        this.state = source["state"];
 	    }
 	}
@@ -708,6 +754,8 @@ export namespace main {
 	    fallback_required: boolean;
 	    message: string;
 	    display_name: string;
+	    drop_target_kind: string;
+	    drop_target_dir: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new NativeReferenceFileDragResult(source);
@@ -722,6 +770,8 @@ export namespace main {
 	        this.fallback_required = source["fallback_required"];
 	        this.message = source["message"];
 	        this.display_name = source["display_name"];
+	        this.drop_target_kind = source["drop_target_kind"];
+	        this.drop_target_dir = source["drop_target_dir"];
 	    }
 	}
 	export class NativeSubDragExportResult {
@@ -734,6 +784,8 @@ export namespace main {
 	    sub_id: string;
 	    display_name: string;
 	    new_system_code: string;
+	    drop_target_kind: string;
+	    drop_target_dir: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new NativeSubDragExportResult(source);
@@ -750,6 +802,24 @@ export namespace main {
 	        this.sub_id = source["sub_id"];
 	        this.display_name = source["display_name"];
 	        this.new_system_code = source["new_system_code"];
+	        this.drop_target_kind = source["drop_target_kind"];
+	        this.drop_target_dir = source["drop_target_dir"];
+	    }
+	}
+	export class OllamaState {
+	    binaryFound: boolean;
+	    daemonRunning: boolean;
+	    binaryPath?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new OllamaState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.binaryFound = source["binaryFound"];
+	        this.daemonRunning = source["daemonRunning"];
+	        this.binaryPath = source["binaryPath"];
 	    }
 	}
 	export class ReadinessGateState {
@@ -848,6 +918,104 @@ export namespace main {
 	        this.suggested_name = source["suggested_name"];
 	        this.mode = source["mode"];
 	        this.agent_id = source["agent_id"];
+	    }
+	}
+	export class SkillDraftSaveResult {
+	    manifest?: skill_step.SkillManifest;
+	    problems: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new SkillDraftSaveResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.manifest = this.convertValues(source["manifest"], skill_step.SkillManifest);
+	        this.problems = source["problems"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SkillExecutionDecision {
+	    decision: string;
+	    resolve_id: string;
+	    skill_id?: string;
+	    status: string;
+	    injected: boolean;
+	    executed: boolean;
+	    action_target?: string;
+	    response?: skill_step.CLIResponse;
+	    message?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SkillExecutionDecision(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.decision = source["decision"];
+	        this.resolve_id = source["resolve_id"];
+	        this.skill_id = source["skill_id"];
+	        this.status = source["status"];
+	        this.injected = source["injected"];
+	        this.executed = source["executed"];
+	        this.action_target = source["action_target"];
+	        this.response = this.convertValues(source["response"], skill_step.CLIResponse);
+	        this.message = source["message"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SubExportCapabilities {
+	    platform: string;
+	    native_drag_supported: boolean;
+	    native_drag_strategy: string;
+	    fallback_supported: boolean;
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SubExportCapabilities(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.platform = source["platform"];
+	        this.native_drag_supported = source["native_drag_supported"];
+	        this.native_drag_strategy = source["native_drag_strategy"];
+	        this.fallback_supported = source["fallback_supported"];
+	        this.message = source["message"];
 	    }
 	}
 	export class SubPackagePreview {
@@ -1488,6 +1656,24 @@ export namespace scheduler {
 
 export namespace settings {
 	
+	export class EmbeddingConfig {
+	    providerId?: string;
+	    modelId?: string;
+	    dimension?: number;
+	    pickerDismissed?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new EmbeddingConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.providerId = source["providerId"];
+	        this.modelId = source["modelId"];
+	        this.dimension = source["dimension"];
+	        this.pickerDismissed = source["pickerDismissed"];
+	    }
+	}
 	export class PanelSettings {
 	    panelLanguage: string;
 	    roleLanguage: string;
@@ -1566,6 +1752,8 @@ export namespace settings {
 	    activePersonaId: string;
 	    summaryModel: SummaryModelSettings;
 	    controlSeal: controlseal.Settings;
+	    adapterModelChoices?: Record<string, string>;
+	    embeddingConfig?: EmbeddingConfig;
 	
 	    static createFrom(source: any = {}) {
 	        return new State(source);
@@ -1578,6 +1766,8 @@ export namespace settings {
 	        this.activePersonaId = source["activePersonaId"];
 	        this.summaryModel = this.convertValues(source["summaryModel"], SummaryModelSettings);
 	        this.controlSeal = this.convertValues(source["controlSeal"], controlseal.Settings);
+	        this.adapterModelChoices = source["adapterModelChoices"];
+	        this.embeddingConfig = this.convertValues(source["embeddingConfig"], EmbeddingConfig);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1647,6 +1837,61 @@ export namespace skill_step {
 	        this.Reason = source["Reason"];
 	    }
 	}
+	export class ExpectedStep {
+	    action: string;
+	    target: string;
+	    next?: string;
+	    code: string;
+	    requirement: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExpectedStep(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.action = source["action"];
+	        this.target = source["target"];
+	        this.next = source["next"];
+	        this.code = source["code"];
+	        this.requirement = source["requirement"];
+	    }
+	}
+	export class ExpectedChain {
+	    schema: string;
+	    max_steps: number;
+	    steps: ExpectedStep[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ExpectedChain(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schema = source["schema"];
+	        this.max_steps = source["max_steps"];
+	        this.steps = this.convertValues(source["steps"], ExpectedStep);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class Injection {
 	    injection_id: string;
 	    skill_id: string;
@@ -1671,6 +1916,28 @@ export namespace skill_step {
 	        this.allowed_use = source["allowed_use"];
 	        this.blocked_use = source["blocked_use"];
 	        this.resource_refs = source["resource_refs"];
+	    }
+	}
+	export class Lifecycle {
+	    status: string;
+	    visible_in_toolbar: boolean;
+	    route_as_candidate: boolean;
+	    auto_execute: boolean;
+	    created_from_trace?: string;
+	    user_confirmed: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Lifecycle(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.status = source["status"];
+	        this.visible_in_toolbar = source["visible_in_toolbar"];
+	        this.route_as_candidate = source["route_as_candidate"];
+	        this.auto_execute = source["auto_execute"];
+	        this.created_from_trace = source["created_from_trace"];
+	        this.user_confirmed = source["user_confirmed"];
 	    }
 	}
 	export class ResolveResult {
@@ -1713,6 +1980,144 @@ export namespace skill_step {
 		    return a;
 		}
 	}
+	export class SkillRouting {
+	    action_patterns: string[];
+	    target_aliases: string[];
+	    minimum_auto_score: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SkillRouting(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.action_patterns = source["action_patterns"];
+	        this.target_aliases = source["target_aliases"];
+	        this.minimum_auto_score = source["minimum_auto_score"];
+	    }
+	}
+	export class SkillResources {
+	    examples: string[];
+	    programs: string[];
+	    cli_md: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new SkillResources(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.examples = source["examples"];
+	        this.programs = source["programs"];
+	        this.cli_md = source["cli_md"];
+	    }
+	}
+	export class SkillPermissions {
+	    network: string;
+	    filesystem: string;
+	    execution: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SkillPermissions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.network = source["network"];
+	        this.filesystem = source["filesystem"];
+	        this.execution = source["execution"];
+	    }
+	}
+	export class SkillTags {
+	    purpose_tag: string[];
+	    action_tag: string[];
+	    domain_tag: string[];
+	    risk_tag: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new SkillTags(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.purpose_tag = source["purpose_tag"];
+	        this.action_tag = source["action_tag"];
+	        this.domain_tag = source["domain_tag"];
+	        this.risk_tag = source["risk_tag"];
+	    }
+	}
+	export class SkillSource {
+	    source_type: string;
+	    original_path_hash: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SkillSource(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.source_type = source["source_type"];
+	        this.original_path_hash = source["original_path_hash"];
+	    }
+	}
+	export class SkillManifest {
+	    schema_version: string;
+	    skill_id: string;
+	    display_name: string;
+	    version: string;
+	    description_doc: string;
+	    source: SkillSource;
+	    tags: SkillTags;
+	    permissions: SkillPermissions;
+	    resources: SkillResources;
+	    routing: SkillRouting;
+	    lifecycle?: Lifecycle;
+	    expected_chain?: ExpectedChain;
+	    hash: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SkillManifest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schema_version = source["schema_version"];
+	        this.skill_id = source["skill_id"];
+	        this.display_name = source["display_name"];
+	        this.version = source["version"];
+	        this.description_doc = source["description_doc"];
+	        this.source = this.convertValues(source["source"], SkillSource);
+	        this.tags = this.convertValues(source["tags"], SkillTags);
+	        this.permissions = this.convertValues(source["permissions"], SkillPermissions);
+	        this.resources = this.convertValues(source["resources"], SkillResources);
+	        this.routing = this.convertValues(source["routing"], SkillRouting);
+	        this.lifecycle = this.convertValues(source["lifecycle"], Lifecycle);
+	        this.expected_chain = this.convertValues(source["expected_chain"], ExpectedChain);
+	        this.hash = source["hash"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
+	
+	
 
 }
 
@@ -2072,6 +2477,7 @@ export namespace visual_learning {
 	    proposals: RegionProposal[];
 	    degraded: boolean;
 	    reason?: string;
+	    backend: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new DetectorResult(source);
@@ -2082,6 +2488,202 @@ export namespace visual_learning {
 	        this.proposals = this.convertValues(source["proposals"], RegionProposal);
 	        this.degraded = source["degraded"];
 	        this.reason = source["reason"];
+	        this.backend = source["backend"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class InferenceStatus {
+	    available: boolean;
+	    backend: string;
+	    model_path?: string;
+	    degraded: boolean;
+	    reason?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new InferenceStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.backend = source["backend"];
+	        this.model_path = source["model_path"];
+	        this.degraded = source["degraded"];
+	        this.reason = source["reason"];
+	    }
+	}
+	export class OCRResult {
+	    text: string;
+	    confidence: number;
+	    source: string;
+	    bbox?: number[];
+	
+	    static createFrom(source: any = {}) {
+	        return new OCRResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.text = source["text"];
+	        this.confidence = source["confidence"];
+	        this.source = source["source"];
+	        this.bbox = source["bbox"];
+	    }
+	}
+	export class OCRStatus {
+	    available: boolean;
+	    platform: string;
+	    source: string;
+	    reason?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new OCRStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.platform = source["platform"];
+	        this.source = source["source"];
+	        this.reason = source["reason"];
+	    }
+	}
+	export class PixelBBox {
+	    x: number;
+	    y: number;
+	    w: number;
+	    h: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PixelBBox(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.x = source["x"];
+	        this.y = source["y"];
+	        this.w = source["w"];
+	        this.h = source["h"];
+	    }
+	}
+	export class PixelPoint {
+	    x: number;
+	    y: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PixelPoint(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.x = source["x"];
+	        this.y = source["y"];
+	    }
+	}
+	
+	export class WindowsButtonCandidate {
+	    id: string;
+	    source: string;
+	    bbox: PixelBBox;
+	    confidence: number;
+	    contains_click: boolean;
+	    click_distance: number;
+	    center_distance: number;
+	    area_reasonable: boolean;
+	    selection_score: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new WindowsButtonCandidate(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.source = source["source"];
+	        this.bbox = this.convertValues(source["bbox"], PixelBBox);
+	        this.confidence = source["confidence"];
+	        this.contains_click = source["contains_click"];
+	        this.click_distance = source["click_distance"];
+	        this.center_distance = source["center_distance"];
+	        this.area_reasonable = source["area_reasonable"];
+	        this.selection_score = source["selection_score"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class WindowsClickAnchorResult {
+	    platform: string;
+	    ok: boolean;
+	    mode: string;
+	    reason?: string;
+	    click: PixelPoint;
+	    execution_point: PixelPoint;
+	    execution_hint: string;
+	    anchor_bbox: PixelBBox;
+	    crop_bbox: PixelBBox;
+	    crop_png_base64?: string;
+	    candidates?: WindowsButtonCandidate[];
+	    ocr_status: string;
+	    ocr_note: string;
+	    detector_backend?: string;
+	    detector_degraded: boolean;
+	    needs_review: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new WindowsClickAnchorResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.platform = source["platform"];
+	        this.ok = source["ok"];
+	        this.mode = source["mode"];
+	        this.reason = source["reason"];
+	        this.click = this.convertValues(source["click"], PixelPoint);
+	        this.execution_point = this.convertValues(source["execution_point"], PixelPoint);
+	        this.execution_hint = source["execution_hint"];
+	        this.anchor_bbox = this.convertValues(source["anchor_bbox"], PixelBBox);
+	        this.crop_bbox = this.convertValues(source["crop_bbox"], PixelBBox);
+	        this.crop_png_base64 = source["crop_png_base64"];
+	        this.candidates = this.convertValues(source["candidates"], WindowsButtonCandidate);
+	        this.ocr_status = source["ocr_status"];
+	        this.ocr_note = source["ocr_note"];
+	        this.detector_backend = source["detector_backend"];
+	        this.detector_degraded = source["detector_degraded"];
+	        this.needs_review = source["needs_review"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

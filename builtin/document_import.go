@@ -38,7 +38,7 @@ type ImportResult struct {
 
 // ImportFromDrop 從拖入的檔案路徑匯入文件。
 // 完整流程：驗證路徑 → 辨識格式 → 讀取+編碼偵測 → 組裝 blob → 存入 store。
-func ImportFromDrop(store *Store, guard *PathGuard, filePath string) (*ImportResult, error) {
+func ImportFromDrop(store *Store, guard *PathGuard, filePath string, vec Vectorizer) (*ImportResult, error) {
 	// 1. 路徑安全驗證
 	if err := guard.ValidateImportPath(filePath); err != nil {
 		return nil, err
@@ -224,7 +224,7 @@ func ImportFromDrop(store *Store, guard *PathGuard, filePath string) (*ImportRes
 		Content: content,
 	}
 
-	if err := BuildAndSaveVectorIndex(store, blob); err != nil {
+	if err := BuildAndSaveVectorIndex(store, blob, vec); err != nil {
 		return nil, fmt.Errorf("document_import: vector index: %w", err)
 	}
 

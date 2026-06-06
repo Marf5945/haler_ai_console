@@ -57,4 +57,12 @@ void CoreML_FreeFloats(float* ptr);
 void CoreML_FreeInts(int* ptr);
 void CoreML_FreeString(char* str);
 
+// VisionOCR_RecognizeImage uses Apple's Vision framework to recognize text in
+// PNG/JPEG/WebP-like image bytes. It returns a JSON array allocated on the C
+// heap; caller must release outJSON with CoreML_FreeString().
+int VisionOCR_RecognizeImage(const uint8_t* imageData,
+                             int imageLen,
+                             char** outJSON,
+                             char** errMsg);
+
 #endif // COREML_BRIDGE_DARWIN_H

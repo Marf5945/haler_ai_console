@@ -3,12 +3,13 @@
 // 規範依據：AI_Console_Spec_v4_2.md §14.3 + §14.6
 //
 // 重構說明（v4.2）：
-//   原版為純 stub（永遠回傳 Degraded=true）。
-//   重構後串接 InferenceEngine（§14.6.7）+ DecodeYOLOOutput（純 Go 後處理）。
-//   InferenceEngine 由各平台的 build tag 決定實際實作：
-//     macOS   → coreml_bridge_darwin.go  （CoreML）
-//     Windows → directml_bridge_windows.go（DirectML / ONNX Runtime）
-//     其他    → stub_bridge_fallback.go  （ErrInferenceUnavailable）
+//
+//	原版為純 stub（永遠回傳 Degraded=true）。
+//	重構後串接 InferenceEngine（§14.6.7）+ DecodeYOLOOutput（純 Go 後處理）。
+//	InferenceEngine 由各平台的 build tag 決定實際實作：
+//	  macOS   → coreml_bridge_darwin.go  （CoreML）
+//	  Windows → directml_bridge_windows.go（DirectML / ONNX Runtime）
+//	  其他    → stub_bridge_fallback.go  （ErrInferenceUnavailable）
 //
 // 安全規則（§14.3）：
 //   - YOLO 只提議區域（RegionProposal），不做語義判斷
@@ -24,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -32,7 +34,7 @@ import (
 //
 // 使用方式：
 //
-//	detector := NewYOLODetector("assets/models/yolo_nano", pipeline)
+//	detector := NewYOLODetector("assets/models/yolox_nano", pipeline)
 //	result := detector.Detect(imageData, width, height)
 //	// result.Proposals 包含 BBox + raw_score
 //	// result.Degraded 表示是否使用了 OpenCV fallback
@@ -88,15 +90,23 @@ type RegionProposal struct {
 // NewYOLODetector 建立 YOLO 偵測器。
 //
 // modelBasePath: 模型檔基底路徑（不含副檔名），
-//   例如 "assets/models/yolo_nano"
-//   macOS 會嘗試 + ".mlmodelc"，Windows 會嘗試 + ".onnx"
+//
+//	例如 "assets/models/yolox_nano"
+//	macOS 會嘗試 + ".mlmodelc"，Windows 會嘗試 + ".onnx"
 //
 // fallback: OpenCV 純 Go 管線，作為降級 fallback（不可為 nil）
 func NewYOLODetector(modelBasePath string, fallback *OpenCVPipeline) *YOLODetector {
+	return NewYOLODetectorWithConfig(modelBasePath, fallback, DefaultYOLOXButtonSConfig)
+}
+
+// NewYOLODetectorWithConfig creates a YOLO detector with an explicit postprocess
+// config. This keeps model family/size choices outside the platform-native
+// inference bridge and avoids coupling ui-console to the YOLOX Python runtime.
+func NewYOLODetectorWithConfig(modelBasePath string, fallback *OpenCVPipeline, config YOLOConfig) *YOLODetector {
 	d := &YOLODetector{
 		modelPath:        modelBasePath,
 		fallbackPipeline: fallback,
-		config:           DefaultYOLOv5NanoConfig,
+		config:           config,
 	}
 
 	// 嘗試初始化平台原生推論引擎
@@ -118,7 +128,10 @@ func (d *YOLODetector) tryLoadModel() {
 	err := d.engine.LoadModel(modelFile)
 	if err != nil {
 		if errors.Is(err, ErrInferenceUnavailable) {
-			d.degradedReason = "hardware inference unavailable on this platform"
+			d.degradedReason = strings.TrimSpace(err.Error())
+			if d.degradedReason == ErrInferenceUnavailable.Error() {
+				d.degradedReason = "hardware inference unavailable on this platform"
+			}
 		} else if errors.Is(err, ErrModelIntegrityMismatch) {
 			d.degradedReason = fmt.Sprintf("model integrity check failed: %v", err)
 		} else {
@@ -162,12 +175,14 @@ func (d *YOLODetector) Status() InferenceStatus {
 		return InferenceStatus{
 			Available: true,
 			Backend:   InferenceBackendName(),
+			ModelPath: d.modelPath,
 			Degraded:  false,
 		}
 	}
 	return InferenceStatus{
 		Available: false,
 		Backend:   InferenceBackendName(),
+		ModelPath: d.modelPath,
 		Degraded:  true,
 		Reason:    d.degradedReason,
 	}
@@ -176,10 +191,12 @@ func (d *YOLODetector) Status() InferenceStatus {
 // Detect 執行區域偵測。
 //
 // YOLO 引擎可用時：
-//   影像 → Infer() → RawTensor → DecodeYOLOOutput() → []RegionProposal
+//
+//	影像 → Infer() → RawTensor → DecodeYOLOOutput() → []RegionProposal
 //
 // YOLO 引擎不可用時（降級模式）：
-//   影像 → OpenCVPipeline.Propose() → 轉換為 DetectorResult
+//
+//	影像 → OpenCVPipeline.Propose() → 轉換為 DetectorResult
 //
 // 降級模式不增加信心分、不跳過 dry-run、不繞過 review（§14.5）。
 func (d *YOLODetector) Detect(imageData []byte, width, height int) DetectorResult {

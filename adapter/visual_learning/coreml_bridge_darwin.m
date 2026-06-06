@@ -78,19 +78,23 @@ CoreMLHandle CoreML_LoadModel(const char* modelDirPath, char** errMsg) {
         NSURL* url = [NSURL fileURLWithPath:path];
         NSError* error = nil;
 
-        // ── MLModelConfiguration ──
-        // computeUnits = All：讓 CoreML 自動選擇最佳裝置
-        //   Apple Silicon → Neural Engine（最快）
-        //   Intel Mac → GPU 或 CPU
-        MLModelConfiguration* config = [[MLModelConfiguration alloc] init];
-        config.computeUnits = MLComputeUnitsAll;
-
         // ── 載入 MLModel ──
         // .mlmodelc 是 CoreML 編譯後的目錄格式，
         // 包含模型權重和中繼資料。
-        MLModel* model = [MLModel modelWithContentsOfURL:url
-                                           configuration:config
-                                                   error:&error];
+        MLModel* model = nil;
+        if (@available(macOS 10.14, *)) {
+            // ── MLModelConfiguration ──
+            // computeUnits = All：讓 CoreML 自動選擇最佳裝置
+            //   Apple Silicon → Neural Engine（最快）
+            //   Intel Mac → GPU 或 CPU
+            MLModelConfiguration* config = [[MLModelConfiguration alloc] init];
+            config.computeUnits = MLComputeUnitsAll;
+            model = [MLModel modelWithContentsOfURL:url
+                                      configuration:config
+                                              error:&error];
+        } else {
+            model = [MLModel modelWithContentsOfURL:url error:&error];
+        }
         if (!model) {
             if (errMsg) *errMsg = copyErrString(error);
             return NULL;
@@ -322,24 +326,32 @@ int CoreML_Infer(CoreMLHandle handle,
                 dataArr[i] = (float)src[i];
             }
 
-        } else if (dtype == MLMultiArrayDataTypeFloat16) {
-            // Float16 → Float32 轉換。
-            // Apple Silicon 原生支援 __fp16 型別（ARM NEON）。
-            // Intel Mac 使用 NSNumber fallback（較慢但正確）。
-            #if defined(__arm64__) || defined(__aarch64__)
-            const __fp16* src = (const __fp16*)srcPtr;
-            for (NSInteger i = 0; i < totalElements; i++) {
-                dataArr[i] = (float)src[i];
+        } else if (@available(macOS 12.0, *)) {
+            if (dtype == MLMultiArrayDataTypeFloat16) {
+                // Float16 → Float32 轉換。
+                // Apple Silicon 原生支援 __fp16 型別（ARM NEON）。
+                // Intel Mac 使用 NSNumber fallback（較慢但正確）。
+                #if defined(__arm64__) || defined(__aarch64__)
+                const __fp16* src = (const __fp16*)srcPtr;
+                for (NSInteger i = 0; i < totalElements; i++) {
+                    dataArr[i] = (float)src[i];
+                }
+                #else
+                // Intel Mac fallback：透過 NSNumber 逐元素轉換。
+                // 效能較差，但 Intel Mac 上 CoreML 推論本身就較慢，
+                // 這個開銷相對可以接受。
+                for (NSInteger i = 0; i < totalElements; i++) {
+                    NSNumber* num = [outputArray objectAtIndexedSubscript:i];
+                    dataArr[i] = num.floatValue;
+                }
+                #endif
+            } else {
+                // 不支援的資料型別
+                free(dataArr);
+                free(shapeArr);
+                if (errMsg) *errMsg = makeCString("unsupported MLMultiArray data type");
+                return -1;
             }
-            #else
-            // Intel Mac fallback：透過 NSNumber 逐元素轉換。
-            // 效能較差，但 Intel Mac 上 CoreML 推論本身就較慢，
-            // 這個開銷相對可以接受。
-            for (NSInteger i = 0; i < totalElements; i++) {
-                NSNumber* num = [outputArray objectAtIndexedSubscript:i];
-                dataArr[i] = num.floatValue;
-            }
-            #endif
 
         } else {
             // 不支援的資料型別
@@ -387,6 +399,77 @@ void CoreML_Close(CoreMLHandle handle) {
 // ══════════════════════════════════════════════════
 // 記憶體釋放
 // ══════════════════════════════════════════════════
+
+// VisionOCR_RecognizeImage uses macOS Apple Vision OCR. This is an optional
+// helper for visual anchors: it may describe text inside a small cropped button
+// image, but replay code must still use YOLO/layout/candidate IDs for clicks.
+int VisionOCR_RecognizeImage(const uint8_t* imageData,
+                             int imageLen,
+                             char** outJSON,
+                             char** errMsg) {
+    @autoreleasepool {
+        if (!imageData || imageLen <= 0 || !outJSON) {
+            if (errMsg) *errMsg = makeCString("invalid OCR image parameters");
+            return -1;
+        }
+
+        if (@available(macOS 10.15, *)) {
+            NSData* data = [NSData dataWithBytes:imageData length:(NSUInteger)imageLen];
+            if (!data) {
+                if (errMsg) *errMsg = makeCString("failed to create OCR image data");
+                return -1;
+            }
+
+            __block NSError* requestError = nil;
+            VNRecognizeTextRequest* request =
+                [[VNRecognizeTextRequest alloc] initWithCompletionHandler:
+                 ^(VNRequest* req, NSError* error) {
+                    requestError = error;
+                 }];
+            request.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
+            request.usesLanguageCorrection = YES;
+
+            VNImageRequestHandler* handler =
+                [[VNImageRequestHandler alloc] initWithData:data options:@{}];
+            NSError* performError = nil;
+            BOOL ok = [handler performRequests:@[request] error:&performError];
+            if (!ok || performError || requestError) {
+                if (errMsg) *errMsg = copyErrString(performError ?: requestError);
+                return -1;
+            }
+
+            NSMutableArray* rows = [NSMutableArray array];
+            for (VNRecognizedTextObservation* observation in request.results) {
+                NSArray<VNRecognizedText*>* candidates = [observation topCandidates:1];
+                VNRecognizedText* best = candidates.firstObject;
+                if (!best || best.string.length == 0) continue;
+
+                CGRect box = observation.boundingBox;
+                [rows addObject:@{
+                    @"text": best.string ?: @"",
+                    @"confidence": @(best.confidence),
+                    @"bbox": @[@(box.origin.x), @(box.origin.y), @(box.size.width), @(box.size.height)]
+                }];
+            }
+
+            NSError* jsonError = nil;
+            NSData* jsonData = [NSJSONSerialization dataWithJSONObject:rows
+                                                               options:0
+                                                                 error:&jsonError];
+            if (!jsonData) {
+                if (errMsg) *errMsg = copyErrString(jsonError);
+                return -1;
+            }
+            NSString* jsonString = [[NSString alloc] initWithData:jsonData
+                                                         encoding:NSUTF8StringEncoding];
+            *outJSON = makeCString(jsonString.UTF8String);
+            return *outJSON ? 0 : -1;
+        }
+
+        if (errMsg) *errMsg = makeCString("Apple Vision text recognition requires macOS 10.15 or newer");
+        return -1;
+    }
+}
 
 void CoreML_FreeFloats(float* ptr) {
     free(ptr);

@@ -15,6 +15,9 @@ type osMasterKeyProvider struct {
 	path string
 }
 
+// Windows stores only the AES master key through DPAPI. API keys and bot tokens
+// stay encrypted in data/secrets/credentials.enc and are not portable across
+// Windows users or machines.
 func NewOSMasterKeyProvider(baseDir string, _ string, _ string) MasterKeyProvider {
 	return osMasterKeyProvider{path: filepath.Join(baseDir, "data", "secrets", "master_key.dpapi")}
 }

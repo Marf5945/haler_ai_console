@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"ui_console/adapter/debugtrace"
+	"ui_console/shared/executil"
 )
 
 // maxScanSize 是 bufio.Scanner 的最大 token 大小（5MB）。
@@ -130,7 +131,7 @@ func (m *SidecarManager) Start(parentCtx context.Context) error {
 	nodeBin := findNodeBinary()
 	log.Printf("cli_manager: resolved node binary: %s", nodeBin)
 	log.Printf("cli_manager: sidecar script: %s", m.scriptPath)
-	cmd := exec.CommandContext(ctx, nodeBin, m.scriptPath)
+	cmd := executil.CommandContext(ctx, nodeBin, m.scriptPath)
 
 	// 將 node 所在目錄與常用 CLI 路徑注入 child process 的 PATH，
 	// 確保 sidecar 內部 spawn CLI 時也能找到正確的執行檔。
@@ -337,7 +338,7 @@ func (m *SidecarManager) Call(method string, params interface{}, timeout time.Du
 	debugtrace.Record("go.SidecarManager.stdin.write", traceID, map[string]interface{}{
 		"rpc_id":  id,
 		"method":  method,
-		"payload": string(data),
+		"payload": tracePayload(traceID, string(data)),
 	})
 
 	if _, err := stdinWriter.Write(data); err != nil {
@@ -374,6 +375,22 @@ func (m *SidecarManager) Call(method string, params interface{}, timeout time.Du
 	}
 }
 
+// CancelTrace asks the sidecar to stop the CLI child currently tied to traceID.
+func (m *SidecarManager) CancelTrace(traceID string) error {
+	traceID = strings.TrimSpace(traceID)
+	if traceID == "" {
+		return nil
+	}
+	params := map[string]string{"trace_id": traceID}
+	resp, err := m.Call("cancelTrace", params, 2*time.Second)
+	if err != nil {
+		debugtrace.Record("go.SidecarManager.cancelTrace.error", traceID, map[string]interface{}{"error": err.Error()})
+		return err
+	}
+	debugtrace.Record("go.SidecarManager.cancelTrace.done", traceID, map[string]interface{}{"result": string(resp.Result), "error": resp.Error})
+	return nil
+}
+
 // DEBUG_TRACE_REMOVE: Pulls trace_id from generic IPC params without coupling the
 // manager to a concrete request struct. Remove with the rest of debug tracing.
 func traceIDFromParams(params interface{}) string {
@@ -389,6 +406,13 @@ func traceIDFromParams(params interface{}) string {
 		return traceID
 	}
 	return ""
+}
+
+func tracePayload(traceID, payload string) string {
+	if !isTaskProgressTraceID(traceID) {
+		return payload
+	}
+	return truncateTraceRunes(payload, 700)
 }
 
 // --- 內部 goroutine ---

@@ -433,3 +433,11 @@ func (s *Store) saveDataAtomic(data storeData) error {
 func (s *Store) FilePath() string {
 	return s.filePath
 }
+
+// ProviderID reports the active OS-backed master-key provider.
+func (s *Store) ProviderID() string {
+	if s == nil || s.provider == nil {
+		return ""
+	}
+	return s.provider.ProviderID()
+}

@@ -16,8 +16,17 @@ import (
 // 持久化結構（僅關鍵節點）
 // ──────────────────────────────────────────────
 
+// Schema 標記避免兩種視圖共用檔名造成誤解析（TASK 31 / Phase 0.1 修 bug）。
+const (
+	SchemaDagCriticalV1 = "dag_run.critical.v1"
+	SchemaDagFullV1     = "dag_run.full.v1"
+	suffixCritical      = ".critical.json"
+	suffixFull          = ".full.json"
+)
+
 // PersistedRun 是持久化到磁碟的 DAGRun 精簡版。
 type PersistedRun struct {
+	Schema        string         `json:"schema"` // 固定 SchemaDagCriticalV1
 	ID            string         `json:"id"`
 	Status        string         `json:"status"`
 	CreatedAt     string         `json:"created_at"`
@@ -35,7 +44,7 @@ type PersistedRun struct {
 // SaveCriticalNodes 持久化 DAGRun 的關鍵節點。
 func SaveCriticalNodes(projectRoot string, run *DAGRun) error {
 	dir := filepath.Join(projectRoot, "dag_runs")
-	os.MkdirAll(dir, 0755)
+	os.MkdirAll(dir, 0o700) // 與 SaveFullRun 權限一致
 
 	// 篩選關鍵節點
 	var criticalNodes []DAGNode
@@ -48,6 +57,7 @@ func SaveCriticalNodes(projectRoot string, run *DAGRun) error {
 	}
 
 	persisted := PersistedRun{
+		Schema:        SchemaDagCriticalV1, // 標記版本，load 時據此選 struct
 		ID:            run.ID,
 		Status:        run.Status,
 		CreatedAt:     run.CreatedAt,
@@ -63,7 +73,8 @@ func SaveCriticalNodes(projectRoot string, run *DAGRun) error {
 		return fmt.Errorf("序列化 DAGRun 失敗: %w", err)
 	}
 
-	path := filepath.Join(dir, run.ID+".json")
+	// 拆檔名：critical 與 full 各自獨立檔，不再互相覆蓋。
+	path := filepath.Join(dir, run.ID+suffixCritical)
 	return os.WriteFile(path, data, 0o600)
 }
 
@@ -73,11 +84,12 @@ func SaveFullRun(projectRoot string, run *DAGRun) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	run.Schema = SchemaDagFullV1 // 標記版本（idempotent，omitempty）
 	data, err := json.MarshalIndent(run, "", "  ")
 	if err != nil {
 		return fmt.Errorf("序列化完整 DAGRun 失敗: %w", err)
 	}
-	return os.WriteFile(filepath.Join(dir, run.ID+".json"), data, 0o600)
+	return os.WriteFile(filepath.Join(dir, run.ID+suffixFull), data, 0o600)
 }
 
 // ──────────────────────────────────────────────
@@ -87,7 +99,7 @@ func SaveFullRun(projectRoot string, run *DAGRun) error {
 // LoadCriticalNodes 從磁碟載入 DAGRun。
 // 只有關鍵節點保留完整狀態，其餘節點狀態設為 planned（需重算）。
 func LoadCriticalNodes(projectRoot string, runID string) (*DAGRun, error) {
-	path := filepath.Join(projectRoot, "dag_runs", runID+".json")
+	path := filepath.Join(projectRoot, "dag_runs", runID+suffixCritical)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("載入 DAGRun 失敗: %w", err)
@@ -96,6 +108,10 @@ func LoadCriticalNodes(projectRoot string, runID string) (*DAGRun, error) {
 	var persisted PersistedRun
 	if err := json.Unmarshal(data, &persisted); err != nil {
 		return nil, fmt.Errorf("解析 DAGRun 失敗: %w", err)
+	}
+	// schema 不符代表檔案被誤寫成別種格式，明確報錯而非默默吃掉。
+	if persisted.Schema != "" && persisted.Schema != SchemaDagCriticalV1 {
+		return nil, fmt.Errorf("DAGRun schema 不符: 期望 %s 得到 %s", SchemaDagCriticalV1, persisted.Schema)
 	}
 
 	// 重建 DAGRun（僅包含關鍵節點，其餘需由呼叫端重新提供）
@@ -113,7 +129,7 @@ func LoadCriticalNodes(projectRoot string, runID string) (*DAGRun, error) {
 
 // LoadFullRun loads a complete run written by SaveFullRun.
 func LoadFullRun(projectRoot string, runID string) (*DAGRun, error) {
-	path := filepath.Join(projectRoot, "dag_runs", runID+".json")
+	path := filepath.Join(projectRoot, "dag_runs", runID+suffixFull)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("載入完整 DAGRun 失敗: %w", err)
@@ -134,10 +150,10 @@ func ListFullRuns(projectRoot string) []*DAGRun {
 	}
 	runs := []*DAGRun{}
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" || strings.HasSuffix(entry.Name(), "_guard.json") {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), suffixFull) {
 			continue
 		}
-		runID := strings.TrimSuffix(entry.Name(), ".json")
+		runID := strings.TrimSuffix(entry.Name(), suffixFull)
 		run, err := LoadFullRun(projectRoot, runID)
 		if err == nil && run.ID != "" {
 			runs = append(runs, run)
@@ -163,9 +179,8 @@ func ListPersistedRuns(projectRoot string) ([]string, error) {
 
 	var ids []string
 	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
-			id := strings.TrimSuffix(entry.Name(), ".json")
-			ids = append(ids, id)
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), suffixCritical) {
+			ids = append(ids, strings.TrimSuffix(entry.Name(), suffixCritical))
 		}
 	}
 	return ids, nil
@@ -173,6 +188,8 @@ func ListPersistedRuns(projectRoot string) ([]string, error) {
 
 // DeletePersistedRun 刪除持久化的 DAGRun。
 func DeletePersistedRun(projectRoot string, runID string) error {
-	path := filepath.Join(projectRoot, "dag_runs", runID+".json")
-	return os.Remove(path)
+	dir := filepath.Join(projectRoot, "dag_runs")
+	// critical 與 full 兩檔都嘗試刪除；缺檔忽略。
+	_ = os.Remove(filepath.Join(dir, runID+suffixCritical))
+	return os.Remove(filepath.Join(dir, runID+suffixFull))
 }

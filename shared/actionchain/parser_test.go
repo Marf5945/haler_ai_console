@@ -15,6 +15,16 @@ func TestParseValidChatChain(t *testing.T) {
 	}
 }
 
+func TestParseAcceptsLocalModelSeparatorTypo(t *testing.T) {
+	chain, err := Parse("閒聊ㄎ👋 hello")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if chain.Action != "聊天" || chain.Target != "👋 hello" {
+		t.Fatalf("unexpected chain: %#v", chain)
+	}
+}
+
 func TestParseValidExecutableChain(t *testing.T) {
 	chain, err := Parse("查詢ㄌ台北天氣ㄌ輸出")
 	if err != nil {
@@ -88,6 +98,8 @@ func TestNormalizeNextIgnoresTailAfterStandby(t *testing.T) {
 func TestResolveBuiltInQuestionAndClipboardTags(t *testing.T) {
 	for _, input := range []string{
 		"提問ㄌ你想查哪裡？ㄌ輸出",
+		"問題ㄌ你要輸入什麼資訊？ㄌ待命",
+		"詢問ㄌ你要哪個格式？ㄌ待命",
 		"選項ㄌㄤ台北ㄤ台中ㄌ等待",
 		"複製ㄌ今天開會ㄌ待命",
 		"貼上ㄌ輸入框ㄌ待命",
@@ -100,6 +112,19 @@ func TestResolveBuiltInQuestionAndClipboardTags(t *testing.T) {
 		if !decision.Handled {
 			t.Fatalf("expected %q to be built-in", chain.Action)
 		}
+	}
+}
+
+func TestParseNormalizesQuestionAliases(t *testing.T) {
+	chain, err := Parse("問題ㄌ請問你要輸入什麼資訊？ㄌ待命")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if chain.Action != "提問" {
+		t.Fatalf("Action = %q, want 提問", chain.Action)
+	}
+	if !IsReservedTag("問題") || !IsReservedTag("詢問") {
+		t.Fatal("question aliases should remain controller-owned")
 	}
 }
 
@@ -127,6 +152,16 @@ func TestResolveBuiltInLocalSearchTags(t *testing.T) {
 		if !decision.Handled || decision.DisplayText != chain.Target {
 			t.Fatalf("expected local search builtin decision: %#v", decision)
 		}
+	}
+}
+
+func TestParseWebSearchActionWithLiteralSeparator(t *testing.T) {
+	chain, err := Parse("網路ㄌ今天的星座運勢ㄌ" + StandbyNext)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if chain.Action != "網路" || chain.Target != "今天的星座運勢" || chain.Next != StandbyNext {
+		t.Fatalf("unexpected chain: %#v", chain)
 	}
 }
 

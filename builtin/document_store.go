@@ -149,7 +149,7 @@ func (s *Store) FindByContentHash(hash string) (*DocumentBlob, bool, error) {
 	return nil, false, nil
 }
 
-// Delete 刪除一個文件 blob。
+// Delete 刪除文件 blob 並清理對應的向量索引。
 func (s *Store) Delete(docID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -158,7 +158,14 @@ func (s *Store) Delete(docID string) error {
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("builtin.store: delete %s: %w", docID, err)
 	}
+	// 清理向量索引（忽略不存在的情況）
+	_ = os.Remove(filepath.Join(s.VectorsDir(), filepath.Base(docID)+".json"))
 	return nil
+}
+
+// RemoveVectorIndex 只清理向量索引，不刪 blob。
+func (s *Store) RemoveVectorIndex(docID string) {
+	_ = os.Remove(filepath.Join(s.VectorsDir(), filepath.Base(docID)+".json"))
 }
 
 // blobPath 回傳 docID 對應的 JSON 檔案路徑。

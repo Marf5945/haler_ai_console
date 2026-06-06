@@ -16,6 +16,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -23,10 +24,12 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"ui_console/data/storage"
 	"ui_console/data/subexport"
+	"ui_console/orchestration/skill_step"
 	"ui_console/shared/taborder"
 )
 
@@ -63,6 +66,8 @@ func (a *App) ExportSubHandler(subID, displayName, mode, destDir, toolsJSON stri
 			return nil, fmt.Errorf("解析工具清單失敗: %w", err)
 		}
 	}
+
+	tools = a.resolvePortableSubExportTools(projectRoot, subID, tools)
 
 	exportMode := subexport.ExportCopy
 	if mode == "export_remove" {
@@ -129,6 +134,16 @@ type NativeSubDragExportResult struct {
 	SubID            string `json:"sub_id"`
 	DisplayName      string `json:"display_name"`
 	NewSystemCode    string `json:"new_system_code"`
+	DropTargetKind   string `json:"drop_target_kind"`
+	DropTargetDir    string `json:"drop_target_dir"`
+}
+
+type SubExportCapabilities struct {
+	Platform            string `json:"platform"`
+	NativeDragSupported bool   `json:"native_drag_supported"`
+	NativeDragStrategy  string `json:"native_drag_strategy"`
+	FallbackSupported   bool   `json:"fallback_supported"`
+	Message             string `json:"message"`
 }
 
 type ConflictResolutionRequest struct {
@@ -136,20 +151,46 @@ type ConflictResolutionRequest struct {
 	Conflicts []subexport.ToolConflict `json:"conflicts"`
 }
 
-// NativeDragExportSubHandler 先匯出到暫存區，再交給平台原生拖曳層。
+func (a *App) GetSubExportCapabilities() SubExportCapabilities {
+	capabilities := SubExportCapabilities{
+		Platform:            runtime.GOOS,
+		NativeDragSupported: false,
+		NativeDragStrategy:  "fallback_directory",
+		FallbackSupported:   true,
+		Message:             "Native subagent drag export is not available on this platform yet.",
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		capabilities.NativeDragSupported = true
+		capabilities.NativeDragStrategy = "macos_file_promise"
+		capabilities.Message = "macOS native drag export uses NSFilePromiseProvider."
+	case "windows":
+		capabilities.NativeDragSupported = true
+		capabilities.NativeDragStrategy = "windows_ole_cfhdrop"
+		capabilities.Message = "Windows native drag export uses OLE DoDragDrop with CF_HDROP."
+	}
+	return capabilities
+}
+
+// NativeDragExportSubHandler packs a safe copy, then lets the OS finish the drop.
 func (a *App) NativeDragExportSubHandler(subID, displayName, mode, toolsJSON string) (*NativeSubDragExportResult, error) {
+	writeNativeDragPhase("sub-handler-start", fmt.Sprintf("sub=%q mode=%q", displayName, mode))
 	projectRoot := storage.ProjectRoot(appDataRoot(), "default")
 	tools, err := parseSubExportTools(toolsJSON)
 	if err != nil {
+		writeNativeDragPhase("sub-handler-tools-error", err.Error())
 		return nil, err
 	}
+	tools = a.resolvePortableSubExportTools(projectRoot, subID, tools)
 
 	tempRoot := filepath.Join(os.TempDir(), "ai-console-export")
 	if err := os.MkdirAll(tempRoot, 0o700); err != nil { // SEC-15: 限制暫存目錄權限
+		writeNativeDragPhase("sub-handler-temp-error", err.Error())
 		return nil, fmt.Errorf("建立暫存匯出目錄失敗: %w", err)
 	}
+	writeNativeDragPhase("sub-handler-pack-start", fmt.Sprintf("temp=%q", tempRoot))
 
-	// 原生拖曳前不可刪原 sub，所以暫存打包永遠用 copy。
+	// The system sub stays untouched until the user chooses Copy/Remove/Cancel.
 	result, err := subexport.PackExport(subexport.ExportOptions{
 		ProjectRoot:    projectRoot,
 		SubID:          subID,
@@ -159,10 +200,14 @@ func (a *App) NativeDragExportSubHandler(subID, displayName, mode, toolsJSON str
 		ConnectedTools: tools,
 	})
 	if err != nil {
+		writeNativeDragPhase("sub-handler-pack-error", err.Error())
 		return nil, err
 	}
+	writeNativeDragPhase("sub-handler-pack-done", fmt.Sprintf("exportDir=%q systemCode=%q", result.ExportDir, result.NewSystemCode))
 
+	writeNativeDragPhase("sub-handler-native-start", fmt.Sprintf("exportDir=%q", result.ExportDir))
 	dragResult := startNativeFileDrag(result.ExportDir)
+	writeNativeDragPhase("sub-handler-native-done", fmt.Sprintf("status=%s message=%q", dragResult.Status, dragResult.Message))
 	out := &NativeSubDragExportResult{
 		Status:           dragResult.Status,
 		ExportDir:        result.ExportDir,
@@ -173,7 +218,10 @@ func (a *App) NativeDragExportSubHandler(subID, displayName, mode, toolsJSON str
 		SubID:            subID,
 		DisplayName:      displayName,
 		NewSystemCode:    result.NewSystemCode,
+		DropTargetKind:   dragResult.DropTargetKind,
+		DropTargetDir:    dragResult.DropTargetDir,
 	}
+	writeSubNativeDragTrace(out)
 
 	if dragResult.Status != nativeDragStatusSuccess {
 		_ = os.RemoveAll(result.ExportDir)
@@ -186,15 +234,52 @@ func (a *App) NativeDragExportSubHandler(subID, displayName, mode, toolsJSON str
 	return out, nil
 }
 
+func writeSubNativeDragTrace(result *NativeSubDragExportResult) {
+	if result == nil {
+		return
+	}
+	line := fmt.Sprintf("%s status=%s sub=%q target=%s dir=%q landed=%q message=%q\n",
+		time.Now().Format(time.RFC3339),
+		result.Status,
+		result.DisplayName,
+		result.DropTargetKind,
+		result.DropTargetDir,
+		result.LandedPath,
+		result.Message,
+	)
+	// Keep a lightweight trace for diagnosing cross-window drag handoff.
+	appendNativeDragTraceLine(line)
+}
+
+func writeNativeDragPhase(phase, detail string) {
+	line := fmt.Sprintf("%s phase=%s detail=%q\n", time.Now().Format(time.RFC3339), phase, detail)
+	appendNativeDragTraceLine(line)
+}
+
+func appendNativeDragTraceLine(line string) {
+	tracePath := filepath.Join(os.TempDir(), "ai-console-export", "native-drag-trace.log")
+	_ = os.MkdirAll(filepath.Dir(tracePath), 0o700)
+	if f, err := os.OpenFile(tracePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+		_, _ = f.WriteString(line)
+		_ = f.Close()
+	}
+}
+
 func (a *App) FinalizeNativeSubExport(action, subID, tempExportDir, landedPath, newSystemCode string) error {
 	projectRoot := storage.ProjectRoot(appDataRoot(), "default")
 	switch action {
 	case "remove":
+		if err := ensureLandedSubExport(tempExportDir, landedPath, newSystemCode); err != nil {
+			return err
+		}
 		subexport.WriteDelegationLog(projectRoot, string(subexport.ExportRemove), subID, newSystemCode)
 		if err := removeSubAfterExport(a, projectRoot, subID); err != nil {
 			return err
 		}
 	case "copy":
+		if err := ensureLandedSubExport(tempExportDir, landedPath, newSystemCode); err != nil {
+			return err
+		}
 		subexport.WriteDelegationLog(projectRoot, string(subexport.ExportCopy), subID, newSystemCode)
 	case "cancel":
 		// SEC-W08：把 newSystemCode 傳下去做 manifest 交叉驗證
@@ -208,6 +293,26 @@ func (a *App) FinalizeNativeSubExport(action, subID, tempExportDir, landedPath, 
 		_ = os.RemoveAll(tempExportDir)
 	}
 	return nil
+}
+
+func ensureLandedSubExport(tempExportDir, landedPath, expectedSystemCode string) error {
+	if landedPath == "" {
+		return fmt.Errorf("sub export: landed path is empty")
+	}
+	if err := validateLandedSubExport(landedPath, expectedSystemCode); err == nil {
+		return nil
+	}
+	if tempExportDir == "" {
+		return fmt.Errorf("sub export: landed copy missing and temp export is empty")
+	}
+	if err := validateLandedSubExport(tempExportDir, expectedSystemCode); err != nil {
+		return fmt.Errorf("sub export: temp export is not valid: %w", err)
+	}
+	// Repair the external copy before removing temp or system data.
+	if err := copySubExportDirectory(tempExportDir, landedPath); err != nil {
+		return fmt.Errorf("sub export: repair landed copy: %w", err)
+	}
+	return validateLandedSubExport(landedPath, expectedSystemCode)
 }
 
 func (a *App) GetSubExportDesktopDirectory() (string, error) {
@@ -318,6 +423,143 @@ func parseSubExportTools(toolsJSON string) ([]subexport.ToolRef, error) {
 	return tools, nil
 }
 
+func (a *App) resolvePortableSubExportTools(projectRoot, subID string, requested []subexport.ToolRef) []subexport.ToolRef {
+	if len(requested) > 0 {
+		return normalizePortableToolRefs(requested)
+	}
+	refsText := readSubPortableReferenceText(projectRoot, subID)
+	if refsText == "" {
+		return nil
+	}
+	refsText = strings.ToLower(refsText)
+
+	var refs []subexport.ToolRef
+	if a != nil && a.skillArchive != nil {
+		if manifests, err := a.skillArchive.ListArchived(); err == nil {
+			refs = append(refs, detectArchivedSkillRefs(manifests, refsText)...)
+		}
+	}
+	refs = append(refs, detectProjectToolRefs(projectRoot, refsText, "skill")...)
+	refs = append(refs, detectProjectToolRefs(projectRoot, refsText, "mcp")...)
+	refs = append(refs, detectProjectToolRefs(projectRoot, refsText, "app")...)
+	return normalizePortableToolRefs(refs)
+}
+
+func detectArchivedSkillRefs(manifests []skill_step.SkillManifest, refsText string) []subexport.ToolRef {
+	var refs []subexport.ToolRef
+	root := appDataRoot()
+	for _, manifest := range manifests {
+		id := strings.TrimSpace(manifest.SkillID)
+		if id == "" || !portableReferenceMentions(refsText, id) {
+			continue
+		}
+		systemPath := filepath.Join(root, "data", "skills", id)
+		if info, err := os.Stat(systemPath); err == nil && info.IsDir() {
+			refs = append(refs, subexport.ToolRef{
+				Type:       "skill",
+				SystemPath: systemPath,
+				OriginalID: id,
+			})
+		}
+	}
+	return refs
+}
+
+func detectProjectToolRefs(projectRoot, refsText, toolType string) []subexport.ToolRef {
+	root := filepath.Join(projectRoot, "tools", toolType+"s")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var refs []subexport.ToolRef
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		id := entry.Name()
+		if !portableReferenceMentions(refsText, id) {
+			continue
+		}
+		refs = append(refs, subexport.ToolRef{
+			Type:       toolType,
+			SystemPath: filepath.Join(root, id),
+			OriginalID: id,
+		})
+	}
+	return refs
+}
+
+func readSubPortableReferenceText(projectRoot, subID string) string {
+	safeSubID := filepath.Base(subID)
+	if safeSubID == "." || safeSubID == ".." || safeSubID != subID {
+		return ""
+	}
+	subBase := filepath.Join(projectRoot, "subagents", "callable", safeSubID)
+	searchRoots := []string{
+		filepath.Join(subBase, "memory"),
+		filepath.Join(subBase, "dag"),
+		filepath.Join(subBase, "tool_history"),
+	}
+	var b strings.Builder
+	const maxFileBytes = 256 * 1024
+	const maxTotalBytes = 2 * 1024 * 1024
+	for _, root := range searchRoots {
+		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() || b.Len() >= maxTotalBytes {
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(path))
+			switch ext {
+			case ".json", ".jsonl", ".md", ".txt", ".yaml", ".yml":
+			default:
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+			if len(data) > maxFileBytes {
+				data = data[:maxFileBytes]
+			}
+			b.WriteByte('\n')
+			b.Write(data)
+			return nil
+		})
+	}
+	return b.String()
+}
+
+func portableReferenceMentions(refsText, id string) bool {
+	id = strings.ToLower(strings.TrimSpace(id))
+	return id != "" && strings.Contains(refsText, id)
+}
+
+func normalizePortableToolRefs(refs []subexport.ToolRef) []subexport.ToolRef {
+	seen := make(map[string]bool)
+	var out []subexport.ToolRef
+	for _, ref := range refs {
+		ref.Type = strings.TrimSpace(strings.ToLower(ref.Type))
+		ref.OriginalID = strings.TrimSpace(ref.OriginalID)
+		ref.SystemPath = strings.TrimSpace(ref.SystemPath)
+		if ref.Type != "skill" && ref.Type != "mcp" && ref.Type != "app" {
+			continue
+		}
+		if ref.OriginalID == "" || filepath.Base(ref.OriginalID) != ref.OriginalID {
+			continue
+		}
+		if info, err := os.Stat(ref.SystemPath); err != nil || !info.IsDir() {
+			continue
+		}
+		key := ref.Type + ":" + ref.OriginalID
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, ref)
+	}
+	return out
+}
+
 func exportModeFromString(mode string) subexport.ExportMode {
 	if mode == "export_remove" {
 		return subexport.ExportRemove
@@ -338,16 +580,89 @@ func removeSubAfterExport(a *App, projectRoot, subID string) error {
 	return nil
 }
 
+func validateLandedSubExport(path, expectedSystemCode string) error {
+	if path == "" {
+		return fmt.Errorf("sub export: path is empty")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("sub export: path is not a directory: %s", path)
+	}
+	base := filepath.Base(path)
+	if expectedSystemCode != "" && base != expectedSystemCode {
+		return fmt.Errorf("sub export: basename mismatch (landed=%q, expected=%q)", base, expectedSystemCode)
+	}
+	if !strings.Contains(base, "_SUB_") {
+		return fmt.Errorf("sub export: basename %q does not contain _SUB_ marker", base)
+	}
+	m, err := subexport.LoadManifest(path)
+	if err != nil {
+		return fmt.Errorf("sub export: load manifest: %w", err)
+	}
+	if m.ExportType != "sub_handler" {
+		return fmt.Errorf("sub export: manifest export_type=%q, expected %q", m.ExportType, "sub_handler")
+	}
+	if expectedSystemCode != "" && m.SourceSystemCode != expectedSystemCode {
+		return fmt.Errorf("sub export: manifest source_system_code=%q, expected %q",
+			m.SourceSystemCode, expectedSystemCode)
+	}
+	return nil
+}
+
+func copySubExportDirectory(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return os.MkdirAll(target, info.Mode().Perm())
+		}
+		return copySubExportFile(path, target, info.Mode())
+	})
+}
+
+func copySubExportFile(src, dst string, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode.Perm())
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
+}
+
 // removeLandedSubExport 在使用者取消 native drag 後清理 landed sub export folder。
 //
 // SEC-W08（2026-05-24）：landedPath 來自前端，必須在 RemoveAll 前做 5 條驗證
 // 才能確認這真的是這次匯出的 sub folder，而不是被誘導刪掉的任意目錄。
 // 驗證項目：
-//   1. landedPath 是目錄（不是檔案）
-//   2. basename == expectedSystemCode（與 caller 傳入比對）或 basename 含 "_SUB_"
-//   3. install_manifest.json 存在且可解析
-//   4. manifest.ExportType == "sub_handler"
-//   5. manifest.SourceSystemCode == expectedSystemCode
+//  1. landedPath 是目錄（不是檔案）
+//  2. basename == expectedSystemCode（與 caller 傳入比對）或 basename 含 "_SUB_"
+//  3. install_manifest.json 存在且可解析
+//  4. manifest.ExportType == "sub_handler"
+//  5. manifest.SourceSystemCode == expectedSystemCode
 //
 // 不抽跨檔 helper、不動 data/subexport/*、不動 orchestration/dag/*。
 func removeLandedSubExport(path, expectedSystemCode string) error {

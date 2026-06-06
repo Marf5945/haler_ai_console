@@ -12,6 +12,7 @@ package adapter_registry
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"ui_console/data/storage"
+	"ui_console/shared/executil"
 )
 
 // Status represents the connectivity state of a CLI adapter.
@@ -256,25 +258,38 @@ func (s *Service) RegisterLocal(id, name, icon, endpoint, model string, paths ..
 // ResolveExecutable returns the executable path for an adapter.
 // It first uses the persisted path, then falls back to known CLI detection.
 func (s *Service) ResolveExecutable(adapterID string) (string, error) {
+	storedPath := ""
 	s.mu.Lock()
-	for i, a := range s.adapters {
+	for _, a := range s.adapters {
 		if a.ID == adapterID && a.Path != "" {
-			path := a.Path
-			unwrapped := unwrapLauncherPath(path, inferBinaryNameForAdapter(adapterID))
-			if unwrapped != path {
-				s.adapters[i].Path = unwrapped
-				s.adapters[i].LastCheck = time.Now()
-				_ = s.store.SaveRaw(s.adapters)
-				path = unwrapped
-			}
-			s.mu.Unlock()
-			if isExecutableFile(path) {
-				return path, nil
-			}
-			return "", fmt.Errorf("adapter_registry: adapter %q path %q is not executable", adapterID, path)
+			storedPath = a.Path
+			break
 		}
 	}
 	s.mu.Unlock()
+
+	if storedPath != "" {
+		path := storedPath
+		unwrapped := unwrapLauncherPath(path, inferBinaryNameForAdapter(adapterID))
+		if unwrapped != path {
+			s.mu.Lock()
+			for i := range s.adapters {
+				if s.adapters[i].ID != adapterID || s.adapters[i].Path != storedPath {
+					continue
+				}
+				s.adapters[i].Path = unwrapped
+				s.adapters[i].LastCheck = time.Now()
+				_ = s.store.SaveRaw(s.adapters)
+				break
+			}
+			s.mu.Unlock()
+			path = unwrapped
+		}
+		if isExecutableFile(path) {
+			return path, nil
+		}
+		return "", fmt.Errorf("adapter_registry: adapter %q path %q is not executable", adapterID, path)
+	}
 
 	for _, cli := range knownCLIs {
 		if cli.AdapterID == adapterID {
@@ -339,17 +354,6 @@ var knownCLIs = []knownCLI{
 		Icon:       "✦",
 		CandidatePaths: []string{
 			"$HOME/gemini_cli/node_modules/.bin/gemini",
-		},
-	},
-	{
-		BinaryName: "ollama",
-		AdapterID:  "ollama-cli",
-		Label:      "Ollama",
-		Icon:       "O",
-		CandidatePaths: []string{
-			"/opt/homebrew/bin/ollama",
-			"/usr/local/bin/ollama",
-			"/Applications/Ollama.app/Contents/Resources/ollama",
 		},
 	},
 	{BinaryName: "aider", AdapterID: "aider-cli", Label: "Aider", Icon: "A"},
@@ -438,7 +442,7 @@ func resolveNpmPrefix() string {
 	// SEC-19: 加入 5 秒 timeout 防止 npm 卡住
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, npmBin, "prefix", "-g").Output()
+	out, err := executil.CommandContext(ctx, npmBin, "prefix", "-g").Output()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			log.Printf("resolveNpmPrefix: npm prefix -g timeout after 5s")
@@ -457,10 +461,8 @@ func findBinary(name string) string {
 	}
 	// 2. 掃描額外路徑
 	for _, dir := range extraSearchPaths() {
-		candidate := filepath.Join(dir, name)
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			// 確認有執行權限
-			if info.Mode()&0o111 != 0 {
+		for _, candidate := range executableCandidates(filepath.Join(dir, name)) {
+			if isExecutableFile(candidate) {
 				return candidate
 			}
 		}
@@ -481,10 +483,21 @@ func findKnownCLI(cli knownCLI) string {
 }
 
 func unwrapLauncherPath(path, binaryName string) string {
+	if runtime.GOOS == "windows" {
+		if target := unwrapWindowsCommandLauncher(path); target != "" {
+			return target
+		}
+	}
 	if binaryName != "codex" {
 		return path
 	}
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
+	if err != nil {
+		return path
+	}
+	defer f.Close()
+	// Launcher scripts are tiny; avoid reading a full CLI binary during health checks.
+	data, err := io.ReadAll(io.LimitReader(f, 64*1024))
 	if err != nil {
 		return path
 	}
@@ -504,6 +517,57 @@ func unwrapLauncherPath(path, binaryName string) string {
 		}
 	}
 	return path
+}
+
+func unwrapWindowsCommandLauncher(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext != ".cmd" && ext != ".bat" {
+		return ""
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, 64*1024))
+	if err != nil {
+		return ""
+	}
+	baseDir := filepath.Dir(path)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.Contains(line, "%*") {
+			continue
+		}
+		for _, quoted := range quotedWindowsCommandParts(line) {
+			candidate := strings.ReplaceAll(quoted, "%dp0%\\", baseDir+string(filepath.Separator))
+			candidate = strings.ReplaceAll(candidate, "%dp0%/", baseDir+string(filepath.Separator))
+			candidate = strings.ReplaceAll(candidate, "%dp0%", baseDir)
+			candidate = os.ExpandEnv(candidate)
+			if isExecutableFile(candidate) {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
+func quotedWindowsCommandParts(line string) []string {
+	var parts []string
+	for {
+		start := strings.Index(line, `"`)
+		if start < 0 {
+			break
+		}
+		rest := line[start+1:]
+		end := strings.Index(rest, `"`)
+		if end < 0 {
+			break
+		}
+		parts = append(parts, rest[:end])
+		line = rest[end+1:]
+	}
+	return parts
 }
 
 func expandHome(path string) string {
@@ -528,7 +592,29 @@ func isExecutableFile(path string) bool {
 	if err != nil || info.IsDir() {
 		return false
 	}
+	if runtime.GOOS == "windows" {
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".exe", ".cmd", ".bat", ".com", ".ps1":
+			return true
+		default:
+			return false
+		}
+	}
 	return info.Mode()&0o111 != 0
+}
+
+func executableCandidates(path string) []string {
+	if runtime.GOOS != "windows" || filepath.Ext(path) != "" {
+		return []string{path}
+	}
+	return []string{
+		path,
+		path + ".exe",
+		path + ".cmd",
+		path + ".bat",
+		path + ".com",
+		path + ".ps1",
+	}
 }
 
 func resolveExecutablePath(path, binaryName string) (string, error) {
@@ -538,10 +624,15 @@ func resolveExecutablePath(path, binaryName string) (string, error) {
 	}
 	info, err := os.Stat(path)
 	if err != nil {
+		for _, candidate := range executableCandidates(path) {
+			if isExecutableFile(candidate) {
+				return unwrapLauncherPath(candidate, binaryName), nil
+			}
+		}
 		return "", fmt.Errorf("adapter_registry: path %q not found: %w", path, err)
 	}
 	if !info.IsDir() {
-		if info.Mode()&0o111 == 0 {
+		if !isExecutableFile(path) {
 			return "", fmt.Errorf("adapter_registry: path %q is not executable", path)
 		}
 		return unwrapLauncherPath(path, binaryName), nil
@@ -557,9 +648,10 @@ func resolveExecutablePath(path, binaryName string) (string, error) {
 			filepath.Join("bin", name),
 			filepath.Join("node_modules", ".bin", name),
 		} {
-			candidate := filepath.Join(path, rel)
-			if isExecutableFile(candidate) {
-				return unwrapLauncherPath(candidate, name), nil
+			for _, candidate := range executableCandidates(filepath.Join(path, rel)) {
+				if isExecutableFile(candidate) {
+					return unwrapLauncherPath(candidate, name), nil
+				}
 			}
 		}
 	}
@@ -606,10 +698,18 @@ func ResolveCustomCLI(name, path string) (DetectResult, error) {
 	if err != nil {
 		return r, err
 	}
+	if IsOllamaExecutablePath(resolvedPath) {
+		return r, fmt.Errorf("adapter_registry: ollama.exe is a local model runtime, not a prompt CLI; register the Ollama model library folder instead")
+	}
 	r.AdapterID = strings.ToLower(strings.ReplaceAll(cleanName, " ", "-")) + "-cli"
 	r.Path = resolvedPath
 	r.Found = true
 	return r, nil
+}
+
+func IsOllamaExecutablePath(path string) bool {
+	base := strings.ToLower(filepath.Base(strings.TrimSpace(path)))
+	return base == "ollama" || base == "ollama.exe"
 }
 
 // AutoDetect 掃描本機 PATH + 常見安裝路徑，找出已安裝的 CLI。

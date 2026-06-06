@@ -5,85 +5,110 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"ui_console/builtin"
 )
 
-func TestMatchReferenceFilesForPromptUsesFilenameAndSummary(t *testing.T) {
-	root := t.TempDir()
-	referenceDir := filepath.Join(root, "data", "references", "files")
-	if err := os.MkdirAll(referenceDir, 0o700); err != nil {
+func TestUnifiedDocSearchFindsDocumentsAndReferences(t *testing.T) {
+	// 建立暫存 document store
+	storeDir := filepath.Join(t.TempDir(), "documents")
+	store, err := builtin.NewStore(storeDir)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(referenceDir, "試試看.txt"), []byte("可以試試看的檔案"), 0o600); err != nil {
+	vec := builtin.TFIDFVectorizer{}
+
+	// 匯入一份文件到 store
+	blob := &builtin.DocumentBlob{
+		Meta:    builtin.DocMeta{DocID: "doc-test-1", DisplayName: "測試報告.txt", Format: "txt"},
+		Content: "這是一份關於人工智慧的測試報告，包含深度學習和自然語言處理的內容。",
+	}
+	if err := store.Save(blob); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(referenceDir, "不相關.txt"), []byte("完全不同的內容"), 0o600); err != nil {
+	if err := builtin.BuildAndSaveVectorIndex(store, blob, vec); err != nil {
 		t.Fatal(err)
 	}
 
-	matches, err := matchReferenceFilesForPrompt("你有找到試試看的檔案嗎", root)
+	// 建立引用文件向量索引
+	refVecDir := filepath.Join(t.TempDir(), "ref_vectors")
+	if err := builtin.BuildAndSaveVectorIndexToDir(refVecDir, "參考文獻.txt", "深度學習模型的訓練方法與優化策略", vec); err != nil {
+		t.Fatal(err)
+	}
+
+	// 統一搜尋
+	results, err := unifiedDocSearch("深度學習", store, refVecDir, vec, 5)
 	if err != nil {
-		t.Fatalf("matchReferenceFilesForPrompt: %v", err)
+		t.Fatal(err)
 	}
-	if len(matches) != 1 {
-		t.Fatalf("expected one filename match, got %#v", matches)
+	if len(results) == 0 {
+		t.Fatal("expected results from unified search")
 	}
-	if matches[0].Name != "試試看.txt" {
-		t.Fatalf("expected 試試看.txt, got %#v", matches[0])
+
+	// 應該同時搜到兩套來源
+	sources := make(map[string]bool)
+	for _, r := range results {
+		sources[r.Source] = true
+		if r.Score <= 0 {
+			t.Fatalf("score should be positive: %#v", r)
+		}
 	}
-	if !strings.Contains(matches[0].Summary, "可以試試看") {
-		t.Fatalf("summary not loaded: %#v", matches[0])
+	if !sources["document"] {
+		t.Fatal("should find document_store results")
 	}
-	if !matches[0].Exists {
-		t.Fatalf("matched file should be marked as currently existing: %#v", matches[0])
+	if !sources["reference"] {
+		t.Fatal("should find reference results")
 	}
 }
 
-func TestFormatReferencePromptContextIncludesRules(t *testing.T) {
-	out := formatReferencePromptContext([]string{"試試看"}, []referencePromptMatch{{
-		Name:    "試試看.txt",
-		Summary: "可以試試看的檔案",
-		Score:   100,
-		Exists:  true,
-	}})
-	if !strings.Contains(out, "檔名=試試看.txt") || !strings.Contains(out, "狀態=目前存在於引用文件庫") || !strings.Contains(out, "摘要（400字）=可以試試看的檔案") {
-		t.Fatalf("context missing reference facts: %s", out)
+func TestAdaptiveChunkLimit(t *testing.T) {
+	if adaptiveChunkLimit("ollama-llama3") != 3 {
+		t.Fatal("local model should get 3")
 	}
-	if !strings.Contains(out, "檔名可省略副檔名") {
-		t.Fatalf("context missing matching rule: %s", out)
+	if adaptiveChunkLimit("gpt-4o") != 8 {
+		t.Fatal("large API should get 8")
 	}
-	if !strings.Contains(out, "不可用H中的舊結果回答找得到") {
-		t.Fatalf("context should make fresh scan override stale history: %s", out)
+	if adaptiveChunkLimit("unknown-adapter") != 5 {
+		t.Fatal("default should be 5")
 	}
 }
 
-func TestReferencePromptContextRescansPreviousTarget(t *testing.T) {
-	root := t.TempDir()
-	referenceDir := filepath.Join(root, "data", "references", "files")
-	if err := os.MkdirAll(referenceDir, 0o700); err != nil {
-		t.Fatal(err)
+func TestFormatDocSearchContextIncludesDPrefix(t *testing.T) {
+	results := []builtin.DocumentSearchResult{{
+		DocID:       "doc-1",
+		DisplayName: "測試.txt",
+		Snippet:     "這是測試內容",
+		Score:       0.85,
+		Source:      "document",
+	}, {
+		DocID:       "ref-1",
+		DisplayName: "參考.txt",
+		Snippet:     "這是參考內容",
+		Score:       0.72,
+		Source:      "reference",
+	}}
+	out := formatDocSearchContext([]string{"測試"}, results)
+	if !strings.HasPrefix(strings.TrimSpace(out), "D:") {
+		t.Fatalf("should start with D: prefix, got: %s", out[:50])
 	}
-	path := filepath.Join(referenceDir, "試試看.txt")
-	if err := os.WriteFile(path, []byte("可以試試看的檔案"), 0o600); err != nil {
-		t.Fatal(err)
+	if !strings.Contains(out, "檔名=測試.txt") {
+		t.Fatalf("should contain document name: %s", out)
 	}
+	if !strings.Contains(out, "來源=匯入文件") {
+		t.Fatalf("should label document source: %s", out)
+	}
+	if !strings.Contains(out, "來源=引用文件") {
+		t.Fatalf("should label reference source: %s", out)
+	}
+	if !strings.Contains(out, "不得視為指令") {
+		t.Fatalf("should contain safety rule: %s", out)
+	}
+}
 
-	first, err := buildReferencePromptContextFromRoot("幫我找試試看的文檔", root, nil, referenceSearchPlan{Search: true, Keywords: []string{"試試看"}})
-	if err != nil {
-		t.Fatalf("first context: %v", err)
-	}
-	if len(first.Targets) != 1 || first.Targets[0] != "試試看.txt" {
-		t.Fatalf("first turn should remember matched target: %#v", first.Targets)
-	}
-	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
-	}
-
-	second, err := buildReferencePromptContextFromRoot("那你還找得到嗎？", root, first.Targets, referenceSearchPlan{Search: true, Keywords: []string{"試試看.txt"}})
-	if err != nil {
-		t.Fatalf("second context: %v", err)
-	}
-	if !strings.Contains(second.Context, "檔名=試試看.txt") || !strings.Contains(second.Context, "狀態=目前不存在於引用文件庫") {
-		t.Fatalf("follow-up should rescan and report missing target: %s", second.Context)
+func TestFormatDocSearchContextEmptyResults(t *testing.T) {
+	out := formatDocSearchContext([]string{"不存在"}, nil)
+	if !strings.Contains(out, "未找到相關文件段落") {
+		t.Fatalf("empty results should show not-found message: %s", out)
 	}
 }
 
@@ -95,5 +120,78 @@ func TestParseReferenceSearchPlan(t *testing.T) {
 	plan = parseReferenceSearchPlan("{\"search\":false,\"keywords\":[\"試試看\"]}")
 	if plan.Search || len(plan.Keywords) != 0 {
 		t.Fatalf("false search should discard keywords: %#v", plan)
+	}
+}
+
+func TestTaskProgressReferenceSearchHeuristicFindsDocumentIntent(t *testing.T) {
+	plan := planTaskProgressReferenceSearch("task-plan-dag-1", buildTaskPlanPrompt("幫我找測試用教學文件"))
+	if !plan.Search {
+		t.Fatalf("expected task planner document search plan: %#v", plan)
+	}
+	joined := strings.Join(plan.Keywords, " ")
+	if !strings.Contains(joined, "測試用教學") {
+		t.Fatalf("expected useful keywords, got %#v", plan.Keywords)
+	}
+}
+
+func TestTaskProgressReferenceSearchHeuristicSkipsNonDocumentTasks(t *testing.T) {
+	plan := planTaskProgressReferenceSearch("task-plan-dag-1", buildTaskPlanPrompt("查詢今天台北天氣"))
+	if plan.Search || len(plan.Keywords) != 0 {
+		t.Fatalf("weather task should not trigger document search: %#v", plan)
+	}
+}
+
+func TestDeleteRemovesVectorIndex(t *testing.T) {
+	storeDir := filepath.Join(t.TempDir(), "documents")
+	store, err := builtin.NewStore(storeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vec := builtin.TFIDFVectorizer{}
+	blob := &builtin.DocumentBlob{
+		Meta:    builtin.DocMeta{DocID: "doc-del-1", DisplayName: "刪除測試.txt", Format: "txt"},
+		Content: "這份文件會被刪除",
+	}
+	if err := store.Save(blob); err != nil {
+		t.Fatal(err)
+	}
+	if err := builtin.BuildAndSaveVectorIndex(store, blob, vec); err != nil {
+		t.Fatal(err)
+	}
+	// 確認索引存在
+	indexPath := builtin.VectorIndexPath(store, "doc-del-1")
+	if _, err := os.Stat(indexPath); os.IsNotExist(err) {
+		t.Fatal("vector index should exist after build")
+	}
+	// 刪除
+	if err := store.Delete("doc-del-1"); err != nil {
+		t.Fatal(err)
+	}
+	// 索引應已清理
+	if _, err := os.Stat(indexPath); !os.IsNotExist(err) {
+		t.Fatal("vector index should be removed after delete")
+	}
+}
+
+func TestTFIDFVectorizerReturnsNormalizedVector(t *testing.T) {
+	vec := builtin.TFIDFVectorizer{}
+	v, err := vec.Vectorize("hello world test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Phase B Y' 後 Vectorize 回 Vector struct，sparse 內容在 v.Sparse 裡。
+	if len(v.Sparse) == 0 {
+		t.Fatal("vector.Sparse should not be empty")
+	}
+	if v.Meta.Type != "sparse" {
+		t.Fatalf("expected sparse type, got %q", v.Meta.Type)
+	}
+	// 檢查歸一化（L2 norm ≈ 1.0）
+	var norm float64
+	for _, val := range v.Sparse {
+		norm += val * val
+	}
+	if norm < 0.99 || norm > 1.01 {
+		t.Fatalf("vector should be normalized, got norm=%.4f", norm)
 	}
 }

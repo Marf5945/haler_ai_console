@@ -34,11 +34,23 @@ type Persona struct {
 }
 
 type State struct {
-	Panel           PanelSettings        `json:"panel"`
-	Personas        []Persona            `json:"personas"`
-	ActivePersonaID string               `json:"activePersonaId"`
-	SummaryModel    SummaryModelSettings `json:"summaryModel"`
-	ControlSeal     controlseal.Settings `json:"controlSeal"`
+	Panel               PanelSettings        `json:"panel"`
+	Personas            []Persona            `json:"personas"`
+	ActivePersonaID     string               `json:"activePersonaId"`
+	SummaryModel        SummaryModelSettings `json:"summaryModel"`
+	ControlSeal         controlseal.Settings `json:"controlSeal"`
+	AdapterModelChoices map[string]string    `json:"adapterModelChoices,omitempty"`
+	EmbeddingConfig     EmbeddingConfig      `json:"embeddingConfig,omitempty"`
+}
+
+// EmbeddingConfig — Phase B M2：使用者選的 embedding 模型。
+// 不變式：Dimension 只能由 backend 第一次成功 embed 後寫入（SaveEmbeddingDimension）。
+// UI / binding 用 SaveEmbeddingConfig 只能改 ProviderID + ModelID；換 model 時自動歸零 Dimension。
+type EmbeddingConfig struct {
+	ProviderID      string `json:"providerId,omitempty"`      // "ollama" | "" (=未設定 / 跳過)
+	ModelID         string `json:"modelId,omitempty"`         // 例 "nomic-embed-text"
+	Dimension       int    `json:"dimension,omitempty"`       // backend-measured；UI 不能寫
+	PickerDismissed bool   `json:"pickerDismissed,omitempty"` // true = 使用者「跳過」過；下次拖檔不要再彈 modal
 }
 
 type PersonaExportPayload struct {
@@ -245,6 +257,91 @@ func (s *Service) SummaryModelSettings() SummaryModelSettings {
 	return normalizeSummaryModelSettings(s.data.SummaryModel)
 }
 
+// AdapterModelChoices 回傳目前每個 adapter 的 model 偏好（複本，可安全 mutate）。
+func (s *Service) AdapterModelChoices() map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]string, len(s.data.AdapterModelChoices))
+	for k, v := range s.data.AdapterModelChoices {
+		out[k] = v
+	}
+	return out
+}
+
+// SaveAdapterModelChoice 寫入單一 adapter 的 model 選擇；空字串等同移除。
+func (s *Service) SaveAdapterModelChoice(adapterID, model string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.data.AdapterModelChoices == nil {
+		s.data.AdapterModelChoices = map[string]string{}
+	}
+	if model == "" {
+		delete(s.data.AdapterModelChoices, adapterID)
+	} else {
+		s.data.AdapterModelChoices[adapterID] = model
+	}
+	_ = s.saveLocked()
+}
+
+// EmbeddingConfig 回目前的 embedding 設定（複本）。
+func (s *Service) EmbeddingConfig() EmbeddingConfig {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.data.EmbeddingConfig
+}
+
+// SaveEmbeddingConfig 由 UI / binding 呼叫：只更新 ProviderID + ModelID。
+// 換 ModelID 會把 Dimension 歸零，下次 backend embed 時重新測量。
+// 設了 model 就自動 PickerDismissed=false（讓使用者之後改主意點選了，就不再被視為跳過狀態）。
+func (s *Service) SaveEmbeddingConfig(providerID, modelID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old := s.data.EmbeddingConfig
+	s.data.EmbeddingConfig = EmbeddingConfig{
+		ProviderID:      providerID,
+		ModelID:         modelID,
+		PickerDismissed: false,
+	}
+	// 維持 Dimension 不變的條件：同個 model；換了就歸零。
+	if old.ModelID == modelID && old.ProviderID == providerID {
+		s.data.EmbeddingConfig.Dimension = old.Dimension
+	}
+	_ = s.saveLocked()
+}
+
+// DismissEmbeddingPicker：使用者點「跳過」時呼叫；保留之前的 model 設定不動，
+// 只設 PickerDismissed=true，避免下次拖檔重複彈 modal。
+func (s *Service) DismissEmbeddingPicker() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data.EmbeddingConfig.PickerDismissed = true
+	_ = s.saveLocked()
+}
+
+// ReopenEmbeddingPicker：未來 settings panel 內「重新開啟 picker」的入口；
+// 不動 provider/model，僅清 dismissed flag。
+func (s *Service) ReopenEmbeddingPicker() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data.EmbeddingConfig.PickerDismissed = false
+	_ = s.saveLocked()
+}
+
+// SaveEmbeddingDimension 給 backend 在第一次成功 embed 後寫入測得的 dimension。
+// 故意不接出成 Wails binding——避免 UI 寫錯值汙染後續相容檢查。
+func (s *Service) SaveEmbeddingDimension(dim int) {
+	if dim <= 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.data.EmbeddingConfig.Dimension == dim {
+		return
+	}
+	s.data.EmbeddingConfig.Dimension = dim
+	_ = s.saveLocked()
+}
+
 func (s *Service) load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -367,6 +464,13 @@ func normalizeReservedPersona(personas []Persona) []Persona {
 
 func cloneState(state State) State {
 	state.Personas = append([]Persona(nil), state.Personas...)
+	if state.AdapterModelChoices != nil {
+		m := make(map[string]string, len(state.AdapterModelChoices))
+		for k, v := range state.AdapterModelChoices {
+			m[k] = v
+		}
+		state.AdapterModelChoices = m
+	}
 	return state
 }
 

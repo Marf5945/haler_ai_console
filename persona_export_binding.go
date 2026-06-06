@@ -19,6 +19,8 @@ type NativePersonaDragExportResult struct {
 	Message          string      `json:"message"`
 	PersonaID        string      `json:"persona_id"`
 	DisplayName      string      `json:"display_name"`
+	DropTargetKind   string      `json:"drop_target_kind"`
+	DropTargetDir    string      `json:"drop_target_dir"`
 	State            interface{} `json:"state,omitempty"`
 }
 
@@ -90,6 +92,8 @@ func (a *App) NativeDragExportPersonaHandler(personaID, mode string) (*NativePer
 		Message:          dragResult.Message,
 		PersonaID:        personaID,
 		DisplayName:      displayName,
+		DropTargetKind:   dragResult.DropTargetKind,
+		DropTargetDir:    dragResult.DropTargetDir,
 	}
 	if dragResult.Status != nativeDragStatusSuccess {
 		_ = os.Remove(exportPath)

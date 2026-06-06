@@ -580,7 +580,8 @@ func isInside(root, path string) bool {
 
 func shouldSkipDir(name string) bool {
 	switch name {
-	case "secrets", "cache", "tmp", "node_modules", ".git", "cli-workspaces":
+	// TASK 31 / Phase 0.2：skill_eval 評量資料絕不可進入 LLM-facing 搜尋語料（不變式 2）。
+	case "secrets", "cache", "tmp", "node_modules", ".git", "cli-workspaces", "skill_eval":
 		return true
 	default:
 		return strings.HasPrefix(name, ".")

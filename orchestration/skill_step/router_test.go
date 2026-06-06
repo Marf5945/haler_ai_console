@@ -44,8 +44,8 @@ func TestRegisterDocumentBuiltinsCount(t *testing.T) {
 	r := NewRouter(archive)
 	RegisterDocumentBuiltins(r)
 
-	if got := len(r.builtinManifests); got != 7 {
-		t.Errorf("expected 7 builtin manifests, got %d", got)
+	if got := len(r.builtinManifests); got != 8 {
+		t.Errorf("expected 8 builtin manifests, got %d", got)
 	}
 
 	expected := []string{
@@ -54,6 +54,7 @@ func TestRegisterDocumentBuiltinsCount(t *testing.T) {
 		"builtin.document.write",
 		"builtin.document.export",
 		"builtin.local.search",
+		"builtin.web.search",
 		"builtin.scheduler",
 		"builtin.git.status",
 	}

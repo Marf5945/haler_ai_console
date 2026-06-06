@@ -29,6 +29,8 @@ const rl = readline.createInterface({
   terminal: false,
 });
 
+const runningByTraceID = new Map();
+
 // --- IPC 回應工具 ---
 
 // writeResponse: 將 JSON-RPC 回應寫到 stdout，Go 端的 readLoop 會讀取。
@@ -79,6 +81,45 @@ function traceNode(node, traceID, data) {
   } catch {}
 }
 
+function shouldCompactTraceText(traceID) {
+  return /^task-(plan|node)-/.test(String(traceID || ""));
+}
+
+function compactTraceText(text, maxChars) {
+  const raw = String(text || "");
+  const max = maxChars || 360;
+  return raw.length > max ? raw.slice(0, max) + "..." : raw;
+}
+
+function traceTextFields(traceID, text, key) {
+  const name = key || "user_text";
+  const raw = String(text || "");
+  if (!shouldCompactTraceText(traceID)) return {[name]: raw};
+  return {
+    [name + "_len"]: raw.length,
+    [name + "_preview"]: compactTraceText(raw, 360),
+    [name + "_compacted"]: raw.length > 360,
+  };
+}
+
+function traceArgs(traceID, args) {
+  if (!shouldCompactTraceText(traceID)) return args;
+  return (args || []).map((arg) => {
+    const raw = String(arg || "");
+    return raw.length > 360 ? compactTraceText(raw, 360) : arg;
+  });
+}
+
+function traceParams(traceID, params) {
+  const copy = {...(params || {})};
+  if (Object.prototype.hasOwnProperty.call(copy, "user_text")) {
+    const text = copy.user_text || "";
+    delete copy.user_text;
+    Object.assign(copy, traceTextFields(traceID, text));
+  }
+  return copy;
+}
+
 function traceEndpoint() {
   try {
     const raw = process.env.AI_CONSOLE_TRACE_URL || "http://127.0.0.1:48765";
@@ -108,19 +149,38 @@ function isGeminiAdapter(adapterID, cliPath) {
   return id.includes("gemini") || base === "gemini";
 }
 
+function isWindowsCommandLauncher(filePath) {
+  if (process.platform !== "win32") return false;
+  return /\.(cmd|bat)$/i.test(String(filePath || ""));
+}
+
 // --- CLI 指令對應表 ---
 // 每個 adapter 的 CLI 有不同的參數格式，這裡統一對應。
-function commandFor(adapterID, cliPath, prompt) {
+// model 由 Go 端從 settings.AdapterModelChoices 取出後傳入；空字串=用該 CLI 預設。
+function commandFor(adapterID, cliPath, prompt, model) {
   const id = String(adapterID || "").toLowerCase();
   const base = path.basename(cliPath || "").toLowerCase();
+  const m = String(model || "").trim();
   if (id.includes("codex") || base === "codex") {
-    return {cmd: cliPath, args: ["exec", "--skip-git-repo-check", prompt]};
+    // codex 的 prompt 是 positional；--model 放最前面、prompt 在最後即可。
+    const args = ["exec", "--skip-git-repo-check"];
+    if (m) args.push("--model", m);
+    args.push(prompt);
+    return {cmd: cliPath, args};
   }
   if (id.includes("claude") || base === "claude") {
-    return {cmd: cliPath, args: ["-p", prompt]};
+    // claude 的 -p 接 prompt；--model 必須在 -p 之前，不然 -p 會吃 "--model"。
+    const args = [];
+    if (m) args.push("--model", m);
+    args.push("-p", prompt);
+    return {cmd: cliPath, args};
   }
   if (id.includes("gemini") || base === "gemini") {
-    return {cmd: cliPath, args: ["-p", prompt]};
+    // 鎖 --model 跳過 Gemini CLI 0.42 的 auto routing classifier（~1300 tokens 浪費）。
+    // 優先序：UI 雙擊選的 > GEMINI_MODEL env > 預設 gemini-2.5-flash。
+    // 順序：--model X -p prompt（-p 會 consume 下一個 arg，所以 prompt 必須緊接 -p）。
+    const model2 = m || process.env.GEMINI_MODEL || "gemini-2.5-flash";
+    return {cmd: cliPath, args: ["--model", model2, "-p", prompt]};
   }
   return {cmd: cliPath, args: [prompt]};
 }
@@ -146,6 +206,10 @@ function extractAuthURL(text) {
 
 function publicCLIErrorMessage(err, stdout, stderr) {
   const combined = [err && err.message ? err.message : String(err || ""), stdout || "", stderr || ""].join("\n");
+  const unsupported = combined.match(/The '([^']+)' model is not supported[^\n"]*/i);
+  if (unsupported) {
+    return "目前的 Codex CLI 帳號不支援模型 " + unsupported[1] + "，請切換到可用模型（例如 gpt-5.5）或清除該 adapter 的 model 選擇。";
+  }
   if (/MODEL_CAPACITY_EXHAUSTED|No capacity available for model/i.test(combined)) {
     const modelMatch = combined.match(/model\s+([A-Za-z0-9._-]+)/i);
     const model = modelMatch ? modelMatch[1] : "目前選用的 Gemini 模型";
@@ -159,10 +223,22 @@ function publicCLIErrorMessage(err, stdout, stderr) {
     .map((line) => line.trim())
     .find((line) =>
       line &&
+      !/^Reading additional input from stdin/i.test(line) &&
+      !/^OpenAI Codex /i.test(line) &&
       !/^Warning: 256-color support/i.test(line) &&
       !/^Ripgrep is not available/i.test(line)
     );
   return firstUsefulLine || "CLI 執行失敗，請查看監控台取得詳細資訊。";
+}
+
+function looksLikeVerboseCLIError(text) {
+  return /GaxiosError|GoogleGenerativeAIError|No capacity available for model|rateLimitExceeded|Too Many Requests|status\s+429|v1internal:generateContent|chunk-[A-Z0-9]+\.js|\"systemInstruction\"|\"request\":\{\"contents\"/i.test(text || "");
+}
+
+function compactCLIResultText(adapterID, text, stdout, stderr) {
+  const combined = [text || "", stdout || "", stderr || ""].join("\n");
+  if (!looksLikeVerboseCLIError(combined)) return text || "";
+  return publicCLIErrorMessage(new Error(combined), stdout, stderr);
 }
 
 // --- 核心 CLI 執行邏輯 ---
@@ -178,7 +254,7 @@ function runCLI(params) {
       adapter_id: adapterID,
       cli_path: cliPath,
       workspace_dir: workspaceDir,
-      user_text: prompt,
+      ...traceTextFields(traceID, prompt),
       has_skill_injection: !!params.skill_injection,
     });
 
@@ -207,11 +283,13 @@ function runCLI(params) {
       }
     }
 
-    const spec = commandFor(adapterID, cliPath, prompt);
+    const model = params.model || "";
+    const spec = commandFor(adapterID, cliPath, prompt, model);
     traceNode("sidecar.spawn.command", traceID, {
       cmd: spec.cmd,
-      args: spec.args,
+      args: traceArgs(traceID, spec.args),
       cwd: workspaceDir || process.cwd(),
+      shell: isWindowsCommandLauncher(spec.cmd),
     });
     const env = {...process.env};
     env.PATH = [
@@ -223,23 +301,26 @@ function runCLI(params) {
       "/usr/sbin",
       "/sbin",
       env.PATH || "",
-    ].filter(Boolean).join(":");
+    ].filter(Boolean).join(path.delimiter);
     // SEC-08: 已移除 GEMINI_CLI_TRUST_WORKSPACE=true，讓 Gemini CLI 自行處理 workspace 信任確認。
 
     // stdin 設為 "pipe"（非 "ignore"），預留給未來需要寫入 stdin 的場景。
     // 但目前偵測到授權提示後會直接 kill child，不會嘗試自動回應 Y/n。
-    const child = spawn(spec.cmd, spec.args, {
+    const spawnOptions = {
       cwd: workspaceDir || undefined,
       env,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
-    });
+      shell: isWindowsCommandLauncher(spec.cmd),
+    };
+    const child = spawn(spec.cmd, spec.args, spawnOptions);
     traceNode("sidecar.spawn.started", traceID, {
       pid: child.pid,
       cmd: spec.cmd,
-      args: spec.args,
+      args: traceArgs(traceID, spec.args),
       cwd: workspaceDir || process.cwd(),
     });
+    if (traceID) runningByTraceID.set(traceID, child);
 
     let stdout = "";
     let stderr = "";
@@ -250,6 +331,7 @@ function runCLI(params) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (traceID) runningByTraceID.delete(traceID);
       try { child.kill("SIGTERM"); } catch {}
       const publicError = publicCLIErrorMessage(err, stdout, stderr);
       traceNode("sidecar.runCLI.fail", traceID, {
@@ -264,6 +346,7 @@ function runCLI(params) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (traceID) runningByTraceID.delete(traceID);
       traceNode("sidecar.runCLI.finish", traceID, value);
       resolve(value);
     }
@@ -275,6 +358,7 @@ function runCLI(params) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (traceID) runningByTraceID.delete(traceID);
       const authURL = extractAuthURL(combinedText);
       // kill 掉卡住的 CLI — 授權完成後會由前端觸發重試
       try { child.kill("SIGTERM"); } catch {}
@@ -323,6 +407,7 @@ function runCLI(params) {
       fail(err);
     });
     child.on("close", (code) => {
+      if (traceID) runningByTraceID.delete(traceID);
       if (settled) return;
       const text = stdout.trim();
       const errText = stderr.trim();
@@ -331,11 +416,19 @@ function runCLI(params) {
         stdout,
         stderr,
       });
-      if (code !== 0 && !text) {
-        fail(new Error(errText || ("CLI exited with code " + code)));
+      if (code !== 0) {
+        fail(new Error(errText || text || ("CLI exited with code " + code)));
         return;
       }
-      finish({text: text || errText || ""});
+      // Some CLIs can print a recoverable/retried provider error to stderr and
+      // still complete successfully with the useful answer on stdout. Preserve
+      // stdout on success; only compact stderr when stdout is empty or itself is
+      // the verbose error payload.
+      if (text && !looksLikeVerboseCLIError(text)) {
+        finish({text});
+        return;
+      }
+      finish({text: compactCLIResultText(adapterID, text || errText || "", stdout, stderr)});
     });
   });
 }
@@ -344,15 +437,38 @@ function runCLI(params) {
 
 let requestQueue = Promise.resolve();
 
+function cancelTrace(traceID) {
+  const child = runningByTraceID.get(traceID || "");
+  if (!child) return {cancelled: false};
+  traceNode("sidecar.cancelTrace", traceID, {pid: child.pid});
+  try { child.kill("SIGTERM"); } catch {}
+  setTimeout(() => {
+    if (runningByTraceID.get(traceID || "") === child) {
+      try { child.kill("SIGKILL"); } catch {}
+    }
+  }, 1200);
+  return {cancelled: true, pid: child.pid || 0};
+}
+
 async function handleRequest(req) {
   if (!req || !req.id || !req.method) return;
   const traceID = req.params && req.params.trace_id ? req.params.trace_id : "";
   traceNode("sidecar.request.received", traceID, {
     id: req.id,
     method: req.method,
-    params: req.params || {},
+    params: traceParams(traceID, req.params || {}),
   });
   try {
+    if (req.method === "cancelTrace") {
+      const result = cancelTrace(traceID);
+      traceNode("sidecar.response.write", traceID, {
+        id: req.id,
+        result,
+        error: null,
+      });
+      writeResponse(req.id, result, null, traceID);
+      return;
+    }
     if (req.method !== "sendMessage") {
       throw new Error("unknown method: " + req.method);
     }
@@ -381,6 +497,10 @@ rl.on("line", (line) => {
       id: req && req.id,
       method: req && req.method,
     });
+    if (req && req.method === "cancelTrace") {
+      handleRequest(req);
+      return;
+    }
     requestQueue = requestQueue
       .then(() => handleRequest(req))
       .catch((err) => {

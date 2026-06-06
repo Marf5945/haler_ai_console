@@ -7,7 +7,9 @@ import {
   ActivateTool,
   ApplyUIStyleDiff,
   BuildSkillContext,
+  ConfirmAndExecuteSkillExecution,
   ClearSkillContext,
+  ClearWebSearchConfig,
   ConfirmPackageInstall,
   ConfirmSkillArchive,
   DisableContextualRiskOverride,
@@ -22,6 +24,10 @@ import {
   // Keep: debug trace monitor bridge. Used by postDebugTrace() even when the
   // local monitor port is not currently listening.
   GetMonitorLinks,
+  // SEC-05 2b: 開外部連結唯一入口（Go 端做 scheme/metadata 檢查，loopback 放行）
+  OpenExternalURL,
+  // SEC-06: URL provenance — 記錄 LLM 擷取的 URL（閉合洗白防護）
+  RegisterURLOccurrence,
   GetNewSubagentCandidates,
   GetPendingDigest,
   GetPendingTagPatches,
@@ -45,6 +51,7 @@ import {
   RejectPackageInstall,
   ReorderPersonas,
   ResolveSkillForAction,
+  ExecuteSkillMessage,
   RestoreUIDefaults,
   SavePanelSettings,
   SavePersona,
@@ -54,6 +61,8 @@ import {
   SetBrowserPreference,
   SetToolPreference,
   SetTrustDomAndClick,
+  ExecuteNativeLearningReplayStep,
+  RecordLearningMouseEvent,
   RecordStepTrace,
   StartDraftSandbox,
   StartHookRun,
@@ -61,7 +70,7 @@ import {
   MarkSkillFirstUseExplained,
   SendCLIMessage,
   SendAPIMessage,
-  SendInspectorMessage,
+  SendTopInteractionMessage,
   SetActiveConversationAgent,
   ClearInspectorHistory,
   RestartSidecar,
@@ -94,6 +103,10 @@ import {
   ScanLocalModels,
   EnableLocalModel,
   WakeLocalAdapter,
+  GetEmbeddingConfig,
+  GetAdapterModelChoices,
+  SetAdapterModelChoice,
+  ListAdapterModelOptions,
   // ── v3.6 Review / Risk 接線 ──
   DualStepConfirmStep1,
   InvalidateDualStep,
@@ -133,7 +146,12 @@ import {
   // ── v3.6 Visual Learning 接線 ──
   StartLearningMode,
   StopLearningMode,
+  GenerateLearningRunMetadata,
   IsLearningModeActive,
+  GetLastLearningReplayPlan,
+  GetLearningReplayPlan,
+  ListLearningReplayCatalog,
+  SearchLearningOperations,
   GetPendingCandidateCount,
   HasBlockingVLReview,
   // ── v3.6 Stop Recovery 接線 ──
@@ -165,7 +183,6 @@ import {
   SetRemoteBridgePrimaryChannel,
   DismissSummarization,
   DispatchRemoteBridgeAsync,
-  ListDAGRunsFromIndex,
   DeactivateRemoteBridgeChannel,
   SwitchRemoteBridgeMode,
   ListRemoteBridgeChannels,
@@ -204,6 +221,7 @@ import {
   PreviewSubPackage,
   ResolveImportToolConflicts,
   GetTabOrder,
+  GetSubExportCapabilities,
   ReorderAdapters,
   ReorderTabs,
   SelectSubExportDirectory,
@@ -211,7 +229,9 @@ import {
   SaveSummaryModelSettings,
   ScanLocalSummaryModels,
   GetVoiceSettings,
+  GetWebSearchConfig,
   SaveVoiceSettings,
+  SaveWebSearchConfig,
   InstallVoiceBaseModel,
   RemoveVoiceBaseModel,
   ClearVoiceDebug,
@@ -219,7 +239,20 @@ import {
   RouteVoiceCommand,
 } from '../wailsjs/go/main/App';
 import {OnFileDrop, OnFileDropOff, EventsOn, BrowserOpenURL, Quit, ClipboardGetText, ClipboardSetText} from '../wailsjs/runtime/runtime';
+
+// SEC-05 2b: 所有外部連結一律走 Go 端 OpenExternalURL 檢查
+// （僅 http/https、擋 metadata、loopback 放行，monitor 頁不受影響）。
+// catch 兩層：binding 缺失時（測試環境）退回 BrowserOpenURL；正式環境 binding 必存在。
+const openExternal = (url) => {
+  try {
+    OpenExternalURL(url).catch((err) => console.error('openExternal blocked:', err));
+  } catch {
+    BrowserOpenURL(url);
+  }
+};
 import DocumentReviewCard from './components/DocumentReviewCard';
+import VisualLearningPanel from './components/VisualLearningPanel';
+import EmbeddingPickerModal from './components/EmbeddingPickerModal';
 import useI18n, { t as _t } from './locales/useI18n';
 
 const taskProgressDebugEnabled = typeof window !== 'undefined'
@@ -345,25 +378,50 @@ function mergeDraftText(current, addition) {
   return `${left}\n${right}`;
 }
 
+function adapterField(adapter, camel, pascal, fallback = '') {
+  if (!adapter) return fallback;
+  const value = adapter[camel] ?? adapter[pascal];
+  return value == null ? fallback : value;
+}
+
+function adapterKey(adapter) {
+  return adapterField(adapter, 'id', 'ID', '') || adapterField(adapter, 'name', 'Name', '');
+}
+
+function normalizeAdapterDTO(adapter) {
+  if (!adapter) return adapter;
+  return {
+    ...adapter,
+    id: adapterField(adapter, 'id', 'ID', ''),
+    name: adapterField(adapter, 'name', 'Name', ''),
+    icon: adapterField(adapter, 'icon', 'Icon', ''),
+    path: adapterField(adapter, 'path', 'Path', ''),
+    endpoint: adapterField(adapter, 'endpoint', 'Endpoint', ''),
+    model: adapterField(adapter, 'model', 'Model', ''),
+    kind: adapterField(adapter, 'kind', 'Kind', ''),
+    status: adapterField(adapter, 'status', 'Status', 'offline'),
+  };
+}
+
 function isSubagentAdapter(adapter) {
-  return String(adapter?.kind || '').toLowerCase() === 'sub';
+  return String(adapterField(adapter, 'kind', 'Kind', '')).toLowerCase() === 'sub';
 }
 
 function orderSubagentTabsByTabOrder(tabs, tabOrder) {
   if (!Array.isArray(tabs)) return [];
   const rank = new Map((tabOrder?.sub_order || []).map((id, index) => [id, index]));
   return [...tabs].sort((a, b) => {
-    const aKey = a.id || a.name;
-    const bKey = b.id || b.name;
+    const aKey = adapterKey(a);
+    const bKey = adapterKey(b);
     const aRank = rank.has(aKey) ? rank.get(aKey) : Number.MAX_SAFE_INTEGER;
     const bRank = rank.has(bKey) ? rank.get(bKey) : Number.MAX_SAFE_INTEGER;
     if (aRank !== bRank) return aRank - bRank;
-    return String(a.name || a.id || '').localeCompare(String(b.name || b.id || ''), 'zh-Hant');
+    return String(adapterField(a, 'name', 'Name', '') || adapterKey(a)).localeCompare(String(adapterField(b, 'name', 'Name', '') || adapterKey(b)), 'zh-Hant');
   });
 }
 
 function splitAvailableAdapters(adapters, tabOrder) {
-  const items = Array.isArray(adapters) ? adapters : [];
+  const items = Array.isArray(adapters) ? adapters.map(normalizeAdapterDTO) : [];
   return {
     cliAdapters: items.filter((item) => !isSubagentAdapter(item)),
     subagentTabs: orderSubagentTabsByTabOrder(items.filter(isSubagentAdapter), tabOrder),
@@ -373,7 +431,7 @@ function splitAvailableAdapters(adapters, tabOrder) {
 function reorderItemsByKeys(items, orderKeys) {
   const source = Array.isArray(items) ? items : [];
   const order = Array.isArray(orderKeys) ? orderKeys : [];
-  const byKey = new Map(source.map((item) => [item.id || item.name, item]));
+  const byKey = new Map(source.map((item) => [adapterKey(item), item]));
   const used = new Set();
   const next = [];
   for (const key of order) {
@@ -383,7 +441,7 @@ function reorderItemsByKeys(items, orderKeys) {
     }
   }
   for (const item of source) {
-    const key = item.id || item.name;
+    const key = adapterKey(item);
     if (!used.has(key)) next.push(item);
   }
   return next;
@@ -513,6 +571,7 @@ const fallbackReviewState = {
     targetPaths: [],
     diff: [],
     expiresIn: '',
+    source: '',
   },
   lowRiskAmbiguity: {
     id: '',
@@ -579,7 +638,17 @@ function createDagRunFromMessage(text) {
 }
 
 function shouldCreateDagRun(text) {
-  return text.length >= 8 || dagTaskPattern.test(text);
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  // Auto-DAG runs only after an explicit internal/LLM route. Natural language
+  // must reach the LLM first so it can choose chat, search, saved operation, or DAG.
+  return /^\/dag\b/i.test(raw) || /^#dag\b/i.test(raw);
+}
+
+function shouldHandleLearningShortcutBeforeLLM() {
+  // Keep replay/catalog as LLM-routed tools. The frontend may execute the model's
+  // directive later, but it should not classify natural language before the LLM.
+  return false;
 }
 
 function getField(source, camelName, snakeName, fallback = '') {
@@ -598,7 +667,36 @@ function normalizeTaskStatus(status) {
 }
 
 function isTaskProgressActive(run) {
-  return ['starting', 'running', 'waiting_review', 'blocked'].includes(run?.status);
+  return ['starting', 'planning', 'running', 'waiting_review', 'blocked'].includes(run?.status);
+}
+
+function shouldKeepNewerTaskRun(current, incoming) {
+  if (!current || !incoming || current.id !== incoming.id) return false;
+  const incomingEarly = ['planning', 'running'].includes(incoming.status);
+  const currentAdvanced = ['waiting_review', 'completed', 'cancelled', 'failed', 'interrupted'].includes(current.status);
+  return incomingEarly && currentAdvanced;
+}
+
+function plannerClarificationFromError(error) {
+  const raw = String(error?.message || error || '').replace(/^Error:\s*/i, '').trim();
+  if (!raw) return '';
+  const candidate = raw.replace(/^任務規劃失敗：\s*/, '').trim();
+  const lower = candidate.toLowerCase();
+  const hasQuestion = candidate.includes('?') || candidate.includes('？');
+  const hasAsk = [
+    '請提供', '請告訴', '請確認', '我需要知道', '需要知道', '以下幾點',
+    '哪個檔案', '哪個文件', '什麼格式', '什麼內容', '更多資訊',
+  ].some((needle) => candidate.includes(needle)) || [
+    'please provide', 'please clarify', 'need to know', 'which file',
+    'what format', 'more information', 'additional information',
+  ].some((needle) => lower.includes(needle));
+  const hasBlocker = [
+    '無法', '不能', '資訊不足', '資料不足', '不清楚', '太模糊', '缺少',
+    '沒有更多資訊', '沒有足夠資訊',
+  ].some((needle) => candidate.includes(needle)) || [
+    'cannot', "can't", 'unable', 'ambiguous', 'lack', 'not enough information',
+  ].some((needle) => lower.includes(needle));
+  return (hasAsk && hasBlocker) || (hasQuestion && hasAsk) ? candidate : '';
 }
 
 function mapBackendTaskRun(rawRun) {
@@ -606,6 +704,7 @@ function mapBackendTaskRun(rawRun) {
   const nodes = (rawRun.nodes || rawRun.Nodes || []).map((node) => {
     const status = normalizeTaskStatus(getField(node, 'status', 'status', 'queued'));
     const risk = getField(node, 'riskClass', 'risk_class', getField(node, 'risk', 'risk', 'low'));
+    const modelRisk = getField(node, 'modelRiskClass', 'model_risk_class', risk);
     return {
       id: getField(node, 'id', 'id'),
       title: getField(node, 'title', 'title', getField(node, 'operation', 'operation', '任務步驟')),
@@ -614,6 +713,7 @@ function mapBackendTaskRun(rawRun) {
       tool: getField(node, 'executorType', 'executor_type', getField(node, 'tool', 'tool', '')),
       target: getField(node, 'target', 'target', ''),
       risk,
+      modelRisk,
       status,
       reviewId: getField(node, 'reviewId', 'review_id', ''),
       startedAt: getField(node, 'startedAt', 'started_at', ''),
@@ -647,6 +747,15 @@ function mapBackendTaskRun(rawRun) {
   };
 }
 
+function formatNodeRiskLabel(node) {
+  const finalRisk = node?.risk || 'unknown';
+  const modelRisk = node?.modelRisk || finalRisk;
+  if (modelRisk && modelRisk !== finalRisk) {
+    return `系統判定 ${finalRisk} / 模型 ${modelRisk}`;
+  }
+  return finalRisk;
+}
+
 function formatDagTime(value) {
   if (!value) return '--:--:--';
   return new Date(value).toLocaleTimeString('zh-TW', {hour12: false});
@@ -656,6 +765,7 @@ function formatDagTime(value) {
 function dagStatusLabel(status) {
   const labels = {
     starting: _t('dag.starting'),
+    planning: '規劃中',
     running: _t('dag.running'),
     queued: _t('dag.queued'),
     completed: _t('dag.completed'),
@@ -710,6 +820,169 @@ function replaceComposerPendingMessage(messages, traceId, replacement) {
   return next;
 }
 
+const visualLearningInteractiveSelector = [
+  'button',
+  'a[href]',
+  'input',
+  'select',
+  'textarea',
+  '[role="button"]',
+  '[role="link"]',
+  '[data-vl-target]',
+].join(',');
+
+const learningReplayBlockedSelector = [
+  '.rail-mode-record',
+  '.sandbox-stop-overlay',
+  '.reference-embed-popup',
+].join(',');
+
+const learningRecordingBlockedSelector = [
+  '.rail-mode-record',
+  '.sandbox-stop-overlay',
+  '.reference-embed-popup',
+].join(',');
+
+const visualReplayLastDemoDirective = '[[控制:回放剛剛示範]]';
+const legacyVisualReplayLastDemoDirective = '[[visual_replay:last_demo]]';
+const visualReplayTaggedDirectivePattern = /\[\[控制:回放示範\s+tag=([a-zA-Z0-9_.:-]+)\]\]/;
+const learningReplayStepDelayMs = 950;
+
+function compactLearningText(value, fallback = '') {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  return text ? text.slice(0, 120) : fallback;
+}
+
+function cssEscapeIdent(value) {
+  if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(value);
+  return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+}
+
+function buildLearningSelector(element) {
+  if (!element || element.nodeType !== 1) return '';
+  if (element.id) return `#${cssEscapeIdent(element.id)}`;
+  const parts = [];
+  let node = element;
+  while (node && node.nodeType === 1 && parts.length < 4) {
+    const tag = node.tagName.toLowerCase();
+    let part = tag;
+    const dataAttr = node.getAttribute('data-testid') ? 'data-testid' : node.getAttribute('data-vl-target') ? 'data-vl-target' : '';
+    const testId = dataAttr ? node.getAttribute(dataAttr) : '';
+    if (testId) {
+      part += `[${dataAttr}="${String(testId).replace(/"/g, '\\"')}"]`;
+      parts.unshift(part);
+      break;
+    }
+    if (node.classList?.length) {
+      part += `.${Array.from(node.classList).slice(0, 2).map(cssEscapeIdent).join('.')}`;
+    }
+    const parent = node.parentElement;
+    if (parent) {
+      const siblings = Array.from(parent.children).filter((child) => child.tagName === node.tagName);
+      if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(node) + 1})`;
+    }
+    parts.unshift(part);
+    node = parent;
+  }
+  return parts.join(' > ');
+}
+
+function describeLearningTarget(rawTarget) {
+  const element = rawTarget?.nodeType === 1 ? rawTarget : rawTarget?.parentElement;
+  const interactive = element?.closest?.(visualLearningInteractiveSelector) || element;
+  const rect = interactive?.getBoundingClientRect?.();
+  const tag = interactive?.tagName?.toLowerCase?.() || '';
+  const role = interactive?.getAttribute?.('role') || (tag === 'a' ? 'link' : tag);
+  const label = compactLearningText(
+    interactive?.getAttribute?.('aria-label') ||
+    interactive?.getAttribute?.('title') ||
+    interactive?.innerText ||
+    interactive?.value ||
+    interactive?.placeholder ||
+    tag,
+    tag || 'element',
+  );
+  return {
+    element: interactive,
+    label,
+    role,
+    tag,
+    selector: buildLearningSelector(interactive),
+    rect: rect ? {
+      x: Number(rect.x.toFixed(2)),
+      y: Number(rect.y.toFixed(2)),
+      width: Number(rect.width.toFixed(2)),
+      height: Number(rect.height.toFixed(2)),
+    } : null,
+  };
+}
+
+function buildLearningWindowsAnchor(clickX, clickY, rect, viewport) {
+  const width = Math.max(1, Math.round(Number(viewport?.width || window.innerWidth || 1)));
+  const height = Math.max(1, Math.round(Number(viewport?.height || window.innerHeight || 1)));
+  const click = {
+    x: clampReplayCoordinate(Math.round(Number(clickX || 0)), 0, width - 1),
+    y: clampReplayCoordinate(Math.round(Number(clickY || 0)), 0, height - 1),
+  };
+  if (rect && Number(rect.width) > 0 && Number(rect.height) > 0) {
+    const box = clampLearningBBox({
+      x: Math.round(Number(rect.x || 0)),
+      y: Math.round(Number(rect.y || 0)),
+      w: Math.round(Number(rect.width || 0)),
+      h: Math.round(Number(rect.height || 0)),
+    }, width, height);
+    return {
+      platform: 'windows',
+      ok: true,
+      mode: 'dom_rect_anchor',
+      reason: 'in-app DOM element rect captured during learning; YOLO/OpenCV screenshot resolver was not required',
+      click,
+      execution_point: {
+        x: Math.round(box.x + box.w / 2),
+        y: Math.round(box.y + box.h / 2),
+      },
+      execution_hint: 'click_bbox_center',
+      anchor_bbox: box,
+      crop_bbox: box,
+      ocr_status: 'not_used',
+      ocr_note: 'OCR is optional and not used for this recorded DOM anchor.',
+      detector_backend: 'dom',
+      detector_degraded: false,
+      needs_review: false,
+    };
+  }
+  const box = clampLearningBBox({
+    x: click.x - 14,
+    y: click.y - 14,
+    w: 28,
+    h: 28,
+  }, width, height);
+  return {
+    platform: 'windows',
+    ok: true,
+    mode: 'manual_click_box',
+    reason: 'no element rectangle was available during learning; preserving the click as a small manual anchor',
+    click,
+    execution_point: click,
+    execution_hint: 'fast_click_original_point',
+    anchor_bbox: box,
+    crop_bbox: box,
+    ocr_status: 'not_used',
+    ocr_note: 'OCR is optional and not used for this recorded manual anchor.',
+    detector_backend: 'dom',
+    detector_degraded: true,
+    needs_review: true,
+  };
+}
+
+function clampLearningBBox(box, width, height) {
+  const w = clampReplayCoordinate(Math.max(1, Math.round(Number(box.w || 1))), 1, width);
+  const h = clampReplayCoordinate(Math.max(1, Math.round(Number(box.h || 1))), 1, height);
+  const x = clampReplayCoordinate(Math.round(Number(box.x || 0)), 0, Math.max(0, width - w));
+  const y = clampReplayCoordinate(Math.round(Number(box.y || 0)), 0, Math.max(0, height - h));
+  return { x, y, w, h };
+}
+
 function App() {
   /* i18n: component hook */
   const t = useI18n(s => s.t);
@@ -730,6 +1003,8 @@ function App() {
   const [referenceExportDialog, setReferenceExportDialog] = useState(null);
   const [referenceLinkOpen, setReferenceLinkOpen] = useState(false);
   const [referenceLinkValue, setReferenceLinkValue] = useState('');
+  const referenceInternalDragRef = useRef(false);
+  const referenceDropSuppressUntilRef = useRef(0);
   const [settingsState, setSettingsState] = useState(fallbackSettings);
   const [tools, setTools] = useState(getFallbackTools());
   const [toolResult, setToolResult] = useState(null);
@@ -806,6 +1081,9 @@ function App() {
   const [linkPreviewError, setLinkPreviewError] = useState('');
   const [linkPreviewSuggestions, setLinkPreviewSuggestions] = useState([]);
   const [llmAPISetup, setLlmAPISetup] = useState(null);
+  const [webSearchConfig, setWebSearchConfig] = useState(null);
+  const [webSearchSetup, setWebSearchSetup] = useState(null);
+  const [webSearchSetupError, setWebSearchSetupError] = useState('');
   const [adapterRenameTarget, setAdapterRenameTarget] = useState(null);
   const [adapterRenameDraft, setAdapterRenameDraft] = useState('');
   const [llmAPISetupGuideStep, setLlmAPISetupGuideStep] = useState(0);
@@ -816,7 +1094,17 @@ function App() {
   // --- 遺留能力 #1–#8 state ---
   // #1 Adapter Registry: 從 Go service 取得的即時 adapter 列表與狀態
   const [adapterList, setAdapterList] = useState([]);
+  // §M-1 adapter model 雙擊彈窗：choices = {adapterID: model}, options = {adapterID: [model...]}
+  const [adapterModelChoices, setAdapterModelChoices] = useState({});
+  const [adapterModelOptions, setAdapterModelOptions] = useState({});
   const [subagentTabs, setSubagentTabs] = useState([]);
+  const [subExportCapabilities, setSubExportCapabilities] = useState({
+    platform: '',
+    native_drag_supported: false,
+    native_drag_strategy: 'fallback_directory',
+    fallback_supported: true,
+    message: '',
+  });
   const [summaryModelSettings, setSummaryModelSettings] = useState(null);
   const [voiceState, setVoiceState] = useState(null);
   const [voiceRecording, setVoiceRecording] = useState(false);
@@ -833,6 +1121,7 @@ function App() {
   const [subImportResult, setSubImportResult] = useState(null);
   // 目前使用者選中的 adapter（點擊按鈕亮框）
   const [activeAdapterId, setActiveAdapterId] = useState(null);
+  const [activeHaoraId, setActiveHaoraId] = useState(null);
   const activeAdapterIdRef = useRef(null);
   const adapterListRef = useRef([]);
   const subagentTabsRef = useRef([]);
@@ -841,7 +1130,7 @@ function App() {
   subagentTabsRef.current = subagentTabs || [];
   // 只有選到 sub tab 時才切對話；選左側 CLI adapter 仍留在 main。
   const activeSubagentForConversation = (subagentTabs || []).find((tab) => (
-    activeAdapterId && (tab.id === activeAdapterId || tab.name === activeAdapterId)
+    activeHaoraId && (tab.id === activeHaoraId || tab.name === activeHaoraId)
   ));
   const activeConversationId = activeSubagentForConversation?.id || 'main';
   const activeConversationIdRef = useRef('main');
@@ -871,6 +1160,105 @@ function App() {
   const [vlActiveLearningRun, setVlActiveLearningRun] = useState(null);
   const [vlPendingCount, setVlPendingCount] = useState(0);
   const [vlHasBlocking, setVlHasBlocking] = useState(false);
+  const [vlMonitorOpen, setVlMonitorOpen] = useState(false);
+  const [vlRecentLearningEvents, setVlRecentLearningEvents] = useState([]);
+  // §M3 Embedding picker：拖入第一份文件時若沒設定 embed model，後端會發 embedding:config_missing
+  const [embeddingPickerTarget, setEmbeddingPickerTarget] = useState(null); // {displayName} 或 null
+  // §M3+ 雙擊引用文件 → 顯示 embedding 狀態 popup
+  const [refEmbedPopup, setRefEmbedPopup] = useState(null); // {file, rect, config} 或 null
+  useEffect(() => {
+    const off = EventsOn('embedding:config_missing', (payload) => {
+      setEmbeddingPickerTarget({displayName: payload?.displayName || ''});
+    });
+    return () => { off && off(); };
+  }, []);
+  useEffect(() => {
+    if (!refEmbedPopup) return;
+    const close = (ev) => {
+      if (ev.target?.closest?.('.reference-embed-popup')) return;
+      setRefEmbedPopup(null);
+    };
+    const esc = (ev) => { if (ev.key === 'Escape') setRefEmbedPopup(null); };
+    window.addEventListener('mousedown', close);
+    window.addEventListener('keydown', esc);
+    return () => {
+      window.removeEventListener('mousedown', close);
+      window.removeEventListener('keydown', esc);
+    };
+  }, [refEmbedPopup]);
+  useEffect(() => {
+    if (!vlLearningActive) return undefined;
+    const handleLearningClick = (event) => {
+      if (learningReplayExecutingRef.current) return;
+      const target = event.target;
+      if (target?.closest?.(learningRecordingBlockedSelector)) return;
+
+      const described = describeLearningTarget(target);
+      const eventId = `vl-click-${Date.now()}-${Math.round(event.clientX)}-${Math.round(event.clientY)}`;
+      const viewport = {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        device_scale: window.devicePixelRatio || 1,
+      };
+      const payload = {
+        timestamp: new Date().toISOString(),
+        event_type: 'click',
+        x: Math.round(event.clientX),
+        y: Math.round(event.clientY),
+        button: event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left',
+        target_region_id: eventId,
+        target_label: described.label,
+        target_role: described.role,
+        target_tag: described.tag,
+        css_selector: described.selector,
+        target_rect: described.rect,
+        viewport,
+        windows_anchor: buildLearningWindowsAnchor(
+          Math.round(event.clientX),
+          Math.round(event.clientY),
+          described.rect,
+          viewport
+        ),
+      };
+      const recent = {
+        id: eventId,
+        label: payload.target_label,
+        role: payload.target_role,
+        selector: payload.css_selector,
+        x: payload.x,
+        y: payload.y,
+        saved: false,
+        error: '',
+      };
+      setVlRecentLearningEvents((items) => [recent, ...items].slice(0, 8));
+      callWails(() => RecordLearningMouseEvent(JSON.stringify(payload)))
+        .then(() => {
+          setVlRecentLearningEvents((items) => items.map((item) => (
+            item.id === eventId ? {...item, saved: true} : item
+          )));
+        })
+        .catch((error) => {
+          setVlRecentLearningEvents((items) => items.map((item) => (
+            item.id === eventId ? {...item, error: error?.message || String(error)} : item
+          )));
+        });
+    };
+    window.addEventListener('click', handleLearningClick, true);
+    return () => window.removeEventListener('click', handleLearningClick, true);
+  }, [vlLearningActive]);
+  const handleReferenceCardDoubleClick = async (file, rect) => {
+    try {
+      const cfg = await GetEmbeddingConfig();
+      setRefEmbedPopup({file, rect, config: cfg || {}});
+    } catch (_) {
+      setRefEmbedPopup({file, rect, config: {}});
+    }
+  };
+  // §M3+ 失敗 reference entry：拖到 panel 外面 → 從前端 state 移除（後端沒有實檔可刪）
+  const handleReferenceFailedRemove = (key) => {
+    if (!key) return;
+    setReferenceFiles((current) => current.filter((f) => referenceFileKey(f) !== key));
+  };
   // v3.6: Avatar 後端狀態
   const [currentAvatar, setCurrentAvatar] = useState(null);
   const [avatarConfigs, setAvatarConfigs] = useState({});
@@ -881,6 +1269,8 @@ function App() {
   const [avatarClock, setAvatarClock] = useState(Date.now());
   const [windowInactive, setWindowInactive] = useState(() => typeof document !== 'undefined' ? document.hidden : false);
   const appStartedAtRef = useRef(Date.now());
+  const learningReplayExecutingRef = useRef(false);
+  const [pendingLearningReplayConfirm, setPendingLearningReplayConfirm] = useState(null);
   const [renderedPixelAvatars, setRenderedPixelAvatars] = useState({});
   const [staticAvatarPreviews, setStaticAvatarPreviews] = useState({});
   // v3.6: Memory Pipeline 狀態
@@ -909,6 +1299,8 @@ function App() {
   const [snoozeHours, setSnoozeHours] = useState(4);
   // I-7: DAG run front-end mirror; backend Hook Run is attached once a task is created.
   const [dagRun, setDagRun] = useState(null);
+  const dagRunRef = useRef(null);
+  const [pendingTaskReview, setPendingTaskReview] = useState(null);
   // #I-805: Sidecar 狀態追蹤 — 已移至上方（502 行），統一用字串格式。
   // 舊版用 {status, error} object，現在統一為 'unknown' | 'idle' | 'running' | 'crashed' | 'start_failed'。
 
@@ -929,6 +1321,7 @@ function App() {
   // #I-207: 初次使用說明卡——後端 settings 持久化旗標
   const [skillFirstUseExplained, setSkillFirstUseExplained] = useState(true); // 預設 true 避免閃爍
   const [showSkillFirstUseCard, setShowSkillFirstUseCard] = useState(false);
+  const [skillExecutionConfirm, setSkillExecutionConfirm] = useState(null);
 
   // I-3: Controlled Trust
   const [activeSandboxId, setActiveSandboxId] = useState(null);
@@ -1016,6 +1409,45 @@ function App() {
     return {cliAdapters, subagentTabs: nextSubagentTabs};
   }
 
+  useEffect(() => {
+    let cancelled = false;
+    callWails(GetSubExportCapabilities)
+      .then((capabilities) => {
+        if (!cancelled && capabilities) setSubExportCapabilities(capabilities);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  // §M-1 載入 adapter model 偏好 + 候選清單。adapterList 變動時重新查一次。
+  useEffect(() => {
+    if (!adapterList || adapterList.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const choices = await callWails(GetAdapterModelChoices).catch(() => ({}));
+        if (cancelled) return;
+        setAdapterModelChoices(choices || {});
+        const out = {};
+        for (const a of adapterList) {
+          const id = a.id || a.name;
+          if (!id) continue;
+          const opts = await callWails(() => ListAdapterModelOptions(id)).catch(() => null);
+          if (Array.isArray(opts) && opts.length > 0) out[id] = opts;
+        }
+        if (!cancelled) setAdapterModelOptions(out);
+      } catch (_) { /* silent — badge 只是輔助，失敗不要中斷 UI */ }
+    })();
+    return () => { cancelled = true; };
+  }, [adapterList]);
+
+  // §M-1 套用 adapter 的 model 選擇（picker 點按時呼叫）。
+  const handleAdapterModelPick = async (adapterID, model) => {
+    if (!adapterID || !model) return;
+    setAdapterModelChoices((prev) => ({...prev, [adapterID]: model}));
+    try { await callWails(() => SetAdapterModelChoice(adapterID, model)); } catch (_) {}
+  };
+
   // Learning mode waits for an idle window before surfacing a digest-ready hint.
   useEffect(() => {
     callWails(GetConsoleState)
@@ -1081,6 +1513,9 @@ function App() {
     callWails(GetVoiceSettings)
       .then((settings) => setVoiceState(settings || null))
       .catch(() => setVoiceState(null));
+    callWails(GetWebSearchConfig)
+      .then((config) => setWebSearchConfig(config || null))
+      .catch(() => setWebSearchConfig({configured: false, options: defaultWebSearchProviderOptions()}));
     callWails(ScanLocalSummaryModels)
       .then((result) => setSummaryModelScan(result || {options: [], message: ''}))
       .catch(() => setSummaryModelScan({options: [], message: t('settings.noLocalModelDetected')}));
@@ -1197,6 +1632,12 @@ function App() {
           t('system.authBrowserConfirm', { adapter: payload.adapter_id || 'CLI', url: payload.auth_hostname || payload.auth_url || t('common.unknown') }),
         ]);
       }
+    });
+
+    const offWebSearchConfigRequired = EventsOn('web_search:config_required', (payload) => {
+      const config = payload || {configured: false, options: defaultWebSearchProviderOptions()};
+      setWebSearchConfig(config);
+      openWebSearchSetup(config);
     });
 
     // DAG 事件 → 更新 dagRun 狀態
@@ -1438,6 +1879,7 @@ function App() {
       offExecInterrupted();
       offSidecarState();
       offCLIAuth();
+      offWebSearchConfigRequired();
       offDigestArchived();
       offRBRegistered();
       offRBActivated();
@@ -1577,6 +2019,7 @@ function App() {
             targetPaths: result.targetPaths || result.target_paths || [],
             diff: result.predictedDiff || result.predicted_diff || [],
             expiresIn: result.expiresIn || '05:00',
+            source: 'skill',
           },
         }));
       } else if (result.status === 'needs_cli_candidate') {
@@ -1625,8 +2068,171 @@ function App() {
         ...prev,
         highRisk: {...prev.highRisk, status: 'approved'},
       }));
+      setPendingTaskReview(null);
     } catch {
       /* best-effort */
+    }
+  }
+
+  async function finishComposerExecution({resp, payload, apiAdapter, traceId, conversationId, clearPendingTimers}) {
+    clearPendingTimers?.();
+    const cliResp = await applyComposerBuiltInSideEffects(normalizeCLIResponse(resp));
+    console.log('[CLI_MONITOR] frontend raw resp -> normalized', {traceId, resp, cliResp});
+    postDebugTrace(apiAdapter ? 'ui.composer.after.SendAPIMessage' : 'ui.composer.after.SendCLIMessage', traceId, {response: cliResp || null});
+    refreshReadinessGateState();
+    setChatCliLog((prev) => ({
+      ...(prev || {payload}),
+      status: cliResp?.error ? 'error' : 'done',
+      response: cliResp || null,
+      error: cliResp?.error || null,
+      finished_at: new Date().toISOString(),
+    }));
+    const visualReplayDirective = extractVisualReplayDirective(cliResp?.text);
+    if (!cliResp?.auth_required && !cliResp?.error && visualReplayDirective.shouldReplay) {
+      const modelText = visualReplayDirective.text;
+      if (modelText) {
+        setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, `Ai:${modelText}`));
+        persistConversationEntry(conversationId, 'assistant', modelText, traceId).catch(() => {});
+      }
+      try {
+        const plan = visualReplayDirective.tag
+          ? await callWails(() => GetLearningReplayPlan(visualReplayDirective.tag))
+          : await callWails(GetLastLearningReplayPlan);
+        const message = formatLearningReplayPlan(plan);
+        setConversationMessages(conversationId, (prev) => (
+          modelText ? [...prev, message] : replaceComposerPendingMessage(prev, traceId, message)
+        ));
+        persistConversationEntry(conversationId, 'assistant', message.replace(/^Ai:/, ''), traceId).catch(() => {});
+        await executeLearningReplayWithChat(plan, conversationId, traceId);
+      } catch (err) {
+        const errorMessage = `Ai:我收到 replay 指令，但讀不到上一段示範：${err?.message || String(err)}`;
+        setConversationMessages(conversationId, (prev) => (
+          modelText ? [...prev, errorMessage] : replaceComposerPendingMessage(prev, traceId, errorMessage)
+        ));
+      }
+      return;
+    }
+    const operationIntent = operationIntentFromCLIResponse(cliResp);
+    if (!cliResp?.auth_required && !cliResp?.error && operationIntent) {
+      postDebugTrace('ui.composer.learning_operation_intent', traceId, {
+        ...operationIntent,
+        source: 'cli_response',
+      });
+      await executeLearningOperationIntent(operationIntent, {conversationId, traceId});
+      return;
+    }
+    if (cliResp?.auth_required) {
+      setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, `Ai:${cliResp.text || t('system.authRequired')}`));
+    } else if (cliResp?.text) {
+      setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, `Ai:${cliResp.text}`));
+      persistConversationEntry(conversationId, 'assistant', cliResp.text, traceId).catch(() => {});
+    } else if (cliResp?.error) {
+      setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, `[${t('system.sysLabel')}] ${cliResp.error}`));
+    }
+  }
+
+  async function executeLearningOperationIntent(operationIntent, {conversationId, traceId}) {
+    try {
+      const items = await callWails(() => SearchLearningOperations(
+        operationIntent.query,
+        operationIntent.mode === 'query' ? 8 : 5,
+      ));
+      const matches = Array.isArray(items) ? items : [];
+      if (operationIntent.mode === 'query') {
+        const message = formatLearningOperationSearchResults(operationIntent.query, matches);
+        setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, message));
+        persistConversationEntry(conversationId, 'assistant', message.replace(/^Ai:/, ''), traceId).catch(() => {});
+        return;
+      }
+      const resolved = resolveLearningOperationMatch(matches);
+      if (!resolved) {
+        const message = formatLearningOperationSearchResults(operationIntent.query, matches, true);
+        setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, message));
+        persistConversationEntry(conversationId, 'assistant', message.replace(/^Ai:/, ''), traceId).catch(() => {});
+        return;
+      }
+      const plan = await callWails(() => GetLearningReplayPlan(resolved.tag || resolved.run_id));
+      const message = formatLearningReplayPlan(plan);
+      setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, message));
+      persistConversationEntry(conversationId, 'assistant', message.replace(/^Ai:/, ''), traceId).catch(() => {});
+      await executeLearningReplayWithChat(plan, conversationId, traceId);
+    } catch (err) {
+      const message = `Ai:我找不到符合「${operationIntent.query}」的已保存操作：${err?.message || String(err)}`;
+      setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, message));
+    }
+  }
+
+  async function enrichStoppedLearningRun(run, traceId) {
+    const runId = run?.id || run?.run_id || '';
+    if (!runId) return run;
+    const adapter = resolveActiveAdapter();
+    const adapterId = adapter?.id || activeAdapterId || '';
+    const sessionId = appSessionId || '';
+    try {
+      postDebugTrace('ui.learning_metadata.generate.request', traceId, {
+        run_id: runId,
+        adapter_id: adapterId,
+      });
+      const enriched = await callWails(() => GenerateLearningRunMetadata(adapterId, sessionId, runId, traceId));
+      postDebugTrace('ui.learning_metadata.generate.ok', traceId, {
+        run_id: enriched?.id || enriched?.run_id || runId,
+        operation_tag: enriched?.operation_tag || '',
+        title: enriched?.title || enriched?.name || '',
+      });
+      return enriched || run;
+    } catch (err) {
+      postDebugTrace('ui.learning_metadata.generate.error', traceId, {
+        run_id: runId,
+        error: err?.message || String(err),
+      });
+      return run;
+    }
+  }
+
+  function failComposerExecution({err, payload, apiAdapter, adapter, traceId, conversationId, clearPendingTimers}) {
+    clearPendingTimers?.();
+    postDebugTrace(apiAdapter ? 'ui.composer.SendAPIMessage.error' : 'ui.composer.SendCLIMessage.error', traceId, {error: err?.message || String(err)});
+    const rawErrorMsg = err?.message || String(err);
+    const errorMsg = apiAdapter && String(adapter?.kind || '').toLowerCase() === 'local'
+      ? t('system.localModelBlocked', { name: adapter?.name || t('settings.localModelDefault'), error: rawErrorMsg })
+      : rawErrorMsg;
+    setChatCliLog((prev) => ({
+      ...(prev || {payload}),
+      status: 'error',
+      response: null,
+      error: errorMsg,
+      finished_at: new Date().toISOString(),
+    }));
+    setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, t('system.sendFail', { error: errorMsg })));
+  }
+
+  async function confirmSkillExecutionChoice(choice) {
+    const pending = skillExecutionConfirm;
+    if (!pending) return;
+    if (choice === 'cancel') {
+      pending.clearPendingTimers?.();
+      setConversationMessages(pending.conversationId, (prev) => replaceComposerPendingMessage(prev, pending.traceId, t('common.cancel')));
+      setSkillExecutionConfirm(null);
+      return;
+    }
+    setSkillExecutionConfirm(null);
+    try {
+      const decision = await callWails(() => ConfirmAndExecuteSkillExecution(
+        pending.resolveId,
+        pending.sessionId,
+        choice,
+        pending.adapterId,
+        pending.userText,
+        pending.traceId,
+      ));
+      if (decision?.response) {
+        await finishComposerExecution({...pending, resp: decision.response});
+      } else if (decision?.message) {
+        pending.clearPendingTimers?.();
+        setConversationMessages(pending.conversationId, (prev) => replaceComposerPendingMessage(prev, pending.traceId, decision.message));
+      }
+    } catch (err) {
+      failComposerExecution({...pending, err});
     }
   }
 
@@ -1683,20 +2289,51 @@ function App() {
 
   // #I-303 Draft Sandbox — 錄製按鈕啟動 / 停止 / 三選項升格
   async function startDraftSandbox() {
+    const conversationId = activeConversationIdRef.current || 'main';
     try {
       const windowHash = `window-${Date.now()}`;
       const sandboxId = await callWails(() => StartDraftSandbox(windowHash));
       setActiveSandboxId(sandboxId);
+      try {
+        const run = await callWails(() => StartLearningMode(windowHash));
+        setVlActiveLearningRun(run);
+        setVlLearningActive(true);
+        setConversationMessages(conversationId, (prev) => [
+          ...prev,
+          `[系統] 示範開始。${run?.id ? `Run: ${run.id}。` : ''}請操作一次你要教我的流程。`,
+        ]);
+      } catch {
+        setConversationMessages(conversationId, (prev) => [
+          ...prev,
+          '[系統] 示範開始，但 Visual Learning 後端沒有成功啟動記錄。',
+        ]);
+      }
       setRecordingEnabled(true);
       setSandboxStopOptions(null);
     } catch {
-      /* best-effort */
+      setConversationMessages(conversationId, (prev) => [...prev, '[系統] 示範啟動失敗。']);
     }
   }
 
   async function stopDraftSandbox(reason) {
     if (!activeSandboxId) return;
+    const conversationId = activeConversationIdRef.current || 'main';
     try {
+      if (vlLearningActive) {
+        try {
+          const traceId = makeDebugTraceID('learning-metadata');
+          const run = await callWails(StopLearningMode);
+          const namedRun = await enrichStoppedLearningRun(run, traceId);
+          setConversationMessages(conversationId, (prev) => [
+            ...prev,
+            formatLearningOperationLearned(namedRun),
+          ]);
+        } catch {
+          setConversationMessages(conversationId, (prev) => [...prev, '[系統] 示範結束，但後端停止記錄時回報錯誤。']);
+        }
+        setVlLearningActive(false);
+        setVlActiveLearningRun(null);
+      }
       await callWails(() => StopDraftSandbox(activeSandboxId, reason || 'user_stop'));
       setSandboxStopOptions({sandboxId: activeSandboxId, reason: reason || 'user_stop'});
       setRecordingEnabled(false);
@@ -1707,18 +2344,124 @@ function App() {
 
   async function promoteDraft(promotion) {
     if (!sandboxStopOptions) return;
+    const conversationId = activeConversationIdRef.current || 'main';
     try {
       await callWails(() => PromoteDraftToPending(sandboxStopOptions.sandboxId, promotion));
     } catch {
       /* best-effort */
+    }
+    if (promotion === 'formal_review') {
+      let plan = null;
+      try {
+        plan = await callWails(GetLastLearningReplayPlan);
+        const message = formatLearningReplayPlan(plan);
+        setConversationMessages(conversationId, (prev) => [...prev, message]);
+        persistConversationEntry(conversationId, 'assistant', message.replace(/^Ai:/, '')).catch(() => {});
+      } catch (error) {
+        setConversationMessages(conversationId, (prev) => [
+          ...prev,
+          `Ai:我還讀不到上一段示範：${error?.message || String(error)}`,
+        ]);
+      }
+      setSandboxStopOptions(null);
+      setActiveSandboxId(null);
+      if (plan) {
+        await executeLearningReplayWithChat(plan, conversationId);
+      }
+      return;
+    } else if (promotion === 'pending_candidate') {
+      setConversationMessages(conversationId, (prev) => [...prev, '[系統] 已把這次示範存成候選流程。']);
     }
     setSandboxStopOptions(null);
     setActiveSandboxId(null);
   }
 
   function dismissSandboxOptions() {
+    const conversationId = activeConversationIdRef.current || 'main';
+    setConversationMessages(conversationId, (prev) => [...prev, '[系統] 已放棄這次示範。']);
     setSandboxStopOptions(null);
     setActiveSandboxId(null);
+  }
+
+  async function executeLearningReplayWithChat(plan, conversationId, traceId = '') {
+    const steps = Array.isArray(plan?.steps) ? plan.steps : [];
+    if (!steps.length) return;
+    const confirmed = window.confirm(formatLearningReplayConfirmation(plan));
+    if (!confirmed) {
+      const cancelMessage = 'Ai:已取消執行 replay。示範 plan 保留在對話裡，之後可以再輸入「請按照我剛剛的示範」。';
+      setConversationMessages(conversationId, (prev) => [...prev, cancelMessage]);
+      persistConversationEntry(conversationId, 'assistant', cancelMessage.replace(/^Ai:/, ''), traceId).catch(() => {});
+      return;
+    }
+    await delayLearningReplay(350);
+    learningReplayExecutingRef.current = true;
+    try {
+      const result = await executeLearningReplayPlan(plan);
+      const resultMessage = formatLearningReplayExecutionResult(result);
+      setConversationMessages(conversationId, (prev) => [...prev, resultMessage]);
+      persistConversationEntry(conversationId, 'assistant', resultMessage.replace(/^Ai:/, ''), traceId).catch(() => {});
+      if (result?.pending_confirmation) {
+        setPendingLearningReplayConfirm({
+          plan,
+          conversationId,
+          traceId,
+          result,
+          stoppedStepOffset: Math.max(0, result.steps.length - 1),
+          createdAt: Date.now(),
+        });
+      }
+    } finally {
+      learningReplayExecutingRef.current = false;
+    }
+  }
+
+  async function continueLearningReplayAfterConfirm() {
+    const pending = pendingLearningReplayConfirm;
+    if (!pending || learningReplayExecutingRef.current) return;
+    const steps = Array.isArray(pending.plan?.steps) ? pending.plan.steps : [];
+    const previewResult = pending.result?.steps?.[pending.stoppedStepOffset];
+    const originalStep = steps[pending.stoppedStepOffset];
+    if (!originalStep || !previewResult) {
+      setPendingLearningReplayConfirm(null);
+      return;
+    }
+    setPendingLearningReplayConfirm(null);
+    learningReplayExecutingRef.current = true;
+    try {
+      const confirmedStep = {
+        ...originalStep,
+        x: Number.isFinite(Number(previewResult.x)) ? Number(previewResult.x) : originalStep.x,
+        y: Number.isFinite(Number(previewResult.y)) ? Number(previewResult.y) : originalStep.y,
+        windows_anchor: null,
+      };
+      const confirmedResult = await executeLearningReplayStep(confirmedStep);
+      const nextResult = await executeLearningReplayPlan(pending.plan, {
+        startOffset: pending.stoppedStepOffset + 1,
+        initialResults: [
+          ...(pending.result?.steps || []).slice(0, pending.stoppedStepOffset),
+          {...confirmedResult, confirmed_after_preview: true},
+        ],
+      });
+      const message = formatLearningReplayExecutionResult(nextResult);
+      setConversationMessages(pending.conversationId, (prev) => [...prev, message]);
+      persistConversationEntry(pending.conversationId, 'assistant', message.replace(/^Ai:/, ''), pending.traceId).catch(() => {});
+      if (nextResult?.pending_confirmation) {
+        setPendingLearningReplayConfirm({
+          plan: pending.plan,
+          conversationId: pending.conversationId,
+          traceId: pending.traceId,
+          result: nextResult,
+          stoppedStepOffset: Math.max(0, nextResult.steps.length - 1),
+          createdAt: Date.now(),
+        });
+      }
+    } finally {
+      learningReplayExecutingRef.current = false;
+    }
+  }
+
+  function cancelLearningReplayConfirm() {
+    setPendingLearningReplayConfirm(null);
   }
 
   // #I-301 Contextual Risk Override
@@ -1935,10 +2678,12 @@ function App() {
   useEffect(() => {
     try {
       OnFileDrop((x, y, paths) => {
-        if (!paths?.length) return;
-        importReferencePaths(paths);
-        if (shouldProbeDroppedInstallPackage(paths)) {
-          detectDroppedInstallPackage(paths[0]);
+        if (referenceInternalDragRef.current || Date.now() < referenceDropSuppressUntilRef.current) return;
+        const nativePaths = normalizeReferenceImportPaths(paths);
+        if (!nativePaths.length) return;
+        importReferencePaths(nativePaths);
+        if (shouldProbeDroppedInstallPackage(nativePaths)) {
+          detectDroppedInstallPackage(nativePaths[0]);
         }
       }, false);
       return () => OnFileDropOff();
@@ -1946,6 +2691,13 @@ function App() {
       return undefined;
     }
   }, []);
+
+  useEffect(() => {
+    setReferenceFiles((current) => {
+      const cleaned = current.filter((file) => !isInvalidReferencePlaceholder(file));
+      return cleaned.length === current.length ? current : cleaned;
+    });
+  }, [referenceFiles]);
 
   async function detectDroppedInstallPackage(path) {
     try {
@@ -2240,10 +2992,44 @@ function App() {
     }));
   }
 
-  function syncTaskProgressRun(rawRun) {
+  function syncTaskProgressRun(rawRun, options = {}) {
     const mappedRun = mapBackendTaskRun(rawRun);
     if (!mappedRun) return null;
+    const currentRun = dagRunRef.current;
+    if (options.preserveNewer && shouldKeepNewerTaskRun(currentRun, mappedRun)) {
+      return currentRun;
+    }
+    dagRunRef.current = mappedRun;
     setDagRun(mappedRun);
+    if (mappedRun.status !== 'waiting_review') {
+      setPendingTaskReview(null);
+      const reviewIds = new Set((mappedRun.nodes || []).map((node) => node.reviewId).filter(Boolean));
+      if (reviewIds.size > 0) {
+        const nextStatus = mappedRun.status === 'completed' ? 'approved' : 'rejected';
+        setReviewState((prev) => {
+          if (!reviewIds.has(prev.highRisk?.id)) return prev;
+          return {
+            ...prev,
+            highRisk: {
+              ...prev.highRisk,
+              status: nextStatus,
+              expiresIn: '',
+              note: mappedRun.interruptReason || prev.highRisk.note,
+            },
+          };
+        });
+        setReviewPopup((current) => current === 'risk' ? null : current);
+      } else {
+        setReviewState((prev) => {
+          if (prev.highRisk?.source !== 'task_progress') return prev;
+          return {
+            ...prev,
+            highRisk: {...fallbackReviewState.highRisk},
+          };
+        });
+        setReviewPopup((current) => current === 'risk' ? null : current);
+      }
+    }
     return mappedRun;
   }
 
@@ -2251,19 +3037,29 @@ function App() {
     const run = mapBackendTaskRun(rawRun);
     const activeNode = run?.nodes?.find((node) => node.status === 'waiting_review' || node.id === run.currentNodeId);
     if (!run || run.status !== 'waiting_review' || !activeNode?.reviewId) return;
+    const nextReview = {
+      id: activeNode.reviewId,
+      title: activeNode.title || activeNode.action || '需要你確認這一步',
+      action: activeNode.action || activeNode.title || '',
+      impact: activeNode.target || activeNode.action || '目前步驟會執行外部工具或模型。',
+      tool: activeNode.tool || activeNode.actionCode || '目前模型',
+      reason: '執行前需要使用者確認',
+    };
+    setPendingTaskReview(nextReview);
     setReviewState((prev) => ({
       ...prev,
       highRisk: {
-        id: activeNode.reviewId,
+        id: nextReview.id,
         status: 'pending',
         title: '需要你確認這一步',
-        action: activeNode.title || activeNode.action,
-        skillId: activeNode.tool || activeNode.actionCode || '',
+        action: nextReview.title,
+        skillId: nextReview.tool,
         summaryHash: run.hookRunId || activeNode.traceHash || '',
-        permissionSummary: activeNode.target || activeNode.action || '目前步驟會執行外部工具或模型。',
-        targetPaths: [activeNode.target || activeNode.action].filter(Boolean),
+        permissionSummary: nextReview.impact,
+        targetPaths: [nextReview.impact].filter(Boolean),
         diff: [`風險等級：${activeNode.risk || 'high'}`, '執行前需要使用者確認'],
         expiresIn: '等待確認',
+        source: 'task_progress',
       },
     }));
   }
@@ -2319,6 +3115,7 @@ function App() {
         targetPaths: [t('dag.highRiskNodeTarget')],
         diff: ['block: dependent nodes paused', 'await: explicit user confirmation'],
         expiresIn: t('dag.waitingConfirm'),
+        source: 'legacy_dag',
       },
     }));
   }
@@ -2361,7 +3158,7 @@ function App() {
   }
 
   // 任務進度 v1：由後端 DAG runtime 建立、持久化並推送節點狀態。
-  async function startDagForMessage(text) {
+  async function startDagForMessage(text, options = {}) {
     // #5 Degraded Mode guard: 降級時禁止啟動新 DAG run
     if (degradedState.active) {
       setToolResult({toolId: 'dag', ok: false, message: t('dag.degradedPaused')});
@@ -2369,7 +3166,7 @@ function App() {
     }
     const adapter = resolveActiveAdapter();
     const adapterID = adapter?.id || adapter?.name || '';
-    const modelID = adapter?.model_id || adapter?.modelID || adapter?.model || adapterID;
+    const modelID = adapterModelChoices?.[adapterID] || adapter?.model_id || adapter?.modelID || adapter?.model || '';
     const startingRun = {
       id: `task-starting-${Date.now()}`,
       outlineId: '',
@@ -2382,12 +3179,22 @@ function App() {
       currentNodeId: '',
       summaryHash: '',
     };
+    dagRunRef.current = startingRun;
     setDagRun(startingRun);
     setActiveToolTabs((current) => ({...current, left: 'flow'}));
     try {
       const run = await callWails(() => StartTaskProgress(text, adapterID, modelID, appSessionId || ''));
-      syncTaskProgressRun(run);
+      syncTaskProgressRun(run, {preserveNewer: true});
+      if (options.conversationId && options.traceId) {
+        setConversationMessages(options.conversationId, (prev) => replaceComposerPendingMessage(
+          prev,
+          options.traceId,
+          `Ai:任務已開始：${run?.title || '任務進度'}`,
+        ));
+      }
     } catch (error) {
+      const errorMessage = error?.message || String(error);
+      const clarification = plannerClarificationFromError(error);
       setDagRun((current) => current ? {
         ...current,
         status: 'failed',
@@ -2396,16 +3203,25 @@ function App() {
           title: '任務規劃失敗',
           status: 'failed',
           risk: 'low',
-          text: error?.message || String(error),
+          text: errorMessage,
         }],
       } : current);
-      setToolResult({toolId: 'dag', ok: false, message: error?.message || String(error)});
+      if (!clarification) {
+        setToolResult({toolId: 'dag', ok: false, message: errorMessage});
+      }
+      if (options.conversationId && options.traceId) {
+        setConversationMessages(options.conversationId, (prev) => replaceComposerPendingMessage(
+          prev,
+          options.traceId,
+          clarification ? `Ai:${clarification}` : `[${t('system.sysLabel')}] ${errorMessage}`,
+        ));
+      }
     }
   }
 
-  async function cancelActiveTaskProgress() {
+  async function cancelActiveTaskProgress(reason = 'user_stop') {
     try {
-      const run = await callWails(() => CancelActiveTaskProgress('user_stop'));
+      const run = await callWails(() => CancelActiveTaskProgress(reason));
       if (run) syncTaskProgressRun(run);
       await refreshReviewCards();
     } catch (error) {
@@ -2564,6 +3380,7 @@ function App() {
       if (!run) return false;
       syncTaskProgressRun(run);
       setReviewState((prev) => ({...prev, highRisk: {...prev.highRisk, status: 'approved'}}));
+      setPendingTaskReview(null);
       await refreshReviewCards();
       return true;
     } catch {
@@ -2572,27 +3389,26 @@ function App() {
   }
 
   function resolveActiveAdapter() {
-    const allAdapters = [...(adapterList || []), ...(subagentTabs || [])];
-    if (!allAdapters.length) return null;
-    if (!activeAdapterId) return adapterList?.[0] || allAdapters[0];
-    return allAdapters.find((adapter) => adapter.id === activeAdapterId || adapter.name === activeAdapterId) || adapterList?.[0] || allAdapters[0];
+    const adapters = adapterList || [];
+    if (!adapters.length) return null;
+    if (!activeAdapterId) return adapters[0];
+    return adapters.find((adapter) => adapterKey(adapter) === activeAdapterId || adapterField(adapter, 'name', 'Name', '') === activeAdapterId) || adapters[0];
   }
 
   function resolveAdapterFromRefs() {
     const adapters = adapterListRef.current || [];
-    const tabs = subagentTabsRef.current || [];
     const selectedID = activeAdapterIdRef.current;
-    const allAdapters = [...adapters, ...tabs];
-    if (!allAdapters.length) return null;
-    if (!selectedID) return adapters[0] || allAdapters[0];
-    return allAdapters.find((adapter) => adapter.id === selectedID || adapter.name === selectedID) || adapters[0] || allAdapters[0];
+    if (!adapters.length) return null;
+    if (!selectedID) return adapters[0];
+    return adapters.find((adapter) => adapterKey(adapter) === selectedID || adapterField(adapter, 'name', 'Name', '') === selectedID) || adapters[0];
   }
 
   function makeCLIInspectorPayload(adapter, sessionId, userText) {
+    const normalized = normalizeAdapterDTO(adapter);
     return {
-      adapter_id: adapter?.id || activeAdapterId || '',
-      adapter_name: adapter?.name || activeAdapterId || '',
-      cli_path: adapter?.path || 'resolved_by_backend',
+      adapter_id: adapterKey(normalized) || activeAdapterId || '',
+      adapter_name: normalized?.name || activeAdapterId || '',
+      cli_path: normalized?.path || 'resolved_by_backend',
       session_id: sessionId || '',
       user_text: userText,
       skill_injection: skillInjections?.length > 0 ? 'resolved_by_backend' : null,
@@ -2730,16 +3546,11 @@ function App() {
       sent_at: new Date().toISOString(),
     });
     try {
-      const apiAdapter = isAPIAdapter(adapter);
-      postDebugTrace(apiAdapter ? 'ui.inspector.before.SendAPIMessage' : 'ui.inspector.before.SendInspectorMessage', traceId, payload);
-      const resp = await callWails(() => (
-        apiAdapter
-          ? SendAPIMessage(payload.adapter_id, sessionId, escaped || trimmed, traceId)
-          : SendInspectorMessage(payload.adapter_id, sessionId, escaped || trimmed, traceId)
-      ));
+      postDebugTrace('ui.inspector.before.SendTopInteractionMessage', traceId, payload);
+      const resp = await callWails(() => SendTopInteractionMessage(payload.adapter_id, sessionId, escaped || trimmed, traceId));
       const cliResp = normalizeCLIResponse(resp);
       console.log('[CLI_MONITOR] frontend raw resp -> normalized', {traceId, resp, cliResp});
-      postDebugTrace(apiAdapter ? 'ui.inspector.after.SendAPIMessage' : 'ui.inspector.after.SendInspectorMessage', traceId, {response: cliResp || null});
+      postDebugTrace('ui.inspector.after.SendTopInteractionMessage', traceId, {response: cliResp || null});
       console.log('[CLI_MONITOR] frontend cliInspectorLog.response write', {traceId, response: cliResp || null});
       setCliInspectorLog((prev) => ({
         ...(prev || {payload}),
@@ -2864,8 +3675,58 @@ function App() {
     } catch (err) {
       setConversationMessages(conversationId, (prev) => [...prev, t('system.conversationSaveFail', { error: err?.message || err })]);
     }
+    if (shouldHandleLearningShortcutBeforeLLM(text) && isLearningReplayRequest(text)) {
+      clearPendingTimers();
+      postDebugTrace('ui.composer.learning_replay_plan', traceId, {user_text: text});
+      callWails(GetLastLearningReplayPlan)
+        .then(async (plan) => {
+          const message = formatLearningReplayPlan(plan);
+          setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, message));
+          persistConversationEntry(conversationId, 'assistant', message.replace(/^Ai:/, ''), traceId).catch(() => {});
+          await executeLearningReplayWithChat(plan, conversationId, traceId);
+        })
+        .catch((err) => {
+          setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(
+            prev,
+            traceId,
+            `Ai:我還讀不到上一段示範：${err?.message || String(err)}`
+          ));
+      });
+      return;
+    }
+    const operationCatalogRequest = shouldHandleLearningShortcutBeforeLLM(text)
+      ? parseLearningOperationCatalogRequest(text)
+      : null;
+    if (operationCatalogRequest) {
+      clearPendingTimers();
+      postDebugTrace('ui.composer.learning_operation_catalog', traceId, operationCatalogRequest);
+      try {
+        const items = operationCatalogRequest.mode === 'list'
+          ? await callWails(() => ListLearningReplayCatalog(10))
+          : await callWails(() => SearchLearningOperations(operationCatalogRequest.query, 8));
+        const matches = Array.isArray(items) ? items : [];
+        const message = operationCatalogRequest.mode === 'list'
+          ? formatLearningOperationCatalog(matches)
+          : formatLearningOperationSearchResults(operationCatalogRequest.query, matches);
+        setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, message));
+        persistConversationEntry(conversationId, 'assistant', message.replace(/^Ai:/, ''), traceId).catch(() => {});
+      } catch (err) {
+        const message = `Ai:我讀不到已保存操作 catalog：${err?.message || String(err)}`;
+        setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, message));
+      }
+      return;
+    }
     if (shouldCreateDagRun(text)) {
-      startDagForMessage(text);
+      clearPendingTimers();
+      setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(
+        prev,
+        traceId,
+        makeComposerPendingMessage(traceId, '任務規劃中，請稍等。'),
+      ));
+      postDebugTrace('ui.composer.task_progress_only', traceId, {user_text: text});
+      classifySourceInText(text);
+      startDagForMessage(text, {conversationId, traceId});
+      return;
     }
     // v3.6: Source Trust — 若訊息含 URL，自動分類來源並顯示提示
     classifySourceInText(text);
@@ -2897,69 +3758,45 @@ function App() {
         sent_at: new Date().toISOString(),
       });
       runComposerSideEffects(sideEffectEntry, 'user');
-      postDebugTrace(apiAdapter ? 'ui.composer.before.SendAPIMessage' : 'ui.composer.before.SendCLIMessage', traceId, payload);
-      callWails(() => (
-        apiAdapter
-          ? SendAPIMessage(payload.adapter_id, sessionId, escaped || text, traceId)
-          : SendCLIMessage(payload.adapter_id, sessionId, escaped || text, traceId)
-      ))
-        .then(async (resp) => {
-          clearPendingTimers();
-          const cliResp = await applyComposerBuiltInSideEffects(normalizeCLIResponse(resp));
-          console.log('[CLI_MONITOR] frontend raw resp -> normalized', {traceId, resp, cliResp});
-          postDebugTrace(apiAdapter ? 'ui.composer.after.SendAPIMessage' : 'ui.composer.after.SendCLIMessage', traceId, {response: cliResp || null});
-          refreshReadinessGateState();
-          console.log('[CLI_MONITOR] frontend chatCliLog.response write', {traceId, response: cliResp || null});
-          setChatCliLog((prev) => ({
-            ...(prev || {payload}),
-            status: cliResp?.error ? 'error' : 'done',
-            response: cliResp || null,
-            error: cliResp?.error || null,
-            finished_at: new Date().toISOString(),
-          }));
-          if (cliResp?.auth_required) {
-            // CLI 需要瀏覽器授權 — Go 端已開瀏覽器並 emit 事件，
-            // 前端會透過 cli:auth_required 事件訂閱自動彈出授權對話框。
-            // 此處不顯示 cliResp.text（那是授權提示訊息，對話框會處理）。
-            setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, `Ai:${cliResp.text || t('system.authRequired')}`));
-          } else if (cliResp?.text) {
-            setConversationMessages(conversationId, (prev) => {
-              // 下方主聊天回覆只寫入 messages，不更新上方 greeting/statusRail。
-              const next = replaceComposerPendingMessage(prev, traceId, `Ai:${cliResp.text}`);
-              console.log('[CLI_MONITOR] frontend messages write composer', {
-                traceId,
-                prev_len: prev.length,
-                next_len: next.length,
-                appended: `Ai:${cliResp.text}`,
-                next,
-              });
-              return next;
-            });
-            // v3.6: AI 回覆也記錄到 Memory Pipeline
-            persistConversationEntry(conversationId, 'assistant', cliResp.text, traceId).catch(() => {});
-          } else if (cliResp?.error) {
-            // 修復：模型回傳錯誤時，在主聊天區顯示錯誤訊息，
-            // 而非只更新 chatCliLog（那個不在主聊天區直接顯示）。
-            setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, `[${t('system.sysLabel')}] ${cliResp.error}`));
+      postDebugTrace('ui.composer.before.ExecuteSkillMessage', traceId, payload);
+      callWails(() => ExecuteSkillMessage(payload.adapter_id, sessionId, escaped || text, traceId))
+        .then(async (decision) => {
+          if (decision?.response) {
+            await finishComposerExecution({resp: decision.response, payload, apiAdapter, traceId, conversationId, clearPendingTimers});
+            return;
           }
+          if (decision?.decision === 'need_confirm') {
+            setSkillExecutionConfirm({
+              resolveId: decision.resolve_id || decision.ResolveID,
+              skillId: decision.skill_id || decision.SkillID,
+              actionTarget: decision.action_target || decision.ActionTarget,
+              message: decision.message || decision.Message,
+              sessionId,
+              adapterId: payload.adapter_id,
+              userText: escaped || text,
+              traceId,
+              payload,
+              apiAdapter,
+              adapter,
+              conversationId,
+              clearPendingTimers,
+            });
+            setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(
+              prev,
+              traceId,
+              makeComposerPendingMessage(traceId, decision.message || '這個 skill 需要確認後才會執行。'),
+            ));
+            return;
+          }
+          clearPendingTimers();
+          setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(
+            prev,
+            traceId,
+            decision?.message || 'Skill 需要人工確認，已暫停本次執行。',
+          ));
         })
         .catch((err) => {
-          clearPendingTimers();
-          postDebugTrace(apiAdapter ? 'ui.composer.SendAPIMessage.error' : 'ui.composer.SendCLIMessage.error', traceId, {error: err?.message || String(err)});
-          // 修復：SendCLIMessage 拋出例外時（sidecar 未啟動、adapter 找不到等），
-          // 在主聊天區顯示錯誤，讓使用者看到問題而非一片空白。
-          const rawErrorMsg = err?.message || String(err);
-          const errorMsg = apiAdapter && String(adapter?.kind || '').toLowerCase() === 'local'
-            ? t('system.localModelBlocked', { name: adapter?.name || t('settings.localModelDefault'), error: rawErrorMsg })
-            : rawErrorMsg;
-          setChatCliLog((prev) => ({
-            ...(prev || {payload}),
-            status: 'error',
-            response: null,
-            error: errorMsg,
-            finished_at: new Date().toISOString(),
-          }));
-          setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, t('system.sendFail', { error: errorMsg })));
+          failComposerExecution({err, payload, apiAdapter, adapter, traceId, conversationId, clearPendingTimers});
         });
     });
     // v3.6.4: 使用者送出新訊息 → 清除 Floating Candidate Actions
@@ -3100,7 +3937,7 @@ function App() {
       if (patch.panelLanguage) {
         const locale = panelLangToLocale(patch.panelLanguage);
         if (locale && locale !== useI18n.getState().language) {
-          useI18n.getState().setLanguage(locale); // saves to localStorage + reloads
+          useI18n.getState().setLanguage(locale); // saves to localStorage and updates in place
         }
       }
     } catch {
@@ -3485,7 +4322,7 @@ function App() {
       },
     };
     const query = queryMap[remoteBridgeSetupPlatform]?.[field] || `${remoteBridgeSetupPlatform || 'remote bridge'} ${field} official guide`;
-    BrowserOpenURL(`https://www.google.com/search?q=${encodeURIComponent(query)}`);
+    openExternal(`https://www.google.com/search?q=${encodeURIComponent(query)}`);
   }
 
   function remoteBridgeField(label, field, options = {}) {
@@ -4020,6 +4857,17 @@ function App() {
     setCopyConfirmTool(toolAction.tool);
   }
 
+  function reorderReferenceFile(draggedKey, targetKey, placement = 'before') {
+    setReferenceFiles((current) => reorderReferenceFiles(current, draggedKey, targetKey, placement));
+  }
+
+  function handleReferenceInternalDrag(active) {
+    referenceInternalDragRef.current = !!active;
+    if (!active) {
+      referenceDropSuppressUntilRef.current = Date.now() + 350;
+    }
+  }
+
   async function confirmCopyTool() {
     if (!copyConfirmTool) return;
     setToolResult({toolId: copyConfirmTool.id, ok: true, message: t('tool.skillInstallConfirmed', { title: copyConfirmTool.title })});
@@ -4033,6 +4881,29 @@ function App() {
     return loadedFiles;
   }
 
+  function formatReferenceNativeDropDetail(result) {
+    const landed = result?.landed_path || result?.message || '引用文件已拖出';
+    if (!result?.drop_target_kind || !result?.drop_target_dir) return landed;
+    return `${landed}\n${result.drop_target_kind}: ${result.drop_target_dir}`;
+  }
+
+  function showNativeReferenceExportDialog(result, fallbackFile = null) {
+    if (result?.status !== 'success' || !result?.landed_path) return;
+    setReferenceExportDialog({
+      name: result.display_name || fallbackFile?.name || '引用文件',
+      sourcePath: result.source_path || fallbackFile?.path || '',
+      landedPath: result.landed_path,
+      landedDetail: formatReferenceNativeDropDetail(result),
+    });
+  }
+
+  useEffect(() => {
+    const offNativeReferenceExport = EventsOn('reference:native_completed', (result) => {
+      showNativeReferenceExportDialog(result);
+    });
+    return () => offNativeReferenceExport();
+  }, []);
+
   async function startNativeReferenceExport(file) {
     if (!file?.path || file.source !== 'library') {
       setToolResult({toolId: 'doc-entrance', ok: false, message: '只有引用庫內的本機檔案可以拖出複製'});
@@ -4041,11 +4912,7 @@ function App() {
     try {
       const result = await callWails(() => NativeDragExportReferenceFile(file.path));
       if (result?.status === 'success' && result?.landed_path) {
-        setReferenceExportDialog({
-          name: result.display_name || file.name,
-          sourcePath: result.source_path || file.path,
-          landedPath: result.landed_path,
-        });
+        showNativeReferenceExportDialog(result, file);
       } else if (result?.status !== 'cancelled') {
         setToolResult({toolId: 'doc-entrance', ok: false, message: result?.message || '引用文件拖曳失敗'});
         await refreshReferenceFiles();
@@ -4085,7 +4952,8 @@ function App() {
   }
 
   async function importReferencePaths(paths = []) {
-    for (const path of paths) {
+    const nativePaths = normalizeReferenceImportPaths(paths);
+    for (const path of nativePaths) {
       const name = String(path || '').split(/[\/]/).pop() || t('system.unnamedFile');
       let referencePathForStatus = path;
       setReferenceFiles((current) => appendUniqueReferenceFile(current, {
@@ -4100,7 +4968,7 @@ function App() {
         const importedFile = {
           ...imported,
           status: isW3AMediaPath(path) ? 'checking' : 'ready',
-          detail: isW3AMediaPath(path) ? '正在檢查媒體來源' : '已加入引用',
+          detail: isW3AMediaPath(path) ? '正在檢查媒體來源' : '',
         };
         referencePathForStatus = importedFile.path || path;
         setReferenceFiles((current) => appendUniqueReferenceFile(
@@ -4286,13 +5154,9 @@ function App() {
           path: item.path,
           detected: true,
         }));
-      const detectedNames = new Set(detectedSuggestions.map((item) => String(item.name).toLowerCase()));
-      const examples = cliPathExamples
-        .filter((item) => !detectedNames.has(item.name.toLowerCase()))
-        .map((item) => ({...item, detected: false}));
-      setLinkPreviewSuggestions([...detectedSuggestions, ...examples].slice(0, 5));
+      setLinkPreviewSuggestions(detectedSuggestions.slice(0, 6));
     } catch {
-      setLinkPreviewSuggestions(cliPathExamples.map((item) => ({...item, detected: false})));
+      setLinkPreviewSuggestions([]);
     }
   }
 
@@ -4365,6 +5229,45 @@ function App() {
     }
   }
 
+  function openWebSearchSetup(config = webSearchConfig) {
+    const options = Array.isArray(config?.options) ? config.options : defaultWebSearchProviderOptions();
+    const providerId = config?.provider_id || options[0]?.id || 'tavily';
+    setWebSearchSetup({
+      providerId,
+      apiKey: '',
+      cx: '',
+      options,
+    });
+    setWebSearchSetupError('');
+  }
+
+  async function submitWebSearchSetup() {
+    if (!webSearchSetup) return;
+    setWebSearchSetupError('');
+    try {
+      const next = await callWails(() => SaveWebSearchConfig(
+        webSearchSetup.providerId || 'tavily',
+        webSearchSetup.apiKey || '',
+        webSearchSetup.cx || '',
+      ));
+      setWebSearchConfig(next || null);
+      setWebSearchSetup(null);
+    } catch (err) {
+      setWebSearchSetupError(err?.message || String(err));
+    }
+  }
+
+  async function clearWebSearchSetup() {
+    setWebSearchSetupError('');
+    try {
+      const next = await callWails(ClearWebSearchConfig);
+      setWebSearchConfig(next || null);
+      setWebSearchSetup(null);
+    } catch (err) {
+      setWebSearchSetupError(err?.message || String(err));
+    }
+  }
+
   function previewLLMAPIConnection() {
     if (!llmAPISetup) return;
     const missing = [];
@@ -4408,8 +5311,7 @@ function App() {
     setLinkPreviewSuggestions([]);
 
     const looksLikeURL = /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
-    const looksLikeLocalPath = value.startsWith('/') || value.startsWith('~/') ||
-      value.startsWith('$HOME/') || value.startsWith('./') || value.startsWith('../');
+    const looksLikeLocalPath = looksLikeReferenceLocalPath(value);
     if (!looksLikeURL && !looksLikeLocalPath) {
       const message = t('link.previewHint');
       setToolResult({
@@ -4466,7 +5368,7 @@ function App() {
     if (!value) return;
     setLinkPreviewError('');
     setLinkPreviewSuggestions([]);
-    const looksLikeLocalPath = value.startsWith('/') || value.startsWith('~/') || value.startsWith('$HOME/');
+    const looksLikeLocalPath = looksLikeReferenceLocalPath(value);
 
     // v3.6.3 §12A: Remote Bridge 通道註冊流程
     if (linkPreview?.type === 'remote_bridge') {
@@ -4553,18 +5455,18 @@ function App() {
     }
   }
 
-  async function renameSubagent(currentName) {
+  async function renameSubagent(currentName, nextName) {
     if (!currentName || currentName === t('system.mainAgent')) return;
-    const nextName = window.prompt(t('subagent.renamePrompt'), currentName);
-    if (nextName == null) return;
-    const trimmed = nextName.trim();
+    const trimmed = String(nextName || '').trim();
     if (!trimmed || trimmed === currentName) return;
     try {
       const renamed = await callWails(() => RenameSubagent(currentName, trimmed));
       await refreshAvailableAdapters();
       setToolResult({toolId: 'subagent', ok: true, message: t('adapter.handlerRenamed', { name: renamed?.name || trimmed })});
+      return renamed;
     } catch (error) {
       setToolResult({toolId: 'subagent', ok: false, message: t('adapter.handlerRenameFail', { error: error?.message || error })});
+      return null;
     }
   }
 
@@ -4587,11 +5489,20 @@ function App() {
   // v3.6: 學習模式切換 — 對接後端 LearningService
   async function toggleLearning() {
     const wasEnabled = learningEnabled;
+    const conversationId = activeConversationIdRef.current || 'main';
     if (wasEnabled) {
       // 關閉學習模式
       try {
-        await callWails(StopLearningMode);
-      } catch { /* best-effort */ }
+        const traceId = makeDebugTraceID('learning-metadata');
+        const run = await callWails(StopLearningMode);
+        const namedRun = await enrichStoppedLearningRun(run, traceId);
+        setConversationMessages(conversationId, (prev) => [
+          ...prev,
+          formatLearningOperationLearned(namedRun),
+        ]);
+      } catch {
+        setConversationMessages(conversationId, (prev) => [...prev, '[系統] 示範結束，但後端停止記錄時回報錯誤。']);
+      }
       setLearningEnabled(false);
       setVlLearningActive(false);
       setVlActiveLearningRun(null);
@@ -4603,7 +5514,13 @@ function App() {
         const run = await callWails(() => StartLearningMode('window-' + Date.now()));
         setVlActiveLearningRun(run);
         setVlLearningActive(true);
-      } catch { /* fallback: 僅前端標記 */ }
+        setConversationMessages(conversationId, (prev) => [
+          ...prev,
+          `[系統] 示範開始。${run?.id ? `Run: ${run.id}。` : ''}請點一次你要教我的目標。`,
+        ]);
+      } catch {
+        setConversationMessages(conversationId, (prev) => [...prev, '[系統] 示範開始，但後端記錄沒有啟動。']);
+      }
       setLearningEnabled(true);
     }
   }
@@ -4715,10 +5632,11 @@ function App() {
 
   function handleGlobalFileDrop(event) {
     if (event.defaultPrevented) return;
+    if (referenceInternalDragRef.current || Date.now() < referenceDropSuppressUntilRef.current) return;
     const files = Array.from(event.dataTransfer?.files || []);
     if (!files.length) return;
     event.preventDefault();
-    const nativePaths = files.map((file) => file.path).filter(Boolean);
+    const nativePaths = normalizeReferenceImportPaths(files.map((file) => file.path));
     if (nativePaths.length) {
       importReferencePaths(nativePaths);
       if (shouldProbeDroppedInstallPackage(nativePaths)) {
@@ -4756,19 +5674,16 @@ function App() {
       <Sidebar
         adapters={state.adapters}
         adapterList={adapterList}
-        localModelOptions={summaryModelScan?.options || []}
-        activeSummaryModelId={summaryModelSettings?.source === 'local_model' ? summaryModelSettings.modelId : ''}
         activeAdapterId={activeAdapterId}
         onAdapterSelect={async (name) => {
+          activeAdapterIdRef.current = name;
           setActiveAdapterId(name);
           // Selection only changes routing. Runtime health is updated by real
           // send success/failure so a broken adapter is not painted green.
         }}
-        onLocalModelSelect={(model) => saveSummaryModelPatch({
-          source: 'local_model',
-          modelId: model.id,
-          endpoint: model.endpoint,
-        })}
+        adapterModelChoices={adapterModelChoices}
+        adapterModelOptions={adapterModelOptions}
+        onAdapterModelPick={handleAdapterModelPick}
         onLocalAdapterWake={async (adapter) => {
           if (!adapter?.id) return;
           setToolResult({toolId: adapter.id, ok: true, message: t('adapter.wakingModel')});
@@ -4810,6 +5725,11 @@ function App() {
         onAdaptersChanged={refreshAvailableAdapters}
         onAdapterRemove={async (adapterID) => {
           await callWails(() => UnregisterAdapter(adapterID));
+          if (activeAdapterIdRef.current === adapterID) {
+            activeAdapterIdRef.current = null;
+            setActiveAdapterId(null);
+          }
+          await refreshAvailableAdapters();
           setToolResult({toolId: adapterID, ok: true, message: t('adapter.cliUnlinked')});
         }}
       />
@@ -4960,7 +5880,7 @@ function App() {
                         type="button"
                         onClick={() => {
                           const step = discordSetupGuide[remoteBridgeSetupGuideStep];
-                          BrowserOpenURL(step.url || `https://www.google.com/search?q=${encodeURIComponent(step.query)}`);
+                          openExternal(step.url || `https://www.google.com/search?q=${encodeURIComponent(step.query)}`);
                         }}
                       >
                         {discordSetupGuide[remoteBridgeSetupGuideStep].action}
@@ -4989,7 +5909,7 @@ function App() {
                         type="button"
                         onClick={() => {
                           const step = lineSetupGuide[remoteBridgeSetupGuideStep];
-                          BrowserOpenURL(step.url || `https://www.google.com/search?q=${encodeURIComponent(step.query)}`);
+                          openExternal(step.url || `https://www.google.com/search?q=${encodeURIComponent(step.query)}`);
                         }}
                       >
                         {lineSetupGuide[remoteBridgeSetupGuideStep].action}
@@ -5170,7 +6090,10 @@ function App() {
               activeAdapter={resolveActiveAdapter()}
               adapterOptions={adapterList}
               activeAdapterId={activeAdapterId}
-              onAdapterSelect={setActiveAdapterId}
+              onAdapterSelect={(name) => {
+                activeAdapterIdRef.current = name;
+                setActiveAdapterId(name);
+              }}
               cliInspectorBusy={cliInspectorBusy}
               cliInspectorLog={cliInspectorLog}
               onCLIInspectSend={sendCLIInspectorText}
@@ -5188,10 +6111,11 @@ function App() {
               onTemporaryRemoteBridgeTest={sendTemporaryRemoteBridgeTest}
               onSaveRemoteBridgeInboundSecret={saveRemoteBridgeInboundSecret}
               onMakeRemoteBridgePrimary={makeRemoteBridgePrimary}
+              subExportCapabilities={subExportCapabilities}
               onRenameHaora={renameSubagent}
-              activeHaoraId={activeAdapterId}
+              activeHaoraId={activeHaoraId}
               onHaoraSelect={(haora) => {
-                setActiveAdapterId(haora?.isMain ? null : (haora?.id || haora?.name || null));
+                setActiveHaoraId(haora?.isMain ? null : (haora?.id || haora?.name || null));
               }}
               onSubagentsChanged={refreshAvailableAdapters}
               onHaorasReordered={(nextHaoras, nextSubIds) => {
@@ -5213,6 +6137,9 @@ function App() {
               onSend={sendMessage}
               onDelete={(index) => setMessages((prev) => prev.filter((_, i) => i !== index))}
               onSummarizeSearch={(text) => submitComposerText(t('system.summarizeSearch', { text }))}
+              // SEC-06: 讀取網址按鈕注入文字，複用後端確認流程
+              onInjectText={(text) => submitComposerText(text)}
+              activeConversationId={activeConversationIdRef.current || 'main'}
               // v3.6.4 Readiness Gate UI Interaction Layer props
               readinessGate={readinessGate}
               longPressProgress={longPressProgress}
@@ -5235,6 +6162,11 @@ function App() {
               onVoiceCancel={cancelVoiceRecording}
               taskActive={isTaskProgressActive(dagRun)}
               onCancelTask={cancelActiveTaskProgress}
+              pendingTaskReview={pendingTaskReview}
+              taskReviewDetailsOpen={reviewPopup === 'risk'}
+              onConfirmTaskReview={confirmSkillBuild}
+              onCancelTaskReview={() => cancelActiveTaskProgress('review_cancel')}
+              onShowTaskReviewDetails={() => setReviewPopup((current) => current === 'risk' ? null : 'risk')}
             />
           </main>
           <RightRail
@@ -5257,6 +6189,10 @@ function App() {
           }}
           onReferenceLinkOpen={() => setReferenceLinkOpen(true)}
           onReferenceFileDragOut={startNativeReferenceExport}
+          onReferenceFileReorder={reorderReferenceFile}
+          onReferenceInternalDrag={handleReferenceInternalDrag}
+          onReferenceCardDoubleClick={handleReferenceCardDoubleClick}
+          onReferenceFailedRemove={handleReferenceFailedRemove}
           onRecordingToggle={() => {
             if (recordingEnabled) {
               stopDraftSandbox('user_stop');
@@ -5268,6 +6204,114 @@ function App() {
           onToolPopupToggle={() => toggleToolPopup('right')}
           />
         </>
+      )}
+      {typeof document !== 'undefined' && createPortal(
+        <button
+          className={`vl-monitor-launcher${vlMonitorOpen ? ' vl-monitor-launcher-active' : ''}`}
+          data-vl-target="visual-learning-monitor-launcher"
+          onClick={() => setVlMonitorOpen((v) => !v)}
+          type="button"
+          aria-label={vlMonitorOpen ? '隱藏 Visual Learning 監視' : '開啟 Visual Learning 監視'}
+          title={vlMonitorOpen ? '隱藏監視面板' : 'Visual Learning 監視'}
+        >
+          <span>VL</span>
+          {vlPendingCount > 0 && <span className="vl-monitor-launcher-badge">{vlPendingCount}</span>}
+        </button>,
+        document.body
+      )}
+      {typeof document !== 'undefined' && vlMonitorOpen && createPortal(
+	        <VisualLearningPanel
+	          learningActive={vlLearningActive}
+	          onLearningToggle={toggleLearning}
+	          pendingCount={vlPendingCount}
+	          hasBlocking={vlHasBlocking}
+	          recentEvents={vlRecentLearningEvents}
+	          onClose={() => setVlMonitorOpen(false)}
+	        />,
+        document.body
+      )}
+      {/* §M3 Embedding picker modal：first-drop 才開 */}
+      {embeddingPickerTarget && typeof document !== 'undefined' && createPortal(
+        <EmbeddingPickerModal
+          displayName={embeddingPickerTarget.displayName}
+          onClose={() => setEmbeddingPickerTarget(null)}
+        />,
+        document.body
+      )}
+      {/* §M3+ 雙擊引用文件卡片：顯示目前 embedding 狀態 popup */}
+      {refEmbedPopup && typeof document !== 'undefined' && createPortal(
+        <div
+          className="reference-embed-popup"
+          style={{
+            left: Math.min(refEmbedPopup.rect.left - 260, (typeof window !== 'undefined' ? window.innerWidth : 9999) - 280),
+            top: refEmbedPopup.rect.top,
+          }}
+        >
+          <div className="reference-embed-popup-title">{refEmbedPopup.file.name}</div>
+          {refEmbedPopup.config?.providerId && refEmbedPopup.config?.modelId ? (
+            <>
+              <div className="reference-embed-popup-status reference-embed-on">
+                ✓ 語意搜尋已啟用
+              </div>
+              <div className="reference-embed-popup-detail">
+                Provider：{refEmbedPopup.config.providerId}
+                <br />
+                Model：{refEmbedPopup.config.modelId}
+                {refEmbedPopup.config.dimension > 0 && <><br />Dimension：{refEmbedPopup.config.dimension}</>}
+              </div>
+              <div className="reference-embed-popup-actions">
+                <button
+                  type="button"
+                  className="reference-embed-popup-btn"
+                  onClick={() => {
+                    setRefEmbedPopup(null);
+                    setEmbeddingPickerTarget({displayName: refEmbedPopup.file.name});
+                  }}
+                >
+                  換個 model
+                </button>
+                <button
+                  type="button"
+                  className="reference-embed-popup-btn-secondary"
+                  onClick={() => setRefEmbedPopup(null)}
+                >
+                  取消
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="reference-embed-popup-status reference-embed-off">
+                ⚠ 未啟用 embedding model（目前走 TF-IDF 基本搜尋）
+              </div>
+              <div className="reference-embed-popup-detail">
+                沒有 embedding 也能搜，但語意搜尋會更準。
+                <br />
+                要加上 embedding model 嗎？
+              </div>
+              <div className="reference-embed-popup-actions">
+                <button
+                  type="button"
+                  className="reference-embed-popup-btn"
+                  onClick={() => {
+                    setRefEmbedPopup(null);
+                    setEmbeddingPickerTarget({displayName: refEmbedPopup.file.name});
+                  }}
+                >
+                  加上 model
+                </button>
+                <button
+                  type="button"
+                  className="reference-embed-popup-btn-secondary"
+                  onClick={() => setRefEmbedPopup(null)}
+                >
+                  取消
+                </button>
+              </div>
+            </>
+          )}
+        </div>,
+        document.body
       )}
       {avatarUploadTargetId && (
         <AvatarUploadModal
@@ -5295,6 +6339,14 @@ function App() {
 
       {/* CLI 授權對話框：CLI 需要瀏覽器 OAuth 授權時顯示。
           Go 端已自動開啟瀏覽器，此對話框讓使用者確認授權完成後重試原本的訊息。 */}
+      {pendingLearningReplayConfirm && (
+        <LearningReplayConfirmCard
+          pending={pendingLearningReplayConfirm}
+          onConfirm={continueLearningReplayAfterConfirm}
+          onCancel={cancelLearningReplayConfirm}
+        />
+      )}
+
       {cliAuthRequest && (
         <div className="dialog-overlay" role="dialog" aria-label={t('auth.cliAuthLabel')}>
           <div className="dialog-card" style={{maxWidth: 420, padding: 24}}>
@@ -5333,7 +6385,7 @@ function App() {
 	                  const conversationId = req.conversation_id || activeConversationIdRef.current || 'main';
 	                  // SEC-05: untrusted 時先用 BrowserOpenURL 開啟授權頁面
 	                  if (!req.isTrusted && req.auth_url) {
-	                    BrowserOpenURL(req.auth_url);
+	                    openExternal(req.auth_url);
 	                    setConversationMessages(conversationId, (prev) => [...prev, t('auth.openedMessage')]);
 	                    // 標記為已開啟，下次按鈕變為「已完成授權」行為
 	                    setCliAuthRequest({...req, isTrusted: true});
@@ -5477,12 +6529,25 @@ function App() {
           onConfirm={confirmCopyTool}
         />
       )}
+      {skillExecutionConfirm && (
+        <DragActionModal
+          ariaLabel="Skill execution confirmation"
+          icon="⌁"
+          title={skillExecutionConfirm.skillId || 'Skill'}
+          detail={skillExecutionConfirm.actionTarget || skillExecutionConfirm.message || ''}
+          actions={[
+            {label: '允許一次', onClick: () => confirmSkillExecutionChoice('allow_once')},
+            {label: '總是允許', onClick: () => confirmSkillExecutionChoice('always')},
+            {label: t('common.cancel'), onClick: () => confirmSkillExecutionChoice('cancel')},
+          ]}
+        />
+      )}
       {referenceExportDialog && (
         <DragActionModal
           ariaLabel="引用文件拖曳操作"
           icon="▤"
           title={referenceExportDialog.name}
-          detail={referenceExportDialog.landedPath}
+          detail={referenceExportDialog.landedDetail || referenceExportDialog.landedPath}
           actions={[
             {label: t('adapter.remove'), onClick: () => handleReferenceExportAction('remove')},
             {label: t('adapter.copyAction'), onClick: () => handleReferenceExportAction('copy')},
@@ -5512,6 +6577,17 @@ function App() {
           onCancel={() => setLlmAPISetup(null)}
           onTest={previewLLMAPIConnection}
           onSubmit={submitLLMAPISetup}
+        />
+      )}
+      {webSearchSetup && (
+        <WebSearchSetupModal
+          setup={webSearchSetup}
+          config={webSearchConfig}
+          error={webSearchSetupError}
+          onChange={setWebSearchSetup}
+          onCancel={() => setWebSearchSetup(null)}
+          onClear={clearWebSearchSetup}
+          onSubmit={submitWebSearchSetup}
         />
       )}
       {adapterRenameTarget && (
@@ -5584,8 +6660,519 @@ function callWails(fn) {
   }
 }
 
+function isLearningReplayRequest(text) {
+  const normalized = String(text || '').trim().toLowerCase();
+  return /按照.*剛剛.*示範/.test(normalized)
+    || /照.*剛剛.*示範/.test(normalized)
+    || /回放.*剛剛.*示範/.test(normalized)
+    || /回放.*剛剛.*步驟/.test(normalized)
+    || /回放.*剛剛.*操作/.test(normalized)
+    || /重播.*剛剛.*示範/.test(normalized)
+    || /重播.*剛剛.*步驟/.test(normalized)
+    || /重播.*剛剛.*操作/.test(normalized)
+    || /再.*示範.*剛剛/.test(normalized)
+    || /再.*執行.*剛剛/.test(normalized)
+    || /再.*跑.*剛剛/.test(normalized)
+    || /剛剛.*步驟/.test(normalized)
+    || /replay.*last.*demo/.test(normalized)
+    || /replay.*previous.*demo/.test(normalized)
+    || /replay.*demo/.test(normalized)
+    || /replay.*steps/.test(normalized)
+    || /follow.*demo/.test(normalized);
+}
+
+function normalizeLearningOperationQuery(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return '';
+  return raw
+    .replace(/操作|操做|operation/gi, ' ')
+    .replace(/相關|關於|有關|已保存|已儲存|保存|儲存|錄影紀錄|錄製紀錄|示範紀錄|示範|流程|畫面|tag/gi, ' ')
+    .replace(/幫我|請|查詢|搜尋|查找|尋找|找|列出|查看|看看|知道|執行|回放|重播|開啟|打開|有哪些|什麼|甚麼|樣|的/g, ' ')
+    .replace(/[，。！？、,.!?;:()[\]{}"'`<>|\\/]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseLearningOperationCatalogRequest(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
+  const mentionsSavedCatalog = /已保存|已儲存|保存|儲存|錄影|錄製|示範|紀錄|記錄|catalog/i.test(raw);
+  const asksSavedTag = /tag/i.test(raw) && /儲存|保存|已保存|已儲存|畫面|錄影|錄製|示範|紀錄|記錄|操作|操做/.test(raw);
+  const asksCatalogList = /有哪些|列出|清單|查看|看看|知道/.test(raw)
+    && (mentionsSavedCatalog || /tag/i.test(raw))
+    && /操作|操做|錄影|錄製|示範|tag|catalog/i.test(raw);
+  // Only explicit catalog/list/tag questions are handled locally. Natural
+  // operation requests must go to the LLM so it can choose an action-chain.
+  if (!asksSavedTag && !asksCatalogList) return null;
+  const catalogQuery = normalizeLearningOperationQuery(raw);
+  return catalogQuery ? {mode: 'search', query: catalogQuery} : {mode: 'list', query: ''};
+}
+
+function operationIntentFromCLIResponse(resp) {
+  const action = String(resp?.action || '').trim().toLowerCase();
+  const target = String(resp?.target || '').trim();
+  const next = String(resp?.next || '').trim().toLowerCase();
+  if (!target) return null;
+  // Internal CLI action-chain contract. User input stays natural language.
+  if ((action === '查詢' || action === '搜尋' || action === 'search' || action === 'query') && (next === '操作' || next === '操做')) {
+    return {mode: 'query', query: normalizeLearningOperationQuery(target) || target};
+  }
+  if (action === '操作' || action === '操做') {
+    return {mode: 'execute', query: normalizeLearningOperationQuery(target) || target};
+  }
+  return null;
+}
+
+function resolveLearningOperationMatch(matches) {
+  if (!matches.length) return null;
+  const [first, second] = matches;
+  const firstScore = Number(first?.score || 0);
+  const secondScore = Number(second?.score || 0);
+  if (firstScore < 1.5) return null;
+  if (second && secondScore > 0 && (firstScore - secondScore) < 0.75) return null;
+  return first;
+}
+
+function defaultWebSearchProviderOptions() {
+  return [
+    {
+      id: 'tavily',
+      name: 'Tavily',
+      fields: ['api_key'],
+      docs_url: 'https://docs.tavily.com/documentation/api-reference/endpoint/search',
+      free_tier_hint: 'AI-agent friendly search; free credits are available from Tavily.',
+    },
+    {
+      id: 'google_cse',
+      name: 'Google Custom Search JSON API',
+      fields: ['api_key', 'cx'],
+      docs_url: 'https://developers.google.com/custom-search/v1/reference/rest/v1/cse/list',
+      free_tier_hint: 'Requires an API key and Programmable Search Engine ID.',
+    },
+    {
+      id: 'brave',
+      name: 'Brave Search API',
+      fields: ['api_key'],
+      docs_url: 'https://api-dashboard.search.brave.com/documentation/guides/authentication',
+      free_tier_hint: 'Requires a Brave Search API subscription token.',
+    },
+  ];
+}
+
+function formatLearningOperationSearchResults(query, matches, forExecution = false) {
+  if (!matches.length) {
+    return `Ai:我找不到符合「${query}」的已保存操作。可以重新示範一次，或換更明確的關鍵詞。`;
+  }
+  const lines = matches.slice(0, 6).map((item, index) => {
+    const risk = item?.risk?.level ? `風險：${item.risk.level}` : '';
+    const keywords = Array.isArray(item?.keywords) && item.keywords.length
+      ? `關鍵詞：${item.keywords.slice(0, 6).join('、')}`
+      : '';
+    const opTag = item?.operation_tag ? `操作分類：${item.operation_tag}` : '';
+    const score = Number.isFinite(Number(item?.score)) ? `匹配：${Number(item.score).toFixed(2)}` : '';
+    const meta = [opTag, keywords, risk, score].filter(Boolean).join('；');
+    return `${index + 1}. ${item.title || item.operation_tag || item.tag || item.run_id || '未命名操作'}\n   ${item.summary || '沒有摘要。'}${meta ? `\n   ${meta}` : ''}`;
+  });
+  const prefix = forExecution
+    ? `Ai:「${query}」有多個或不夠明確的操作候選，請換更精準的關鍵詞。`
+    : `Ai:我找到這些「${query}」相關操作：`;
+  return [prefix, ...lines, '請用更明確的自然語言指定其中一個操作。'].join('\n');
+}
+
+function formatLearningOperationCatalog(items) {
+  if (!items.length) {
+    return 'Ai:目前還沒有已保存操作。請先開始示範並停止示範，系統就會產生操作名稱、摘要和關鍵詞。';
+  }
+  const lines = items.slice(0, 10).map((item, index) => {
+    const risk = item?.risk?.level ? `風險：${item.risk.level}` : '';
+    const keywords = Array.isArray(item?.keywords) && item.keywords.length
+      ? `關鍵詞：${item.keywords.slice(0, 6).join('、')}`
+      : '';
+    const opTag = item?.operation_tag ? `操作分類：${item.operation_tag}` : '';
+    const internal = item?.tag || item?.run_id ? `內部：${item.tag || item.run_id}` : '';
+    const meta = [opTag, keywords, risk, `步驟：${item.step_count || 0}`, internal].filter(Boolean).join('；');
+    return `${index + 1}. ${item.title || item.operation_tag || '未命名操作'}\n   ${item.summary || '沒有摘要。'}\n   ${meta}`;
+  });
+  return ['Ai:目前已保存的操作如下：', ...lines].join('\n');
+}
+
+function formatLearningOperationLearned(run) {
+  const title = run?.title || run?.name || run?.operation_tag || '未命名操作';
+  const summary = run?.summary || '已保存這次示範。';
+  const keywords = Array.isArray(run?.keywords) && run.keywords.length
+    ? `\n關鍵詞：${run.keywords.slice(0, 8).join('、')}`
+    : '';
+  const opTag = run?.operation_tag ? `\n操作分類：${run.operation_tag}` : '';
+  const risk = run?.risk?.level ? `\n風險：${run.risk.level}` : '';
+  return `Ai:已保存操作：「${title}」。\n${summary}${opTag}${keywords}${risk}\n之後可以用自然語言請我查找或執行這類操作。`;
+}
+
+function isLearningReplayRelatedText(text) {
+  const normalized = String(text || '').trim().toLowerCase();
+  if (!normalized) return false;
+  return /示範|回放|重播|剛剛.*步驟|剛剛.*操作|照.*剛剛|按照.*剛剛/.test(normalized)
+    || /replay|demo|last\s+steps|previous\s+steps/.test(normalized);
+}
+
+function extractVisualReplayDirective(text) {
+  const raw = String(text || '');
+  const taggedMatch = raw.match(visualReplayTaggedDirectivePattern);
+  if (taggedMatch) {
+    return {
+      shouldReplay: true,
+      tag: taggedMatch[1],
+      text: raw.replace(visualReplayTaggedDirectivePattern, '').trim(),
+    };
+  }
+  const matchedDirective = raw.includes(visualReplayLastDemoDirective)
+    ? visualReplayLastDemoDirective
+    : raw.includes(legacyVisualReplayLastDemoDirective)
+      ? legacyVisualReplayLastDemoDirective
+      : '';
+  if (!matchedDirective) {
+    return {shouldReplay: false, tag: '', text: raw};
+  }
+  return {
+    shouldReplay: true,
+    tag: '',
+    text: raw.split(matchedDirective).join('').trim(),
+  };
+}
+
+function formatLearningReplayPlan(plan) {
+  const steps = Array.isArray(plan?.steps) ? plan.steps : [];
+  if (!steps.length) {
+    return 'Ai:我還沒有讀到可重放的示範步驟。請先按「開始示範」，點一次目標，然後按「停止示範」。';
+  }
+  const lines = steps.map((step, index) => {
+    const target = step.window_title || step.label || step.role || step.css_selector || step.tag || `座標 (${step.x}, ${step.y})`;
+    const selector = step.css_selector ? `，selector: ${step.css_selector}` : '';
+    const anchor = step.windows_anchor?.ok ? `，anchor: ${step.windows_anchor.mode || 'available'}` : '，anchor: none';
+    const nativeInfo = isNativeReplayStep(step)
+      ? `，視窗: ${step.window_title || 'unknown'}，process: ${basenameForDisplay(step.window_process || step.tag || '')}`
+      : '';
+    const coordLabel = isNativeReplayStep(step) ? '螢幕座標' : '座標';
+    return `${index + 1}. ${step.action || 'click'} ${target}，${coordLabel} (${step.x}, ${step.y})${nativeInfo}${selector}${anchor}`;
+  });
+  const anchorCount = steps.filter((step) => step.windows_anchor?.ok).length;
+  return [
+    'Ai:我讀到剛剛的示範了，已產生安全 replay plan。確認後會先嘗試操作本視窗內的元素。',
+    `Tag: ${plan?.tag || 'demo-last'}，Title: ${plan?.title || plan?.run_name || 'untitled'}。`,
+    plan?.run_summary ? `Summary: ${plan.run_summary}` : '',
+    `Run: ${plan?.run_id || 'unknown'}，步驟 ${steps.length} 個，visual anchor 覆蓋 ${anchorCount}/${steps.length}。`,
+    ...lines,
+    '執行時本視窗會先走 selector，外部瀏覽器會走 native 螢幕座標；找不到本視窗元素才 fallback 到示範座標。',
+  ].filter(Boolean).join('\n');
+}
+
+function formatLearningReplayConfirmation(plan) {
+  const steps = Array.isArray(plan?.steps) ? plan.steps : [];
+  const nativeSteps = steps.filter(isNativeReplayStep);
+  const domSteps = steps.length - nativeSteps.length;
+  const windows = Array.from(new Map(nativeSteps.map((step) => {
+    const label = `${basenameForDisplay(step.window_process || step.tag || 'unknown')} - ${step.window_title || 'unknown window'}`;
+    return [label, label];
+  })).values()).slice(0, 4);
+  const lines = [
+    `即將依照剛剛的示範執行 ${steps.length} 個步驟。`,
+    `本視窗 selector ${domSteps} 步，外部 native click ${nativeSteps.length} 步。`,
+  ];
+  if (windows.length) {
+    lines.push('', '外部目標視窗：', ...windows.map((item) => `- ${item}`));
+  }
+  lines.push('', '外部 native click 會慢速移動鼠標到目標並短暫停頓；錯誤率會在執行後統整呈現，失敗步驟會跳過並繼續後面。', '確定要執行嗎？');
+  return lines.join('\n');
+}
+
+function formatLearningReplayExecutionResult(result) {
+  const steps = Array.isArray(result?.steps) ? result.steps : [];
+  const okCount = steps.filter((step) => step.ok).length;
+  const skipped = steps.filter((step) => step.skipped);
+  const failed = steps.filter((step) => !step.ok && !step.skipped);
+  const selectorCount = steps.filter((step) => step.ok && step.method === 'selector').length;
+  const coordinateCount = steps.filter((step) => step.ok && step.method === 'coordinate').length;
+  const nativeTotal = steps.filter((step) => step.method === 'native').length;
+  const nativeOK = steps.filter((step) => step.ok && step.method === 'native').length;
+  const nativeForegroundOK = steps.filter((step) => step.method === 'native' && step.foreground_ok).length;
+  const warned = steps.filter((step) => step.warning);
+  const isVisualRelocation = (step) => (
+    step.method === 'visual_relocation'
+    || String(step.method || '').includes('relocation')
+    || Boolean(step.relocation_method)
+  );
+  const visualTotal = steps.filter(isVisualRelocation).length;
+  const visualOK = steps.filter((step) => step.ok && isVisualRelocation(step)).length;
+  const visualConfirm = steps.filter((step) => step.needs_confirmation).length;
+  const anchorTotal = steps.filter((step) => step.windows_anchor?.ok).length;
+  const reviewAnchors = steps.filter((step) => step.windows_anchor?.needs_review).length;
+  const lines = [
+    `Ai:Replay executor 執行完成：${okCount}/${steps.length} 步成功。`,
+    `selector 命中 ${selectorCount} 步，native 座標 ${nativeOK}/${nativeTotal} 步${nativeTotal ? `（前景確認 ${nativeForegroundOK}/${nativeTotal}）` : ''}，座標 fallback ${coordinateCount} 步。`,
+    `visual anchor 覆蓋 ${anchorTotal}/${steps.length} 步，需複核 ${reviewAnchors} 步；YOLO/OpenCV 重定位 ${visualOK}/${visualTotal} 步${visualConfirm ? `，待確認 ${visualConfirm} 步` : ''}。`,
+    `略過 ${skipped.length} 步，失敗 ${failed.length} 步，警告 ${warned.length} 步。`,
+  ];
+  const details = steps.filter((step) => step.warning || step.skipped || (!step.ok && !step.skipped) || isVisualRelocation(step)).map((step) => {
+    const target = step.label || step.selector || `座標 (${step.x}, ${step.y})`;
+    const status = !step.ok && !step.skipped ? 'FAIL' : step.skipped ? 'SKIP' : 'WARN';
+    const error = step.error ? `，${step.error}` : step.warning ? `，${step.warning}` : '';
+    const relocation = step.relocation_method
+      ? `，relocation=${step.relocation_method} ${Number(step.relocation_confidence || 0).toFixed(2)}${step.relocation_reason ? `，${step.relocation_reason}` : ''}`
+      : '';
+    const debug = step.debug_image_path ? `，debug=${step.debug_image_path}${step.debug_info_path ? `，info=${step.debug_info_path}` : ''}` : '';
+    return `${step.index || '?'}. ${status} ${target}${error}${relocation}${debug}`;
+  });
+  return [...lines, ...details].join('\n');
+}
+
+async function executeLearningReplayPlan(plan, options = {}) {
+  const steps = Array.isArray(plan?.steps) ? plan.steps : [];
+  const startOffset = Math.max(0, Number(options.startOffset || 0));
+  const results = Array.isArray(options.initialResults) ? [...options.initialResults] : [];
+  let pendingConfirmation = false;
+  for (const step of steps.slice(startOffset)) {
+    await delayLearningReplay(learningReplayStepDelayMs);
+    const result = await executeLearningReplayStep(step);
+    results.push(result);
+    if (result?.needs_confirmation) {
+      pendingConfirmation = true;
+      break;
+    }
+  }
+  return {
+    run_id: plan?.run_id || '',
+    step_count: steps.length,
+    steps: results,
+    pending_confirmation: pendingConfirmation,
+  };
+}
+
+async function executeLearningReplayStep(step) {
+  const selector = String(step?.css_selector || '').trim();
+  const action = String(step?.action || 'click').toLowerCase();
+  const label = step?.label || step?.role || step?.tag || '';
+  if (isNativeReplayStep(step)) {
+    return executeNativeLearningReplayStep(step);
+  }
+  if (isLearningReplayBlockedStep(step)) {
+    return {
+      ok: false,
+      skipped: true,
+      method: 'blocked',
+      index: step?.index,
+      selector,
+      label,
+      x: step?.x,
+      y: step?.y,
+      windows_anchor: step?.windows_anchor,
+      error: '系統控制項不重播，避免重新開始錄製',
+    };
+  }
+  if (action !== 'click') {
+    return {
+      ok: false,
+      method: 'unsupported',
+      index: step?.index,
+      selector,
+      label,
+      x: step?.x,
+      y: step?.y,
+      windows_anchor: step?.windows_anchor,
+      error: `尚未支援 ${action}`,
+    };
+  }
+
+  const bySelector = findReplayElementBySelector(selector);
+  if (bySelector) {
+    clickReplayElement(bySelector.element, bySelector.x, bySelector.y);
+    return {
+      ok: true,
+      method: 'selector',
+      index: step?.index,
+      selector,
+      label,
+      x: Math.round(bySelector.x),
+      y: Math.round(bySelector.y),
+      windows_anchor: step?.windows_anchor,
+    };
+  }
+
+  const point = normalizeReplayPoint(step);
+  const byPoint = document.elementFromPoint(point.x, point.y);
+  if (byPoint) {
+    const interactive = byPoint.closest?.(visualLearningInteractiveSelector) || byPoint;
+    if (isLearningReplayBlockedElement(interactive)) {
+      return {
+        ok: false,
+        skipped: true,
+        method: 'blocked',
+        index: step?.index,
+        selector,
+        label,
+        x: point.x,
+        y: point.y,
+        windows_anchor: step?.windows_anchor,
+        error: '座標落在系統控制項，已略過',
+      };
+    }
+    clickReplayElement(interactive, point.x, point.y);
+    return {
+      ok: true,
+      method: 'coordinate',
+      index: step?.index,
+      selector,
+      label: label || compactLearningText(interactive?.innerText || interactive?.textContent || interactive?.getAttribute?.('aria-label') || ''),
+      x: point.x,
+      y: point.y,
+      windows_anchor: step?.windows_anchor,
+    };
+  }
+
+  return {
+    ok: false,
+    method: 'coordinate',
+    index: step?.index,
+    selector,
+    label,
+    x: point.x,
+    y: point.y,
+    windows_anchor: step?.windows_anchor,
+    error: '找不到可點擊元素',
+  };
+}
+
+function isLearningReplayBlockedStep(step) {
+  const selector = String(step?.css_selector || '').toLowerCase();
+  const label = String(step?.label || step?.summary || '').trim();
+  return selector.includes('rail-mode-record')
+    || selector.includes('sandbox-stop-overlay')
+    || /示範螢幕操作|開始示範|停止示範|demo|record/i.test(label);
+}
+
+function isLearningReplayBlockedElement(element) {
+  return Boolean(element?.closest?.(learningReplayBlockedSelector));
+}
+
+function isNativeReplayStep(step) {
+  return step?.source === 'native' || step?.coordinate_space === 'screen';
+}
+
+async function executeNativeLearningReplayStep(step) {
+  try {
+    const result = await callWails(() => ExecuteNativeLearningReplayStep(JSON.stringify(step)));
+    return {
+      ok: Boolean(result?.ok),
+      skipped: Boolean(result?.skipped),
+      needs_confirmation: Boolean(result?.needs_confirmation),
+      method: result?.method || 'native',
+      index: result?.index || step?.index,
+      label: result?.label || step?.label || step?.window_title || '',
+      selector: '',
+      x: Number.isFinite(Number(result?.x)) ? Number(result.x) : step?.x,
+      y: Number.isFinite(Number(result?.y)) ? Number(result.y) : step?.y,
+      error: result?.error || '',
+      warning: result?.warning || '',
+      window_title: result?.window_title || step?.window_title || '',
+      window_process: result?.window_process || step?.window_process || step?.tag || '',
+      foreground_ok: Boolean(result?.foreground_ok),
+      foreground_title: result?.foreground_title || '',
+      foreground_process: result?.foreground_process || '',
+      relocated: Boolean(result?.relocated),
+      relocation_method: result?.relocation_method || '',
+      relocation_confidence: Number.isFinite(Number(result?.relocation_confidence)) ? Number(result.relocation_confidence) : 0,
+      relocation_reason: result?.relocation_reason || '',
+      debug_image_path: result?.debug_image_path || '',
+      debug_info_path: result?.debug_info_path || '',
+      original_x: Number.isFinite(Number(result?.original_x)) ? Number(result.original_x) : 0,
+      original_y: Number.isFinite(Number(result?.original_y)) ? Number(result.original_y) : 0,
+      windows_anchor: step?.windows_anchor,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      method: 'native',
+      index: step?.index,
+      label: step?.label || step?.window_title || '',
+      x: step?.x,
+      y: step?.y,
+      error: error?.message || String(error),
+      window_title: step?.window_title || '',
+      window_process: step?.window_process || step?.tag || '',
+      windows_anchor: step?.windows_anchor,
+    };
+  }
+}
+
+function basenameForDisplay(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const parts = text.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || text;
+}
+
+function findReplayElementBySelector(selector) {
+  if (!selector) return null;
+  try {
+    const element = document.querySelector(selector);
+    if (!element) return null;
+    if (isLearningReplayBlockedElement(element)) return null;
+    const rect = element.getBoundingClientRect();
+    const x = Math.round(rect.left + rect.width / 2);
+    const y = Math.round(rect.top + rect.height / 2);
+    if (!isFinite(x) || !isFinite(y)) return null;
+    return {element, x, y};
+  } catch {
+    return null;
+  }
+}
+
+function normalizeReplayPoint(step) {
+  const sourceWidth = Number(step?.viewport?.width || window.innerWidth || 1);
+  const sourceHeight = Number(step?.viewport?.height || window.innerHeight || 1);
+  const currentWidth = window.innerWidth || sourceWidth;
+  const currentHeight = window.innerHeight || sourceHeight;
+  const rawX = Number(step?.x || 0);
+  const rawY = Number(step?.y || 0);
+  const x = sourceWidth > 0 ? Math.round((rawX / sourceWidth) * currentWidth) : Math.round(rawX);
+  const y = sourceHeight > 0 ? Math.round((rawY / sourceHeight) * currentHeight) : Math.round(rawY);
+  return {
+    x: clampReplayCoordinate(x, 0, Math.max(0, currentWidth - 1)),
+    y: clampReplayCoordinate(y, 0, Math.max(0, currentHeight - 1)),
+  };
+}
+
+function clampReplayCoordinate(value, min, max) {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+function clickReplayElement(element, x, y) {
+  if (!element) return;
+  const eventInit = {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    clientX: x,
+    clientY: y,
+    button: 0,
+    buttons: 1,
+  };
+  if (typeof PointerEvent === 'function') {
+    element.dispatchEvent(new PointerEvent('pointerdown', eventInit));
+    element.dispatchEvent(new PointerEvent('pointerup', {...eventInit, buttons: 0}));
+  }
+  element.dispatchEvent(new MouseEvent('mousedown', eventInit));
+  element.dispatchEvent(new MouseEvent('mouseup', {...eventInit, buttons: 0}));
+  element.dispatchEvent(new MouseEvent('click', {...eventInit, buttons: 0}));
+}
+
+function delayLearningReplay(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function appendUniqueReferenceFile(current, file) {
   if (!file) return current;
+  if (isInvalidReferencePlaceholder(file)) return current;
   const nextPath = String(file.path || file.name || '');
   const nextName = String(file.name || nextPath);
   let found = false;
@@ -5598,6 +7185,57 @@ function appendUniqueReferenceFile(current, file) {
     return {...item, ...file};
   });
   return found ? merged : [...current, file];
+}
+
+function referenceFileKey(file) {
+  return String(file?.path || file?.name || '');
+}
+
+function normalizeReferenceImportPaths(paths = []) {
+  return Array.from(paths || [])
+    .map((path) => (typeof path === 'string' ? path : path?.path))
+    .map((path) => String(path || '').trim())
+    .filter(isNativeFilePath);
+}
+
+function isNativeFilePath(path) {
+  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || /^\\\\[^\\]+\\[^\\]+/.test(path);
+}
+
+function looksLikeReferenceLocalPath(path) {
+  const value = String(path || '').trim();
+  return value.startsWith('/') ||
+    value.startsWith('~/') ||
+    value.startsWith('$HOME/') ||
+    value.startsWith('./') ||
+    value.startsWith('../') ||
+    /^[A-Za-z]:[\\/]/.test(value) ||
+    /^\\\\[^\\]+\\[^\\]+/.test(value);
+}
+
+function isInvalidReferencePlaceholder(file) {
+  const path = String(file?.path || '').trim();
+  const name = String(file?.name || '').trim();
+  return (
+    file?.status === 'error'
+    && !path
+    && (!name || name === _t('system.unnamedFile') || name === _t('rightRail.unnamedFile'))
+  );
+}
+
+function reorderReferenceFiles(current, draggedKey, targetKey, placement = 'before') {
+  if (!draggedKey || !targetKey || draggedKey === targetKey) return current;
+  const fromIndex = current.findIndex((file) => referenceFileKey(file) === draggedKey);
+  const targetIndex = current.findIndex((file) => referenceFileKey(file) === targetKey);
+  if (fromIndex < 0 || targetIndex < 0) return current;
+
+  const next = [...current];
+  const [moved] = next.splice(fromIndex, 1);
+  const adjustedTargetIndex = next.findIndex((file) => referenceFileKey(file) === targetKey);
+  if (adjustedTargetIndex < 0) return current;
+  const insertIndex = placement === 'after' ? adjustedTargetIndex + 1 : adjustedTargetIndex;
+  next.splice(insertIndex, 0, moved);
+  return next;
 }
 
 function mergeReferenceLibraryFiles(current, libraryFiles) {
@@ -5621,9 +7259,14 @@ function referenceFileStatusLabel(status) {
   return {
     importing: '處理中',
     checking: '檢查中',
-    ready: '完成',
+    ready: '已載入',
     error: '失敗',
   }[status] || '已加入';
+}
+
+function shouldShowReferenceFileDetail(file) {
+  if (!file?.detail) return false;
+  return !(file.source === 'library' && file.status === 'ready');
 }
 
 function avatarStateLabel(state) {
@@ -6216,6 +7859,7 @@ function OnboardingOverlay({state, onCompleteStep, onFinish, onGoBack, onDetectC
   const [manualName, setManualName] = useState('');
   const [manualPath, setManualPath] = useState('');
   const [manualError, setManualError] = useState('');
+  const [localModelResults, setLocalModelResults] = useState([]);
   if (!state || !state.is_first_run) return null;
 
   const steps = state.steps || [];
@@ -6227,7 +7871,6 @@ function OnboardingOverlay({state, onCompleteStep, onFinish, onGoBack, onDetectC
   const isToolStep = current?.id === 'tool';
 
   // CLI + Local model 偵測 handler（只偵測，不註冊）
-  const [localModelResults, setLocalModelResults] = React.useState([]);
   async function runDetect() {
     setDetecting(true);
     try {
@@ -6496,8 +8139,9 @@ function SubToolConflictDialog({result, onResolve, onCancel}) {
 }
 
 function Sidebar({
-  adapters, adapterList, localModelOptions, activeSummaryModelId, activeAdapterId,
-  onAdapterSelect, onLocalModelSelect, onLocalAdapterWake, adapterCandidateLinks, activePanel,
+  adapters, adapterList, activeAdapterId,
+  adapterModelChoices, adapterModelOptions, onAdapterModelPick,
+  onAdapterSelect, onLocalAdapterWake, adapterCandidateLinks, activePanel,
   isToolPopupOpen, panelSettings, onPanelChange, voiceState, voiceInstallBusy,
   onVoiceSettingsChange, onVoiceSettingsRefresh, onVoiceModelInstall, onVoiceModelRemove, onRestoreDefaults, onTogglePanel,
   onToolPopupToggle, onProjectManageOpen, onCreateSubagent, onAdaptersReordered, onAdaptersChanged, onAdapterRemove,
@@ -6507,13 +8151,32 @@ function Sidebar({
   // §31: 拖曳狀態
   const [draggedAdapter, setDraggedAdapter] = useState(null);
   const draggedAdapterRef = useRef(null);
+  const adapterPointerDragRef = useRef(null);
+  const adapterPointerSelectRef = useRef({key: '', time: 0});
   const [exportDialog, setExportDialog] = useState(null); // {name, key} 或 null
+  // §M-1 model picker 彈窗：{adapterID, rect, label} 或 null
+  const [modelPicker, setModelPicker] = useState(null);
+  useEffect(() => {
+    if (!modelPicker) return;
+    const close = (ev) => {
+      if (ev.target && ev.target.closest && ev.target.closest('.adapter-model-picker')) return;
+      setModelPicker(null);
+    };
+    const esc = (ev) => { if (ev.key === 'Escape') setModelPicker(null); };
+    window.addEventListener('mousedown', close);
+    window.addEventListener('keydown', esc);
+    return () => {
+      window.removeEventListener('mousedown', close);
+      window.removeEventListener('keydown', esc);
+    };
+  }, [modelPicker]);
 
   // 優先使用 adapterList（含狀態的完整物件），fallback 用純名稱陣列
   const adapterItems = (adapterList && adapterList.length > 0)
-    ? adapterList.map((a) => {
-        const id = a.id || a.name;
-        const rawKind = String(a.kind || a.Kind || '').toLowerCase();
+    ? adapterList.map((raw) => {
+        const a = normalizeAdapterDTO(raw);
+        const id = adapterKey(a);
+        const rawKind = String(a.kind || '').toLowerCase();
         const inferredKind = rawKind || (String(id || '').startsWith('llm-api-') ? 'api' : ((a.name || id || '').toLowerCase() === 'main' ? 'main' : 'cli'));
         const rawName = a.name || a.id;
         const localProviderName = String(rawName || id || '').toLowerCase().includes('lm studio') ? 'LM Studio' : 'Ollama';
@@ -6524,8 +8187,8 @@ function Sidebar({
           icon: a.icon,
           status: a.status || 'offline',
           kind: inferredKind,
-          model: a.model || a.Model || '',
-          endpoint: a.endpoint || a.Endpoint || '',
+          model: a.model || '',
+          endpoint: a.endpoint || '',
           isMain: inferredKind === 'main' || (a.name || a.id || '').toLowerCase() === 'main',
         };
       })
@@ -6539,50 +8202,26 @@ function Sidebar({
         kind: name.toLowerCase() === 'main' ? 'main' : 'cli',
       }));
   const isRegistryAdapter = (item) => item && (item.kind === 'cli' || item.kind === 'api' || item.kind === 'local');
-  const registeredLocalModelIds = new Set(
-    adapterItems
-      .filter((item) => item.kind === 'local')
-      .map((item) => item.model || String(item.name || '').replace(/^Ollama\s*-\s*/i, '').replace(/^LM Studio\s*-\s*/i, ''))
-      .filter(Boolean),
-  );
-  const localModelItems = (localModelOptions || [])
-    .filter((model) => !registeredLocalModelIds.has(model.id))
-    .map((model) => ({
-      key: `local-model-${model.provider || 'local'}-${model.id}`,
-      name: model.label || model.id,
-      id: model.id,
-      provider: model.provider,
-      endpoint: model.endpoint,
-    }));
-
   /* i18n: adapter status */ const statusLabel = {online: t('adapter.statusOnline'), offline: t('adapter.statusOffline'), degraded: t('adapter.statusDegraded')};
 
-  // §31.3: 拖曳事件處理
-  const handleAdapterDragStart = (e, item) => {
-    if (item.isMain) { e.preventDefault(); return; } // main 不可拖
-    draggedAdapterRef.current = item.key;
-    setDraggedAdapter(item.key);
-    // 使用自訂 MIME type，避免 macOS 將拖曳資料當成文字檔落地到桌面
-    e.dataTransfer.setData('application/x-ai-console-adapter', item.key);
-    e.dataTransfer.setData('text/plain', item.key);
-    e.dataTransfer.effectAllowed = 'move';
+  const selectAdapterItem = (item, source = 'click') => {
+    if (source === 'click') {
+      const last = adapterPointerSelectRef.current;
+      if (last.key === item.key && Date.now() - last.time < 500) return;
+    }
+    if (source === 'pointer') {
+      adapterPointerSelectRef.current = {key: item.key, time: Date.now()};
+    }
+    onAdapterSelect?.(item.key);
+    const disconnected = item.status === 'offline' || item.status === 'error' || item.status === 'degraded';
+    if (item.kind === 'local' && disconnected) onLocalAdapterWake?.(item);
   };
 
-  const handleAdapterDragOver = (e, item) => {
-    const draggedKey = draggedAdapterRef.current || draggedAdapter;
+  const moveAdapterItem = (draggedKey, targetKey) => {
     const draggedItem = adapterItems.find((a) => a.key === draggedKey);
-    const bothSub = item.kind === 'sub' && draggedItem?.kind === 'sub';
-    const bothAdapters = isRegistryAdapter(item) && isRegistryAdapter(draggedItem);
-    if (!bothSub && !bothAdapters) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-  };
-
-  const handleAdapterDrop = (e, targetItem) => {
-    e.preventDefault();
-    const draggedKey = draggedAdapterRef.current || draggedAdapter;
-    const draggedItem = adapterItems.find((a) => a.key === draggedKey);
+    const targetItem = adapterItems.find((a) => a.key === targetKey);
     if (!draggedItem) return;
+    if (!targetItem) return;
     const bothSub = draggedItem.kind === 'sub' && targetItem.kind === 'sub';
     const bothAdapters = isRegistryAdapter(draggedItem) && isRegistryAdapter(targetItem);
     if (!bothSub && !bothAdapters) return;
@@ -6600,29 +8239,60 @@ function Sidebar({
         .then(() => onAdaptersChanged?.())
         .catch(console.error);
     }
-    draggedAdapterRef.current = null;
-    setDraggedAdapter(null);
   };
 
-  const handleAdapterDragEnd = (e) => {
-    // §31.3: 偵測拖出視窗 — 若放開位置在視窗外，觸發匯出對話框
-    // macOS 拖出視窗後 dragend 會回報 clientX/clientY = (0,0)，
-    // 且 dropEffect 為 'none'（OS 未接受自訂 MIME 拖放）。
-    const draggedKey = draggedAdapterRef.current || draggedAdapter;
-    if (draggedKey) {
-      const {clientX, clientY} = e;
-      const isZeroCoords = clientX === 0 && clientY === 0;
-      const inWindow = !isZeroCoords && clientX > 0 && clientY > 0
-        && clientX < window.innerWidth && clientY < window.innerHeight;
-      if (!inWindow && e.dataTransfer.dropEffect !== 'move') {
-        const item = adapterItems.find((a) => a.key === draggedKey);
-        if (item && !item.isMain) {
-          setExportDialog({name: item.name, key: item.key, kind: item.kind});
-        }
+  const startAdapterPointerDrag = (event, item) => {
+    selectAdapterItem(item, 'pointer');
+    if (!item || item.isMain) return;
+    adapterPointerDragRef.current = {
+      key: item.key,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+      pointerId: event.pointerId,
+    };
+    draggedAdapterRef.current = item.key;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const handleAdapterPointerMove = (event) => {
+    const drag = adapterPointerDragRef.current;
+    if (!drag) return;
+    const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+    if (distance < 8 && !drag.moved) return;
+    drag.moved = true;
+    event.preventDefault();
+    setDraggedAdapter(drag.key);
+    const target = document.elementFromPoint?.(event.clientX, event.clientY)?.closest?.('[data-adapter-key]');
+    const targetKey = target?.dataset?.adapterKey;
+    if (targetKey && targetKey !== drag.key) {
+      moveAdapterItem(drag.key, targetKey);
+    }
+  };
+
+  const finishAdapterPointerDrag = (event) => {
+    const drag = adapterPointerDragRef.current;
+    if (!drag) return;
+    event.currentTarget.releasePointerCapture?.(drag.pointerId ?? event.pointerId);
+    const leftWindow =
+      event.clientX <= 0 ||
+      event.clientY <= 0 ||
+      event.clientX >= window.innerWidth ||
+      event.clientY >= window.innerHeight;
+    const droppedOutside = leftWindow || (event.clientX === 0 && event.clientY === 0);
+    if (drag.moved && droppedOutside) {
+      const item = adapterItems.find((a) => a.key === drag.key);
+      if (item && !item.isMain) {
+        setExportDialog({name: item.name, key: item.key, kind: item.kind});
       }
     }
     draggedAdapterRef.current = null;
     setDraggedAdapter(null);
+    setTimeout(() => {
+      if (adapterPointerDragRef.current === drag) {
+        adapterPointerDragRef.current = null;
+      }
+    }, 0);
   };
 
   // §31.3: 匯出對話框操作
@@ -6667,18 +8337,36 @@ function Sidebar({
               className={`adapter-btn ${sourceClass}${isActive ? ' adapter-active' : ''}${draggedAdapter === item.key ? ' adapter-dragging' : ''}`}
               type="button"
               key={item.key}
-              draggable={!item.isMain}
-              onClick={() => {
-                onAdapterSelect?.(item.key);
-                if (item.kind === 'local' && disconnected) onLocalAdapterWake?.(item);
+              data-adapter-key={item.key}
+              draggable={false}
+              onPointerDown={(event) => startAdapterPointerDrag(event, item)}
+              onPointerMove={handleAdapterPointerMove}
+              onPointerUp={finishAdapterPointerDrag}
+              onPointerCancel={finishAdapterPointerDrag}
+              onDragStart={(event) => event.preventDefault()}
+              onClick={(event) => {
+                if (adapterPointerDragRef.current?.moved) {
+                  event.preventDefault();
+                  return;
+                }
+                selectAdapterItem(item);
               }}
-              onDoubleClick={() => {
+              onContextMenu={(event) => {
+                if (item.isMain) return;
+                event.preventDefault();
+                setExportDialog({name: item.name, key: item.key, kind: item.kind});
+              }}
+              onDoubleClick={(e) => {
+                e.preventDefault();
+                // §M-1：有候選清單就開 model picker；無候選保留原 local wake 行為
+                const opts = adapterModelOptions?.[item.key];
+                if (Array.isArray(opts) && opts.length > 0) {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  setModelPicker({adapterID: item.key, rect, label: item.displayName || item.name});
+                  return;
+                }
                 if (item.kind === 'local') onLocalAdapterWake?.(item);
               }}
-              onDragStart={(e) => handleAdapterDragStart(e, item)}
-              onDragOver={(e) => handleAdapterDragOver(e, item)}
-              onDrop={(e) => handleAdapterDrop(e, item)}
-              onDragEnd={handleAdapterDragEnd}
               title={`${titleName} — ${statusLabel[item.status] || item.status}${item.isMain ? '' : t('adapter.dragToUnlink')}`}
             >
               <span className="adapter-icon">{item.icon || meta.icon}</span>
@@ -6695,20 +8383,6 @@ function Sidebar({
             <span>{link.label || link.url}</span>
           </button>
         ))}
-        {localModelItems.map((model) => (
-          <button
-            className={`adapter-btn adapter-local-model${activeSummaryModelId === model.id ? ' adapter-active' : ''}`}
-            type="button"
-            key={model.key}
-            onClick={() => onLocalModelSelect?.(model)}
-            title={`${model.name}${model.endpoint ? ` — ${model.endpoint}` : ''}`}
-          >
-            <span className="adapter-icon">{model.provider === 'lmstudio' ? 'LM' : 'OL'}</span>
-            <span className="adapter-name">{model.name}</span>
-            <span className="adapter-source-badge">loc</span>
-            <span className="adapter-status-dot status-online" />
-          </button>
-        ))}
       </nav>
 
       {/* §31.3: 匯出對話框 */}
@@ -6720,8 +8394,8 @@ function Sidebar({
               <button type="button" onClick={() => handleExportAction('remove')}>{t('adapter.remove')}</button>
               <button
                 type="button"
-                disabled={exportDialog.kind === 'cli' || exportDialog.kind === 'api'}
-                className={exportDialog.kind === 'cli' || exportDialog.kind === 'api' ? 'export-action-disabled' : ''}
+                disabled={isRegistryAdapter(exportDialog)}
+                className={isRegistryAdapter(exportDialog) ? 'export-action-disabled' : ''}
                 onClick={() => handleExportAction('copy')}
               >
                 {t('adapter.copyAction')}
@@ -6761,6 +8435,42 @@ function Sidebar({
           onRestoreDefaults={onRestoreDefaults}
         />
       )}
+      {/* §M-1 model picker 彈窗 — 雙擊 adapter 卡片時顯示，貼在卡片右側 */}
+      {modelPicker && typeof document !== 'undefined' && createPortal(
+        <div
+          className="adapter-model-picker"
+          style={{
+            left: Math.max(12, Math.min(modelPicker.rect.right + 10, (typeof window !== 'undefined' ? window.innerWidth : 9999) - 300)),
+            top: Math.max(12, Math.min(modelPicker.rect.top, (typeof window !== 'undefined' ? window.innerHeight : 9999) - 360)),
+          }}
+        >
+          <header className="adapter-model-picker-head">
+            <div>
+              <div className="adapter-model-picker-title">{t('adapter.pickModel') || '選擇 model'}</div>
+              <small>{modelPicker.label || modelPicker.adapterID}</small>
+            </div>
+            <button type="button" aria-label={t('common.close')} onClick={() => setModelPicker(null)}>×</button>
+          </header>
+          {(adapterModelOptions?.[modelPicker.adapterID] || []).map((m) => {
+            const isActive = (adapterModelChoices?.[modelPicker.adapterID] || (adapterModelOptions[modelPicker.adapterID] || [])[0]) === m;
+            return (
+              <button
+                key={m}
+                type="button"
+                className={`adapter-model-picker-item${isActive ? ' active' : ''}`}
+                onClick={() => {
+                  onAdapterModelPick?.(modelPicker.adapterID, m);
+                  setModelPicker(null);
+                }}
+              >
+                <span>{m}</span>
+                {isActive && <b>{t('adapter.currentModel') || '目前'}</b>}
+              </button>
+            );
+          })}
+        </div>,
+        document.body
+      )}
     </aside>
   );
 }
@@ -6769,49 +8479,68 @@ function Sidebar({
 // I-5: externalServiceLinks / documentationLinks 來自 ListExternalLinksByType，取代靜態假資料。
 //       documentation 僅做參考顯示，不進工具執行區。
 // I-6 (#I-601): onReorder(toolId, newRank) 拖曳排序回呼 → 呼叫 SetToolPreference 儲存偏好。
-// §19.4 DAG 歷史列表元件（純唯讀，供除錯用）
-/* i18n: DAG history list */
-function DAGHistoryList() {
+// Recording catalog shown in the flow popup. DAG run history belongs in the
+// review/debug surfaces, not in the user's recording asset list.
+function RecordingCatalogList() {
   const t = useI18n(s => s.t);
-  const [runs, setRuns] = useState([]);
-  const [expanded, setExpanded] = useState(null);
+  const [recordings, setRecordings] = useState([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
-    callWails(() => ListDAGRunsFromIndex(20, ''))
-      .then((data) => setRuns(data || []))
-      .catch(() => setRuns([]))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    const loadRecordings = () => {
+      setLoading(true);
+      callWails(() => ListLearningReplayCatalog(20))
+        .then((data) => {
+          if (!cancelled) setRecordings(Array.isArray(data) ? data : []);
+        })
+        .catch(() => {
+          if (!cancelled) setRecordings([]);
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    };
+    loadRecordings();
+    const offStopped = EventsOn('visual_learning:recording_stopped', loadRecordings);
+    return () => {
+      cancelled = true;
+      offStopped && offStopped();
+    };
   }, []);
 
-  const statusIcons = { succeeded: '✅', failed: '❌', running: '🔄', blocked: '⏸', cancelled: '⊘', completed: '✅' };
-
-  if (loading) return <div className="dag-history-list"><small>{t('dag.historyLoading')}</small></div>;
-  if (!runs || runs.length === 0) return <div className="dag-history-list"><small>{t('dag.historyEmpty')}</small></div>;
+  if (loading) return <div className="recording-catalog-list"><div className="recording-catalog-state">{t('recordingCatalog.loading')}</div></div>;
+  if (!recordings || recordings.length === 0) return <div className="recording-catalog-list"><div className="recording-catalog-state">{t('recordingCatalog.empty')}</div></div>;
 
   return (
-    <div className="dag-history-list">
-      <div className="dag-history-title">{t('dag.historyTitle')}</div>
-      {runs.map((run) => (
-        <div key={run.run_id} className="dag-history-item">
-          <button type="button" className="dag-history-row" onClick={() => setExpanded(expanded === run.run_id ? null : run.run_id)}>
-            <span>{statusIcons[run.status] || '?'}</span>
-            <span className="dag-history-time">{run.started_at?.slice(0, 16)?.replace('T', ' ')}</span>
-            <span>{run.duration_ms ? `${(run.duration_ms / 1000).toFixed(1)}s` : '—'}</span>
-            <span>{run.node_count} nodes</span>
-          </button>
-          {run.error_summary && <small className="dag-history-error">{run.error_summary}</small>}
-          {expanded === run.run_id && (
-            <div className="dag-history-detail">
-              <div>Run ID: {run.run_id}</div>
-              <div>{t('dag.historyStatus')} {run.status}</div>
-              <div>{t('dag.historyFailedNode')} {run.failed_node_count || 0}</div>
-              {run.ended_at && <div>{t('dag.historyEnd')} {run.ended_at}</div>}
-            </div>
-          )}
-        </div>
-      ))}
+    <div className="recording-catalog-list">
+      <div className="recording-catalog-title">{t('recordingCatalog.title')}</div>
+      <div className="recording-catalog-grid">
+        {recordings.map((recording) => {
+          const tag = recording.tag || recording.operation_tag || recording.run_id || t('recordingCatalog.untitled');
+          const title = recording.title || recording.summary || tag;
+          const stoppedAt = recording.stopped_at ? new Date(recording.stopped_at).toLocaleString('zh-TW', {hour12: false}) : '';
+          return (
+            <button
+              key={recording.run_id || tag}
+              type="button"
+              className="recording-catalog-card"
+              data-full-title={title}
+              aria-label={`${tag} ${title}`}
+            >
+              {/* Keep recordings framed like tool cards so the flow popup stays visually unified. */}
+              <span className="recording-catalog-icon">◇</span>
+              <span className="recording-catalog-copy">
+                <strong>{tag}</strong>
+                <small>
+                  {recording.step_count || 0} {t('recordingCatalog.steps')}
+                  {stoppedAt ? ` · ${stoppedAt}` : ''}
+                </small>
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -6942,9 +8671,9 @@ function ToolPopup({side, tools, activeTab, favoriteToolIds, hiddenToolIds, tool
             </div>
           </div>
         )}
-        {/* §19.4 DAG 執行紀錄入口（純唯讀） */}
+        {/* Recording assets live here; DAG run history stays out of this list. */}
         {activeTab === 'flow' && (
-          <DAGHistoryList />
+          <RecordingCatalogList />
         )}
         {/* ── #44 工具清單：可用工具在前、斷線工具在後 ── */}
         {/* unavailable 工具：icon 加黑線打叉覆蓋，保持可見，不灰化 */}
@@ -7005,7 +8734,7 @@ function ToolPopup({side, tools, activeTab, favoriteToolIds, hiddenToolIds, tool
             key={link.id}
             type="button"
             title={t('link.docLinkTitle', { url: link.url })}
-            onClick={() => BrowserOpenURL(link.url)}
+            onClick={() => openExternal(link.url)}
           >
             <span className="tool-menu-icon">▤</span>
             <strong>{link.label || link.url}</strong>
@@ -7060,6 +8789,30 @@ function DragActionModal({ariaLabel, icon = '↗', title, detail = '', actions =
   );
 }
 
+function LearningReplayConfirmCard({pending, onConfirm, onCancel}) {
+  const step = pending?.result?.steps?.[pending?.stoppedStepOffset] || {};
+  const label = step.label || step.window_title || step.window_process || 'native-window';
+  return (
+    <div className="learning-replay-confirm" role="dialog" aria-label="Replay confirmation">
+      <header>
+        <strong>確認這一步</strong>
+        <span>OpenCV fallback</span>
+      </header>
+      <p>已把游標移到候選位置。確認後會點擊這一步並繼續剩餘 replay。</p>
+      <div className="learning-replay-confirm-grid">
+        <span>Step</span><strong>{step.index || pending?.stoppedStepOffset + 1}</strong>
+        <span>Target</span><strong>{label}</strong>
+        <span>Point</span><strong>{Math.round(Number(step.x || 0))}, {Math.round(Number(step.y || 0))}</strong>
+      </div>
+      {step.error && <small>{step.error}</small>}
+      <footer>
+        <button type="button" onClick={onCancel}>取消</button>
+        <button type="button" className="learning-replay-confirm-primary" onClick={onConfirm}>確認繼續</button>
+      </footer>
+    </div>
+  );
+}
+
 function ToolCopyConfirmModal({tool, onCancel, onConfirm}) {
   const t = useI18n(s => s.t);
   return (
@@ -7077,16 +8830,17 @@ function ToolCopyConfirmModal({tool, onCancel, onConfirm}) {
 
 // I-5 (#I-502): 兩段式流程 — 先 Preview 顯示 link_type，確認後才 Register。
 // linkPreview 為 null 表示尚未預覽；有值且 valid 時顯示確認按鈕。
-const cliPathExamples = [
-  {name: 'Ollama', path: '/opt/homebrew/bin/ollama'},
-  {name: 'Codex', path: '/Applications/Codex.app/Contents/Resources/codex'},
-  {name: 'Claude', path: '/opt/homebrew/bin/claude'},
-  {name: 'Gemini', path: '~/gemini_cli/node_modules/.bin/gemini'},
-];
-
 function ReferenceLinkModal({value, linkPreview, error, suggestions, onCancel, onChange, onUseSuggestion, onPreview, onConfirm}) {
   const {t} = useI18n();
-  const getLinkTypeLabel = () => ({external_service: t('link.externalService'), adapter_candidate: 'CLI Adapter', llm_provider_candidate: t('link.llmApiInterface'), documentation: t('link.docLinkShort'), unsupported: t('link.unsupported')});
+  const isOllamaModelLibraryPreview = linkPreview?.link_type === 'adapter_candidate' &&
+    /ollama|模型庫|本機模型|blobs|manifests|\.ollama[\\/]+models/i.test(`${value || ''} ${linkPreview?.url || ''} ${linkPreview?.reason || ''}`);
+  const getLinkTypeLabel = () => ({
+    external_service: t('link.externalService'),
+    adapter_candidate: isOllamaModelLibraryPreview ? '本地模型 Adapter' : 'CLI Adapter',
+    llm_provider_candidate: t('link.llmApiInterface'),
+    documentation: t('link.docLinkShort'),
+    unsupported: t('link.unsupported'),
+  });
   const linkTypeLabel = getLinkTypeLabel();
   // i18n: link
   return (
@@ -7177,9 +8931,9 @@ function LLMAPISetupModal({setup, guideStep, onGuideStepChange, onChange, onCanc
   ];
   const currentGuide = guide[Math.min(guideStep || 0, guide.length - 1)];
   const openHelp = (field) => {
-    if (field === 'apiKey' && setup.apiKeyURL) return BrowserOpenURL(setup.apiKeyURL);
-    if (setup.docsURL) return BrowserOpenURL(setup.docsURL);
-    BrowserOpenURL(`https://www.google.com/search?q=${encodeURIComponent(`${setup.providerName || 'LLM API'} ${field} official docs`)}`);
+    if (field === 'apiKey' && setup.apiKeyURL) return openExternal(setup.apiKeyURL);
+    if (setup.docsURL) return openExternal(setup.docsURL);
+    openExternal(`https://www.google.com/search?q=${encodeURIComponent(`${setup.providerName || 'LLM API'} ${field} official docs`)}`);
   };
   return (
     <div className="tool-drag-overlay" role="dialog" aria-modal="true" aria-label={t('llmSetup.setupTitle')}>
@@ -7194,7 +8948,7 @@ function LLMAPISetupModal({setup, guideStep, onGuideStepChange, onChange, onCanc
           <p>{currentGuide.body}</p>
           <div className="rb-guide-actions">
             {currentGuide.url && (
-              <button type="button" onClick={() => BrowserOpenURL(currentGuide.url)}>
+              <button type="button" onClick={() => openExternal(currentGuide.url)}>
                 {currentGuide.action}
               </button>
             )}
@@ -7263,6 +9017,76 @@ function AdapterRenameModal({target, draft, onDraftChange, onCancel, onSave}) {
   );
 }
 
+function WebSearchSetupModal({setup, config, error, onChange, onCancel, onClear, onSubmit}) {
+  const options = Array.isArray(setup?.options) && setup.options.length ? setup.options : defaultWebSearchProviderOptions();
+  const selected = options.find((option) => option.id === setup.providerId) || options[0];
+  const fields = Array.isArray(selected?.fields) ? selected.fields : ['api_key'];
+  const update = (key, value) => onChange({...setup, [key]: value});
+  const chooseProvider = (providerId) => onChange({
+    ...setup,
+    providerId,
+    apiKey: '',
+    cx: '',
+  });
+  return (
+    <div className="tool-drag-overlay" role="dialog" aria-modal="true" aria-label="Web search setup">
+      <section className="reference-link-modal web-search-setup-modal">
+        <h4>內建網路搜尋</h4>
+        <p className="reference-link-hint">
+          選擇搜尋供應商並輸入 API 欄位。金鑰會寫入 Windows DPAPI 加密 credential store，不會交給 Agent 或顯示在提示詞中。
+        </p>
+        <div className="web-search-provider-grid">
+          {options.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              className={option.id === setup.providerId ? 'web-search-provider-card web-search-provider-active' : 'web-search-provider-card'}
+              onClick={() => chooseProvider(option.id)}
+            >
+              <strong>{option.name}</strong>
+              <small>{option.free_tier_hint || option.id}</small>
+            </button>
+          ))}
+        </div>
+        <label>
+          <span>API Key</span>
+          <input
+            type="password"
+            value={setup.apiKey || ''}
+            onChange={(event) => update('apiKey', event.target.value)}
+            placeholder={selected?.id === 'tavily' ? 'tvly-...' : 'API key'}
+          />
+        </label>
+        {fields.includes('cx') && (
+          <label>
+            <span>Search Engine ID (cx)</span>
+            <input
+              type="text"
+              value={setup.cx || ''}
+              onChange={(event) => update('cx', event.target.value)}
+              placeholder="Programmable Search Engine ID"
+            />
+          </label>
+        )}
+        {config?.configured && (
+          <small className="reference-link-hint">
+            目前已設定：{config.provider || config.provider_id}
+          </small>
+        )}
+        {error && <div className="rb-error">{error}</div>}
+        <div className="rb-actions">
+          {selected?.docs_url && (
+            <button type="button" onClick={() => openExternal(selected.docs_url)}>官方文件</button>
+          )}
+          <button type="button" onClick={onSubmit}>儲存</button>
+          <button type="button" onClick={onClear}>清除設定</button>
+          <button type="button" className="rb-cancel-btn" onClick={onCancel}>取消</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 // I-6 (#I-602): Reauth Intercept Dialog
 // 工具 unavailable（lightning-fracture 狀態）時，點擊執行會被攔截到此 dialog。
 // 用戶可選「重試」（強制呼叫 ActivateTool）或「取消」。
@@ -7324,6 +9148,9 @@ function SettingsMenu({
 }) {
   const t = useI18n(s => s.t);
   const activePanelStyle = normalizePanelStyle(panel.panelStyle);
+  const panelLanguageValue = localizeBackendLabel(panel.panelLanguage, _panelLangLabelMap);
+  const roleLanguageValue = localizeBackendLabel(panel.roleLanguage, _roleLangLabelMap);
+  const fontPresetValue = localizeBackendLabel(panel.fontPreset, _fontPresetLabelMap);
   const [orderedStyleOptions, setOrderedStyleOptions] = useState(loadStyleOptionOrder);
   const [draggedStyleOption, setDraggedStyleOption] = useState('');
   const voiceSettings = voiceState?.settings || {languageMode: 'auto', manualLanguage: '', debugMode: false, commandMode: false};
@@ -7345,20 +9172,20 @@ function SettingsMenu({
         <SettingSelect
           icon="◎"
           label={t('settings.panelLanguage')}
-          value={panel.panelLanguage}
-          onNext={() => onPanelChange({panelLanguage: cycleValue([t('settings.langZhTW'), t('settings.langEn'), t('settings.langJa')], panel.panelLanguage)})}
+          value={panelLanguageValue}
+          onNext={() => onPanelChange({panelLanguage: cycleValue([t('settings.langZhTW'), t('settings.langEn'), t('settings.langJa')], panelLanguageValue)})}
         />
         <SettingSelect
           icon="♙"
           label={t('settings.roleLanguage')}
-          value={panel.roleLanguage}
-          onNext={() => onPanelChange({roleLanguage: cycleValue([t('settings.roleLangAuto'), t('settings.langZhTW'), t('settings.langEn')], panel.roleLanguage)})}
+          value={roleLanguageValue}
+          onNext={() => onPanelChange({roleLanguage: cycleValue([t('settings.roleLangAuto'), t('settings.langZhTW'), t('settings.langEn')], roleLanguageValue)})}
         />
         <SettingSelect
           icon="Aa"
           label={t('settings.fontPreset')}
-          value={panel.fontPreset}
-          onNext={() => onPanelChange({fontPreset: cycleValue([t('settings.fontDefault'), t('settings.fontRound'), t('settings.fontMono')], panel.fontPreset)})}
+          value={fontPresetValue}
+          onNext={() => onPanelChange({fontPreset: cycleValue([t('settings.fontDefault'), t('settings.fontRound'), t('settings.fontMono')], fontPresetValue)})}
         />
         <SettingSelect
           icon="Tt"
@@ -8552,6 +10379,7 @@ function TopConsole({
   onToggleRemoteBridge, onOpenRemoteBridgeMode, onSwitchRemoteBridgeMode,
   onRemoveRemoteBridge, onCloseRemoteBridgeModePopup,
   onOpenRemoteBridgeSetup, onRemoteBridgeRename, onTemporaryRemoteBridgeTest, onSaveRemoteBridgeInboundSecret, onMakeRemoteBridgePrimary,
+  subExportCapabilities,
   activeHaoraId, onHaoraSelect, onRenameHaora, onHaorasReordered, onSubagentsChanged,
 }) {
   const {t} = useI18n();
@@ -8568,7 +10396,13 @@ function TopConsole({
   const [currentPack, setCurrentPack] = useState('wolf');
   const [draggedHaoraKey, setDraggedHaoraKey] = useState(null);
   const [haoraExportDialog, setHaoraExportDialog] = useState(null);
+  const [editingHaoraKey, setEditingHaoraKey] = useState(null);
+  const [haoraNameDraft, setHaoraNameDraft] = useState('');
+  const [haoraDragPreview, setHaoraDragPreview] = useState(null);
   const [remoteInboundSecretDraft, setRemoteInboundSecretDraft] = useState('');
+  const haoraPointerDragRef = useRef(null);
+  const haoraNativeExportInFlightRef = useRef(false);
+  const nativeSubDragSupported = subExportCapabilities?.native_drag_supported === true;
   const haoraItems = (Array.isArray(subagentTabs) && subagentTabs.length > 0)
     ? [
         {key: 'main', id: 'main', name: haoras?.[0] || t('persona.mainHaora'), isMain: true},
@@ -8586,30 +10420,136 @@ function TopConsole({
         isMain: index === 0,
       }));
 
-  function moveHaoraTab(targetKey) {
-    if (!draggedHaoraKey || draggedHaoraKey === targetKey) return;
-    const fromIndex = haoraItems.findIndex((item) => item.key === draggedHaoraKey);
+  function moveHaoraTab(targetKey, {keepDragging = false} = {}) {
+    const sourceKey = draggedHaoraKey || haoraPointerDragRef.current?.key;
+    if (!sourceKey || sourceKey === targetKey) return;
+    const fromIndex = haoraItems.findIndex((item) => item.key === sourceKey);
     const toIndex = haoraItems.findIndex((item) => item.key === targetKey);
     if (fromIndex <= 0 || toIndex <= 0) return;
     const next = [...haoraItems];
     const [moved] = next.splice(fromIndex, 1);
     next.splice(toIndex, 0, moved);
-    setDraggedHaoraKey(null);
+    if (!keepDragging) setDraggedHaoraKey(null);
     onHaorasReordered?.(next.map((item) => item.name), next.filter((item) => !item.isMain).map((item) => item.id));
   }
 
   function finishHaoraDrag() {
     setDraggedHaoraKey(null);
+    setHaoraDragPreview(null);
+  }
+
+  function startHaoraPointerDrag(event, haora, options = {}) {
+    if (!options.skipDebug) {
+      markHaoraDragDebug('pointerdown', haora, `native=${nativeSubDragSupported ? 'yes' : 'no'}`);
+    }
+    if (!haora || haora.isMain || editingHaoraKey) return;
+    haoraPointerDragRef.current = {
+      key: haora.key,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+      nativeStarted: false,
+      pointerId: event.pointerId,
+    };
+    setDraggedHaoraKey(haora.key);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function handleHaoraPointerMove(event) {
+    const drag = haoraPointerDragRef.current;
+    if (!drag || drag.nativeStarted) return;
+    const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+    if (distance < 8 && !drag.moved) return;
+    drag.moved = true;
+    event.preventDefault();
+    markHaoraDragDebug('pointermove', {name: drag.key}, `distance=${Math.round(distance)}`);
+    const haora = haoraItems.find((item) => item.key === drag.key);
+    if (haora && !haora.isMain) {
+      setHaoraDragPreview({
+        key: haora.key,
+        name: haora.name,
+        x: event.clientX,
+        y: event.clientY,
+      });
+    }
+    const leavingWindow =
+      event.clientX <= 2 ||
+      event.clientY <= 2 ||
+      event.clientX >= window.innerWidth - 2 ||
+      event.clientY >= window.innerHeight - 2;
+    if (leavingWindow && nativeSubDragSupported && haora && !haora.isMain) {
+      drag.nativeStarted = true;
+      // DOM previews cannot leave WebView; hand off to OS drag at the window edge.
+      event.currentTarget.releasePointerCapture?.(drag.pointerId ?? event.pointerId);
+      setDraggedHaoraKey(null);
+      setHaoraDragPreview(null);
+      haoraPointerDragRef.current = null;
+      startNativeHaoraExport(haora);
+      return;
+    }
+    const target = document.elementFromPoint?.(event.clientX, event.clientY)?.closest?.('[data-haora-key]');
+    const targetKey = target?.dataset?.haoraKey;
+    if (!targetKey || targetKey === 'main' || targetKey === drag.key) return;
+    moveHaoraTab(targetKey, {keepDragging: true});
+  }
+
+  function finishHaoraPointerDrag(event) {
+    const drag = haoraPointerDragRef.current;
+    if (!drag) return;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    setDraggedHaoraKey(null);
+    setHaoraDragPreview(null);
+    setTimeout(() => {
+      if (haoraPointerDragRef.current === drag) {
+        haoraPointerDragRef.current = null;
+      }
+    }, 0);
+  }
+
+  function startInlineHaoraRename(event, haora) {
+    if (!haora || haora.isMain) return;
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    setDraggedHaoraKey(null);
+    setEditingHaoraKey(haora.key);
+    setHaoraNameDraft(haora.name || '');
+  }
+
+  function cancelInlineHaoraRename() {
+    setEditingHaoraKey(null);
+    setHaoraNameDraft('');
+  }
+
+  async function commitInlineHaoraRename(haora) {
+    if (!haora || editingHaoraKey !== haora.key) return;
+    const next = haoraNameDraft.trim();
+    setEditingHaoraKey(null);
+    setHaoraNameDraft('');
+    if (!next || next === haora.name) return;
+    await onRenameHaora?.(haora.name, next);
+  }
+
+  function formatHaoraNativeDropDetail(result) {
+    const landed = result?.landed_path || result?.message || t('subagent.dragNativeFailed');
+    if (!result?.drop_target_kind || !result?.drop_target_dir) return landed;
+    return `${landed}\n${result.drop_target_kind}: ${result.drop_target_dir}`;
   }
 
   function showNativeHaoraExportDialog(result, fallbackHaora = null) {
-    if (result?.status !== 'success' || !result?.landed_path) return;
+    if (result?.status !== 'success' || !result?.landed_path) {
+      if (result?.message) {
+        markHaoraDragDebug('native-no-drop', fallbackHaora, result.message);
+      }
+      return;
+    }
     setHaoraExportDialog({
       id: result.sub_id || fallbackHaora?.id || '',
       name: result.display_name || fallbackHaora?.name || 'subagent',
       tempExportDir: result.export_dir,
       landedPath: result.landed_path,
+      landedDetail: formatHaoraNativeDropDetail(result),
       newSystemCode: result.new_system_code,
+      nativeFailed: false,
     });
   }
 
@@ -8621,21 +10561,49 @@ function TopConsole({
     return () => offNativeSubExport();
   }, []);
 
-  async function startNativeHaoraExport(event, haora) {
-    if (haora.isMain) {
-      event.preventDefault();
+  async function startNativeHaoraExport(haora) {
+    if (!haora || haora.isMain) return;
+    if (haoraNativeExportInFlightRef.current) {
+      markHaoraDragDebug('native-skip', haora, 'already-running');
       return;
     }
-    event.preventDefault();
+    haoraNativeExportInFlightRef.current = true;
+    markHaoraDragDebug('native-call', haora);
+    setHaoraDragPreview(null);
     setDraggedHaoraKey(haora.key);
     try {
       const result = await callWails(() => NativeDragExportSubHandler(haora.id, haora.name, 'export_copy', '[]'));
       setDraggedHaoraKey(null);
+      if (result?.status && result.status !== 'success') {
+        markHaoraDragDebug('native-result', haora, result.status);
+      }
       showNativeHaoraExportDialog(result, haora);
     } catch (err) {
       setDraggedHaoraKey(null);
+      markHaoraDragDebug('native-error', haora, err?.message || String(err));
       console.error('[NATIVE SUB EXPORT]', err);
+    } finally {
+      haoraNativeExportInFlightRef.current = false;
     }
+  }
+
+  function startNativeHaoraExportDrag(event, haora) {
+    event.preventDefault();
+    event.stopPropagation();
+    markHaoraDragDebug('dragstart', haora, `native=${nativeSubDragSupported ? 'yes' : 'no'}`);
+    if (!nativeSubDragSupported || !haora || haora.isMain) return;
+    if (haoraPointerDragRef.current?.key === haora.key) {
+      haoraPointerDragRef.current.nativeStarted = true;
+      haoraPointerDragRef.current = null;
+    }
+    startNativeHaoraExport(haora);
+  }
+
+  function markHaoraDragDebug(stage, haora = null, detail = '') {
+    const name = haora?.name || haora?.key || '';
+    const time = new Date().toLocaleTimeString('zh-TW', {hour12: false});
+    const message = `${time} ${stage}${name ? ` ${name}` : ''}${detail ? ` ${detail}` : ''}`;
+    console.info('[HAORA DRAG]', message);
   }
 
   async function handleHaoraExportAction(action) {
@@ -9066,27 +11034,65 @@ function TopConsole({
             const isActiveHaora = haora.isMain
               ? !haoraItems.some((item) => !item.isMain && (item.id === activeHaoraId || item.name === activeHaoraId))
               : (haora.id === activeHaoraId || haora.name === activeHaoraId);
+            const isEditingHaora = editingHaoraKey === haora.key;
+            if (isEditingHaora) {
+              return (
+                <div
+                  className={`haora-card haora-card-editing ${haora.isMain ? 'haora-card-main' : ''} ${isActiveHaora ? 'haora-card-active' : ''}`}
+                  key={haora.key}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <input
+                    className="haora-name-input"
+                    autoFocus
+                    value={haoraNameDraft}
+                    onChange={(event) => setHaoraNameDraft(event.target.value)}
+                    onBlur={() => commitInlineHaoraRename(haora)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        commitInlineHaoraRename(haora);
+                      }
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        cancelInlineHaoraRename();
+                      }
+                    }}
+                  />
+                  {isActiveHaora && <i aria-hidden="true"/>}
+                </div>
+              );
+            }
             return (
               <button
                 className={`haora-card ${haora.isMain ? 'haora-card-main' : ''} ${isActiveHaora ? 'haora-card-active' : ''} ${draggedHaoraKey === haora.key ? 'haora-card-dragging' : ''}`}
                 type="button"
                 key={haora.key}
-                draggable={!haora.isMain}
-                title={haora.isMain ? t('subagent.switchToMain') : t('subagent.haoraTitle')}
-                onClick={() => onHaoraSelect?.(haora)}
-                onDragStart={(event) => startNativeHaoraExport(event, haora)}
-                onDragOver={(event) => {
-                  if (!haora.isMain && draggedHaoraKey != null) {
+                data-haora-key={haora.key}
+                draggable={false}
+                title={haora.isMain
+                  ? t('subagent.switchToMain')
+                  : nativeSubDragSupported
+                    ? t('subagent.haoraTitle')
+                    : (subExportCapabilities?.message || t('subagent.haoraTitle'))}
+                onClick={(event) => {
+                  if (haoraPointerDragRef.current?.moved) {
                     event.preventDefault();
-                    event.dataTransfer.dropEffect = 'move';
+                    return;
                   }
+                  onHaoraSelect?.(haora);
                 }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  moveHaoraTab(haora.key);
+                onDragStart={(event) => event.preventDefault()}
+                onPointerDown={(event) => {
+                  const draggable = !haora.isMain && nativeSubDragSupported;
+                  markHaoraDragDebug('pointerdown', haora, `native=${nativeSubDragSupported ? 'yes' : 'no'} draggable=${draggable ? 'yes' : 'no'}`);
+                  startHaoraPointerDrag(event, haora, {skipDebug: true});
                 }}
-                onDragEnd={finishHaoraDrag}
-                onDoubleClick={() => !haora.isMain && onRenameHaora?.(haora.name)}
+                onPointerMove={handleHaoraPointerMove}
+                onPointerUp={finishHaoraPointerDrag}
+                onPointerCancel={finishHaoraPointerDrag}
+                onLostPointerCapture={finishHaoraDrag}
+                onDoubleClick={(event) => startInlineHaoraRename(event, haora)}
               >
                 <span>{haora.name}</span>
                 {/* 亮點只跟著目前 active 的 haㄌer/sub。 */}
@@ -9096,17 +11102,30 @@ function TopConsole({
           })}
         </div>
       </div>
+      {haoraDragPreview && (
+        <div
+          className="haora-drag-preview"
+          style={{
+            transform: `translate(${Math.round(haoraDragPreview.x)}px, ${Math.round(haoraDragPreview.y)}px) translate(12px, -50%)`,
+          }}
+          aria-hidden="true"
+        >
+          {haoraDragPreview.name}
+        </div>
+      )}
       {haoraExportDialog && (
         <DragActionModal
           ariaLabel={t('subagent.dragTitle')}
           icon="ha"
           title={haoraExportDialog.name}
-          detail={haoraExportDialog.landedPath}
-          actions={[
-            {label: t('adapter.remove'), onClick: () => handleHaoraExportAction('remove')},
-            {label: t('adapter.copyAction'), onClick: () => handleHaoraExportAction('copy')},
-            {label: t('common.cancel'), onClick: () => handleHaoraExportAction('cancel')},
-          ]}
+          detail={haoraExportDialog.landedDetail || haoraExportDialog.landedPath}
+          actions={haoraExportDialog.nativeFailed
+            ? [{label: t('common.close'), onClick: () => setHaoraExportDialog(null)}]
+            : [
+                {label: t('adapter.remove'), onClick: () => handleHaoraExportAction('remove')},
+                {label: t('adapter.copyAction'), onClick: () => handleHaoraExportAction('copy')},
+                {label: t('common.cancel'), onClick: () => handleHaoraExportAction('cancel')},
+              ]}
         />
       )}
       <div className="top-function-stack">
@@ -9471,8 +11490,62 @@ function MicIcon() {
   );
 }
 
+// SEC-06: 訊息內 URL 偵測（與後端 urlInTextRe 對齊）。
+const MESSAGE_URL_RE = /https?:\/\/[^\s'"<>）)】\]]+/g;
+
+// MessageText 把訊息文字 linkify：每個 URL 旁加來源 chip + 「讀取」按鈕。
+// AI 訊息內的 URL 在渲染時記為 llm_extracted（閉合洗白防護）；
+// 使用者貼上的 URL 後端送出時已記 user_paste，前端不重複記。
+function MessageText({ text, kind, onInjectText, sessionId }) {
+  const urls = React.useMemo(() => {
+    const found = text.match(MESSAGE_URL_RE);
+    return found ? Array.from(new Set(found)) : [];
+  }, [text]);
+
+  // 閉合洗白防護：AI 回答裡的 URL 記成 llm_extracted。
+  React.useEffect(() => {
+    if (kind !== 'ai' || urls.length === 0) return;
+    urls.forEach((u) => {
+      try {
+        RegisterURLOccurrence(u, 'llm_extracted', sessionId || '', '').catch(() => {});
+      } catch { /* binding 缺失（測試環境）忽略 */ }
+    });
+  }, [kind, urls, sessionId]);
+
+  if (urls.length === 0) return <>{text}</>;
+
+  // 以 URL 切段，URL 段渲染成連結 + chip + 讀取按鈕。
+  const parts = text.split(MESSAGE_URL_RE);
+  const matches = text.match(MESSAGE_URL_RE) || [];
+  return (
+    <>
+      {parts.map((seg, i) => (
+        <React.Fragment key={i}>
+          {seg}
+          {i < matches.length && (
+            <span className="url-token">
+              <a
+                href={matches[i]}
+                onClick={(e) => { e.preventDefault(); onInjectText?.(matches[i]); }}
+                title="點擊選擇讀取或開啟"
+              >{matches[i]}</a>
+              {kind === 'ai' && <span className="url-source-chip url-source-llm" title="此網址由 LLM 擷取，內容未經信任">LLM 擷取</span>}
+              <button
+                type="button"
+                className="url-read-btn"
+                onClick={(e) => { e.stopPropagation(); onInjectText?.(`讀取 ${matches[i]} 的內容`); }}
+              >讀取內容</button>
+            </span>
+          )}
+        </React.Fragment>
+      ))}
+    </>
+  );
+}
+
 function ConversationPanel({
   messages, personaName, draft, onDraftChange, onSend, onDelete, onSummarizeSearch,
+  onInjectText, activeConversationId,
   // v3.6.4 Readiness Gate props
   readinessGate = fallbackReadinessGate,
   longPressProgress = 0, gachaPhase = null, riskImpactExpanded = false,
@@ -9483,10 +11556,13 @@ function ConversationPanel({
   voiceState = null, voiceRecording = false, voiceBusy = false, voiceStatus = '', voiceError = '',
   onVoicePressStart, onVoicePressEnd, onVoiceCancel,
   taskActive = false, onCancelTask,
+  pendingTaskReview = null, taskReviewDetailsOpen = false,
+  onConfirmTaskReview, onCancelTaskReview, onShowTaskReviewDetails,
 }) {
   const t = useI18n(s => s.t);
   const [activeMessage, setActiveMessage] = useState(null);
   const composerComposingRef = useRef(false);
+  const taskReviewCardRef = useRef(null);
   const voiceReady = voiceState?.status === 'ready';
   const micAvailable = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
   const voiceDisabled = voiceBusy || !voiceReady || !micAvailable;
@@ -9501,16 +11577,44 @@ function ConversationPanel({
   };
   const isLocalSearchMessage = (message) => message.startsWith('Ai:本機搜尋');
 
+  useEffect(() => {
+    if (!pendingTaskReview?.id) return;
+    window.requestAnimationFrame(() => {
+      taskReviewCardRef.current?.scrollIntoView({block: 'center', behavior: 'smooth'});
+    });
+  }, [pendingTaskReview?.id]);
+
+  // SEC-06 UX: 新訊息進來（含「讀取內容」按鈕注入）時自動捲到底，
+  // 讓使用者立刻看到最新狀態，不會以為點了沒反應。只在訊息變多時捲。
+  const messageListRef = useRef(null);
+  const prevMessageCountRef = useRef(messages.length);
+  useEffect(() => {
+    if (messages.length > prevMessageCountRef.current) {
+      window.requestAnimationFrame(() => {
+        const el = messageListRef.current;
+        if (el) el.scrollTo({top: el.scrollHeight, behavior: 'smooth'});
+      });
+    }
+    prevMessageCountRef.current = messages.length;
+  }, [messages.length]);
+
   return (
     <section className="conversation-panel">
-      <div className="message-list">
+      <div className="message-list" ref={messageListRef}>
         {messages.map((message, index) => (
           <article
             className={`message-row message-${messageKind(message)} ${activeMessage === index ? 'message-row-active' : ''}`}
             key={`${message}-${index}`}
             onClick={() => setActiveMessage(index)}
           >
-            <span className="message-text">{displayMessage(message)}</span>
+            <div className="message-text">
+              <MessageText
+                text={displayMessage(message)}
+                kind={messageKind(message)}
+                onInjectText={onInjectText}
+                sessionId={activeConversationId}
+              />
+            </div>
             {isLocalSearchMessage(message) && (
               <button
                 type="button"
@@ -9535,6 +11639,39 @@ function ConversationPanel({
             </button>
           </article>
         ))}
+        {pendingTaskReview && (
+          <article className="task-review-inline-card" ref={taskReviewCardRef}>
+            <header>
+              <strong>需要你確認這一步</strong>
+              <span>待確認</span>
+            </header>
+            <div className="task-review-inline-grid">
+              <div>
+                <small>這一步要做什麼</small>
+                <p>{pendingTaskReview.title}</p>
+              </div>
+              <div>
+                <small>為什麼需要確認</small>
+                <p>{pendingTaskReview.reason}</p>
+              </div>
+            </div>
+            <p className="task-review-inline-impact">會影響：{pendingTaskReview.impact}</p>
+            <p className="task-review-inline-impact">使用的工具/模型：{pendingTaskReview.tool}</p>
+            <footer>
+              <button type="button" className="task-review-detail-btn" onClick={onShowTaskReviewDetails}>
+                {taskReviewDetailsOpen ? '關閉' : '查看內容'}
+              </button>
+              <button type="button" className="task-review-cancel-btn" onClick={onCancelTaskReview}>取消</button>
+              <button
+                type="button"
+                className="task-review-confirm-btn"
+                onClick={() => onConfirmTaskReview?.(pendingTaskReview.id)}
+              >
+                確認執行
+              </button>
+            </footer>
+          </article>
+        )}
       </div>
 
       {/* ── v3.6.4 Readiness Gate 輸入框上方區域 ──
@@ -9813,7 +11950,7 @@ function ReviewPanel({
                       </small>
                       {node.resultSummary && <small>{node.resultSummary}</small>}
                     </div>
-                    <em>{node.risk}</em>
+                    <em>{formatNodeRiskLabel(node)}</em>
                   </div>
                 ))}
               </div>
@@ -10416,11 +12553,71 @@ function RightRail({
   onRecordingToggle,
   onReferenceFileDrop,
   onReferenceFileDragOut,
+  onReferenceFileReorder,
+  onReferenceInternalDrag,
   onReferenceLinkOpen,
+  onReferenceCardDoubleClick,
+  onReferenceFailedRemove,
   onToolFavorite,
   onToolPopupToggle,
 }) {
   const t = useI18n(s => s.t);
+  const [draggedReferenceKey, setDraggedReferenceKey] = useState('');
+  const draggedReferenceKeyRef = useRef('');
+
+  function handleReferenceDragStart(event, file) {
+    const fileKey = referenceFileKey(file);
+    if (!fileKey) {
+      event.preventDefault();
+      return;
+    }
+    // §M3+ 失敗 entry：三層保險阻止 OS 拿到任何 drag payload
+    const isFailed = file?.status === 'error' || file?.source !== 'library';
+    if (isFailed) {
+      try {
+        // 1. 清空 dataTransfer 內容（避免 text/plain 變 .textClipping）
+        event.dataTransfer?.clearData?.();
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = 'none';
+          event.dataTransfer.setData('text/plain', '');
+        }
+      } catch (_) { /* old browsers */ }
+      // 2. 阻止預設 drag 行為
+      event.preventDefault();
+      event.stopPropagation();
+      // 3. 立即從 state 移除（即使 drag 真的被啟動，state 也已乾淨）
+      onReferenceFailedRemove?.(fileKey);
+      return false;
+    }
+    draggedReferenceKeyRef.current = fileKey;
+    onReferenceInternalDrag?.(true);
+    setDraggedReferenceKey(fileKey);
+    event.dataTransfer.effectAllowed = 'copyMove';
+    // §M3+ 不用 text/plain（macOS 會把 path-like text 升級成 file drag、誤觸 import）。
+    // 改用 custom MIME；OS 不認得，drop 在外面也不會建桌面假檔；reorder 只看 draggedReferenceKeyRef。
+    try { event.dataTransfer.setData('application/x-ai-console-ref-key', fileKey); } catch (_) {}
+    void onReferenceFileDragOut?.(file);
+  }
+
+  function handleReferenceDragOver(event, file) {
+    const draggedKey = draggedReferenceKeyRef.current;
+    const targetKey = referenceFileKey(file);
+    if (!draggedKey || !targetKey || draggedKey === targetKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'move';
+    const rect = event.currentTarget.getBoundingClientRect();
+    const placement = event.clientY > rect.top + (rect.height / 2) ? 'after' : 'before';
+    onReferenceFileReorder?.(draggedKey, targetKey, placement);
+  }
+
+  function finishReferenceDrag(event) {
+    event?.stopPropagation?.();
+    draggedReferenceKeyRef.current = '';
+    onReferenceInternalDrag?.(false);
+    setDraggedReferenceKey('');
+  }
+
   return (
     <aside
       className="right-panel"
@@ -10435,6 +12632,12 @@ function RightRail({
         }
       }}
       onDrop={(event) => {
+        // §M3+ 內部 reorder drag 不應觸發 import；以 draggedReferenceKeyRef 為憑。
+        if (draggedReferenceKeyRef.current) {
+          event.preventDefault();
+          finishReferenceDrag(event);
+          return;
+        }
         if (event.dataTransfer.files?.length) {
           event.preventDefault();
           onReferenceFileDrop(Array.from(event.dataTransfer.files));
@@ -10489,6 +12692,11 @@ function RightRail({
         onDrop={(event) => {
           event.preventDefault();
           event.stopPropagation();
+          // §M3+ 同上：reorder 不觸發 import
+          if (draggedReferenceKeyRef.current) {
+            finishReferenceDrag(event);
+            return;
+          }
           if (event.dataTransfer.files?.length) {
             onReferenceFileDrop(Array.from(event.dataTransfer.files));
           }
@@ -10497,33 +12705,60 @@ function RightRail({
         <span>▤</span>
         <span>{t('rightRail.citeFile')}</span>
       </div>
-      <div className="reference-file-list">
-        {referenceFiles.map((file, index) => (
+      <div
+        className="reference-file-list"
+        onDragOver={(event) => {
+          if (!draggedReferenceKeyRef.current) return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = 'move';
+        }}
+        onDrop={finishReferenceDrag}
+      >
+        {referenceFiles.map((file, index) => {
+          const fileKey = referenceFileKey(file) || `${file.path}-${index}`;
+          const isDragging = draggedReferenceKey === fileKey;
+          return (
           <div
-            className="reference-file-name"
+            className={`reference-file-name${isDragging ? ' reference-file-dragging' : ''}`}
             data-status={file.status || 'ready'}
-            data-draggable={file.source === 'library' ? 'true' : 'false'}
-            draggable={file.source === 'library'}
-            key={`${file.path}-${index}`}
+            data-draggable="true"
+            draggable
+            key={fileKey}
             title={file.detail || file.path}
-            onDragStart={(event) => {
-              if (file.source !== 'library') {
-                event.preventDefault();
-                return;
+            onDragStart={(event) => handleReferenceDragStart(event, file)}
+            onDragOver={(event) => handleReferenceDragOver(event, file)}
+            onDrop={finishReferenceDrag}
+            onDragEnd={(event) => {
+              // §M3+ 失敗 entry 拖到 window 外 → 移除（同 ToolPopup 的 leftWindow pattern）
+              const leftWindow =
+                event.clientX <= 0 ||
+                event.clientY <= 0 ||
+                event.clientX >= window.innerWidth ||
+                event.clientY >= window.innerHeight;
+              const droppedOutside = leftWindow || (event.clientX === 0 && event.clientY === 0);
+              const isFailed = file?.status === 'error' || file?.source !== 'library';
+              finishReferenceDrag(event);
+              if (droppedOutside && isFailed) {
+                onReferenceFailedRemove?.(referenceFileKey(file));
               }
+            }}
+            onDoubleClick={(event) => {
               event.preventDefault();
-              onReferenceFileDragOut?.(file);
+              const rect = event.currentTarget.getBoundingClientRect();
+              onReferenceCardDoubleClick?.(file, rect);
             }}
           >
             <div className="reference-file-main">
               <span className="reference-file-title">
-                {twoLineFileName(file.name).map((line, lineIndex) => <span key={lineIndex}>{line}</span>)}
+                {twoLineFileName(file.name, t('rightRail.unnamedFile')).map((line, lineIndex) => <span key={lineIndex}>{line}</span>)}
               </span>
               <small className="reference-file-status">{referenceFileStatusLabel(file.status)}</small>
             </div>
-            {file.detail && <small className="reference-file-detail">{file.detail}</small>}
+            {shouldShowReferenceFileDetail(file) && <small className="reference-file-detail">{file.detail}</small>}
           </div>
-        ))}
+          );
+        })}
       </div>
       <button className="tool-card tool-use-bottom" type="button" onClick={onToolPopupToggle}>
         <span>{isToolPopupOpen ? '×' : '⌕'}</span>
@@ -10533,8 +12768,8 @@ function RightRail({
   );
 }
 
-function twoLineFileName(name) {
-  const chars = Array.from(String(name || _t('rightRail.unnamedFile')));
+function twoLineFileName(name, fallback = 'Unnamed File') {
+  const chars = Array.from(String(name || fallback));
   const first = chars.slice(0, 20).join('');
   const second = chars.slice(20, 40).join('');
   return second ? [first, second] : [first];
@@ -10673,6 +12908,26 @@ function PackageConfirmModal({pending, packageData, error, onConfirm, onReject})
 function SessionCloseDialog({analysis, onSave, onDiscard, onCancel}) {
   const t = useI18n(s => s.t);
   const [subName, setSubName] = useState(analysis?.suggested_name || '');
+  if (analysis?.mode === 'active_task') {
+    return (
+      <div className="session-close-overlay" role="dialog" aria-modal="true" aria-label={t("session.closeConfirmLabel")}>
+        <div className="session-close-dialog">
+          <h3>{t('session.closeTaskTitle')}</h3>
+          <p className="session-close-hint">
+            {t('session.closeTaskHint')}
+          </p>
+          <div className="session-close-actions">
+            <button type="button" className="session-close-btn session-close-save" onClick={onDiscard}>
+              {t('session.closeTaskConfirm')}
+            </button>
+            <button type="button" className="session-close-btn session-close-discard" onClick={onCancel}>
+              {t('session.goBack')}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (analysis?.mode === 'active_sub') {
     return (
       <div className="session-close-overlay" role="dialog" aria-modal="true" aria-label={t("session.closeConfirmLabel")}>

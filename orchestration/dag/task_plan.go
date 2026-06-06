@@ -19,14 +19,16 @@ type TaskPlan struct {
 }
 
 type TaskPlanNode struct {
-	ID           string   `json:"id"`
-	Title        string   `json:"title"`
-	ExecutorType string   `json:"executor_type"`
-	ActionCode   string   `json:"action_code"`
-	Action       string   `json:"action"`
-	Target       string   `json:"target"`
-	RiskClass    string   `json:"risk_class"`
-	Dependencies []string `json:"dependencies"`
+	ID             string   `json:"id"`
+	Title          string   `json:"title"`
+	ExecutorType   string   `json:"executor_type"`
+	ActionCode     string   `json:"action_code"`
+	Action         string   `json:"action"`
+	Target         string   `json:"target"`
+	RiskClass      string   `json:"risk_class"`
+	ModelRiskClass string   `json:"model_risk_class,omitempty"`
+	Dependencies   []string `json:"dependencies"`
+	ParallelRoot   bool     `json:"parallel_root,omitempty"` // TASK 31：標記合法平行起始節點（可無依賴）
 }
 
 type NormalizeResult struct {
@@ -83,6 +85,7 @@ func ValidateAndNormalizePlan(plan TaskPlan) (NormalizeResult, error) {
 		n.Action = strings.TrimSpace(n.Action)
 		n.Target = strings.TrimSpace(n.Target)
 		n.RiskClass = strings.TrimSpace(n.RiskClass)
+		n.ModelRiskClass = strings.TrimSpace(n.ModelRiskClass)
 		if n.Title == "" || n.ExecutorType == "" || n.ActionCode == "" || n.Action == "" || n.Target == "" || n.RiskClass == "" {
 			return NormalizeResult{}, fmt.Errorf("node %s missing required fields", n.ID)
 		}
@@ -97,6 +100,10 @@ func ValidateAndNormalizePlan(plan TaskPlan) (NormalizeResult, error) {
 		modelRisk := risk.RiskClass(n.RiskClass)
 		if !validRisk(modelRisk) {
 			return NormalizeResult{}, fmt.Errorf("node %s unsupported risk_class: %s", n.ID, n.RiskClass)
+		}
+		// Preserve the model's original risk so UI/debug can show backend elevation.
+		if n.ModelRiskClass == "" {
+			n.ModelRiskClass = n.RiskClass
 		}
 		classified := risk.ClassifyOperation(n.ActionCode, []string{n.Action, n.Target})
 		finalRisk := risk.Max(modelRisk, classified)
@@ -135,16 +142,18 @@ func TaskPlanToNodes(plan TaskPlan) []DAGNode {
 	nodes := make([]DAGNode, 0, len(plan.Nodes))
 	for _, n := range plan.Nodes {
 		nodes = append(nodes, DAGNode{
-			ID:           n.ID,
-			Title:        n.Title,
-			Operation:    n.ActionCode,
-			Action:       n.Action,
-			ActionCode:   n.ActionCode,
-			Target:       n.Target,
-			ExecutorType: n.ExecutorType,
-			RiskClass:    n.RiskClass,
-			Status:       StatusPlanned,
-			Dependencies: append([]string(nil), n.Dependencies...),
+			ID:             n.ID,
+			Title:          n.Title,
+			Operation:      n.ActionCode,
+			Action:         n.Action,
+			ActionCode:     n.ActionCode,
+			Target:         n.Target,
+			ExecutorType:   n.ExecutorType,
+			RiskClass:      n.RiskClass,
+			ModelRiskClass: n.ModelRiskClass,
+			Status:         StatusPlanned,
+			Dependencies:   append([]string(nil), n.Dependencies...),
+			ParallelRoot:   n.ParallelRoot, // 傳遞平行 root 標記
 		})
 	}
 	return nodes

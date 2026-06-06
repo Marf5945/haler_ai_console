@@ -12,11 +12,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"ui_console/shared/executil"
 )
 
 const maxAudioBytes = 16 * 1024 * 1024
@@ -24,12 +25,12 @@ const managedModelURL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/ma
 const managedModelSHA256 = "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"
 
 type TranscriptResult struct {
-	Text       string `json:"text"`
-	Language   string `json:"language"`
-	DebugSaved bool   `json:"debugSaved"`
+	Text            string  `json:"text"`
+	Language        string  `json:"language"`
+	DebugSaved      bool    `json:"debugSaved"`
 	Warning         string  `json:"warning,omitempty"`
 	DurationSeconds float64 `json:"duration_seconds,omitempty"`
-	AudioPath  string `json:"audioPath,omitempty"`
+	AudioPath       string  `json:"audioPath,omitempty"`
 }
 
 func (s *Service) TranscribeWAVBase64(ctx context.Context, audioBase64, mimeType, panelLanguage string) (TranscriptResult, error) {
@@ -104,11 +105,11 @@ func (s *Service) TranscribeWAVBase64(ctx context.Context, audioBase64, mimeType
 		return TranscriptResult{}, err
 	}
 	result := TranscriptResult{
-		Text:       strings.TrimSpace(text),
-		Language:   state.Language,
+		Text:            strings.TrimSpace(text),
+		Language:        state.Language,
 		Warning:         wavWarning,
 		DurationSeconds: durationSec,
-		DebugSaved: debugMode,
+		DebugSaved:      debugMode,
 	}
 	if debugMode {
 		result.AudioPath = wavPath
@@ -209,7 +210,7 @@ func runWhisper(ctx context.Context, binPath, modelPath, wavPath, outPrefix, lan
 	if lang != "" {
 		args = append(args, "-l", lang)
 	}
-	cmd := exec.CommandContext(ctx, binPath, args...)
+	cmd := executil.CommandContext(ctx, binPath, args...)
 	output, err := cmd.CombinedOutput()
 	txtPath := outPrefix + ".txt"
 	if data, readErr := os.ReadFile(txtPath); readErr == nil {

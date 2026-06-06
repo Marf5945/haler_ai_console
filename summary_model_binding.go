@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"ui_console/internal/urlsafe"
+	"ui_console/shared/executil"
 	"ui_console/shared/settings"
 )
 
@@ -46,7 +47,7 @@ func scanOllamaModels() []SummaryModelOption {
 	if path := resolveOllamaExecutable(); path != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
 		defer cancel()
-		out, err := exec.CommandContext(ctx, path, "list").Output()
+		out, err := executil.CommandContext(ctx, path, "list").Output()
 		if err == nil {
 			return parseOllamaListOutput(string(out))
 		}
@@ -89,6 +90,9 @@ func parseOllamaListOutput(out string) []SummaryModelOption {
 			continue
 		}
 		id := fields[0]
+		if !isOllamaGenerativeModelID(id) {
+			continue
+		}
 		options = append(options, SummaryModelOption{
 			Provider: "ollama",
 			ID:       id,
@@ -97,6 +101,40 @@ func parseOllamaListOutput(out string) []SummaryModelOption {
 		})
 	}
 	return options
+}
+
+func isOllamaGenerativeModelID(id string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(id))
+	if normalized == "" {
+		return false
+	}
+	name := normalized
+	if slash := strings.LastIndex(name, "/"); slash >= 0 {
+		name = name[slash+1:]
+	}
+	if colon := strings.Index(name, ":"); colon >= 0 {
+		name = name[:colon]
+	}
+	nonGenerativeMarkers := []string{
+		"embed",
+		"embedding",
+		"bge-",
+		"e5-",
+		"gte-",
+		"jina-clip",
+		"jina-embeddings",
+		"minilm",
+		"rerank",
+		"ranker",
+		"sentence-transformers",
+		"text-embedding",
+	}
+	for _, marker := range nonGenerativeMarkers {
+		if strings.Contains(name, marker) {
+			return false
+		}
+	}
+	return true
 }
 
 func isOllamaModelLibrary(path string) bool {
@@ -135,9 +173,17 @@ func scanOllamaModelLibrary(path string) []SummaryModelOption {
 		tag := parts[len(parts)-1]
 		modelName := parts[len(parts)-2]
 		namespace := parts[len(parts)-3]
+		registry := strings.Join(parts[:len(parts)-3], "/")
+		prefix := namespace
+		if registry != "" && registry != "registry.ollama.ai" {
+			prefix = registry + "/" + namespace
+		}
 		id := modelName + ":" + tag
-		if namespace != "library" {
-			id = namespace + "/" + id
+		if prefix != "library" {
+			id = prefix + "/" + id
+		}
+		if !isOllamaGenerativeModelID(id) {
+			return nil
 		}
 		options = append(options, SummaryModelOption{
 			Provider: "ollama",
@@ -181,7 +227,8 @@ func (a *App) DismissSummarization() {
 }
 
 func scanLMStudioModels() []SummaryModelOption {
-	client := http.Client{Timeout: 800 * time.Millisecond}
+	// SEC-05 2a: 本機 model 掃描走 PolicyLocalLLM。
+	client := urlsafe.NewSafeClient(urlsafe.PolicyLocalLLM, "model_scan", 800*time.Millisecond)
 	resp, err := client.Get("http://localhost:1234/v1/models")
 	if err != nil {
 		return nil

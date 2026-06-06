@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type NativeReferenceFileDragResult struct {
@@ -15,6 +17,8 @@ type NativeReferenceFileDragResult struct {
 	FallbackRequired bool   `json:"fallback_required"`
 	Message          string `json:"message"`
 	DisplayName      string `json:"display_name"`
+	DropTargetKind   string `json:"drop_target_kind"`
+	DropTargetDir    string `json:"drop_target_dir"`
 }
 
 func (a *App) NativeDragExportReferenceFile(sourcePath string) (*NativeReferenceFileDragResult, error) {
@@ -38,6 +42,11 @@ func (a *App) NativeDragExportReferenceFile(sourcePath string) (*NativeReference
 		FallbackRequired: dragResult.FallbackRequired,
 		Message:          dragResult.Message,
 		DisplayName:      filepath.Base(sourcePath),
+		DropTargetKind:   dragResult.DropTargetKind,
+		DropTargetDir:    dragResult.DropTargetDir,
+	}
+	if dragResult.Status == nativeDragStatusSuccess && a.ctx != nil {
+		wailsruntime.EventsEmit(a.ctx, "reference:native_completed", out)
 	}
 	return out, nil
 }

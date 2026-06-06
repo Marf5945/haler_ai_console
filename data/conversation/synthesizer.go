@@ -137,7 +137,7 @@ func PromptActionTags(tags []string) []string {
 func mergePromptActionTags(tags []string) []string {
 	seen := make(map[string]bool)
 	var all []string
-	for _, tag := range []string{"讀取", "列出", "開啟", "寫入", "儲存", "搜尋", "匯入", "匯出", "git", "排程", "提問", "選項", "重試", "輸出"} {
+	for _, tag := range []string{"讀取", "列出", "開啟", "寫入", "儲存", "網路", "搜尋", "匯入", "匯出", "git", "排程", "提問", "選項", "重試", "輸出"} {
 		if seen[tag] {
 			continue
 		}
@@ -159,12 +159,14 @@ func canonicalPromptActionTag(tag string) string {
 	switch strings.ToLower(strings.TrimSpace(tag)) {
 	case "聊天", "輸出":
 		return "輸出"
-	case "澄清", "提問":
+	case "澄清", "提問", "問題", "詢問":
 		return "提問"
 	case "選項":
 		return "選項"
 	case "重試":
 		return "重試"
+	case "網路", "網路搜尋", "搜尋網路", "查網路", "上網查", "web_search", "search_web", "web search", "search web":
+		return "網路"
 	case "本機搜尋", "搜尋", "查找", "查詢", "search", "find", "query":
 		return "搜尋"
 	case "讀取", "read", "查看":

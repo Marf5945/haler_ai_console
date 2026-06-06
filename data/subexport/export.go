@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -220,6 +221,12 @@ func copyDirContents(src, dst string) error {
 		if err != nil {
 			return err
 		}
+		if shouldSkipPortableExportPath(rel) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		dstPath := filepath.Join(dst, rel)
 
 		if d.IsDir() {
@@ -228,6 +235,37 @@ func copyDirContents(src, dst string) error {
 
 		return copyFile(path, dstPath)
 	})
+}
+
+func shouldSkipPortableExportPath(rel string) bool {
+	if rel == "." || rel == "" {
+		return false
+	}
+	normalized := filepath.ToSlash(strings.ToLower(rel))
+	parts := strings.Split(normalized, "/")
+	for _, part := range parts {
+		switch part {
+		case ".git", ".env", ".env.local", ".env.production", "credentials", "secrets", "secret",
+			"tokens", "api_keys", "apikeys", "private", "private_keys", "uploads", "uploaded_files",
+			"attachments", "reference_files", "node_modules", "cache", ".cache", "tmp", "temp":
+			return true
+		}
+		if strings.Contains(part, "api_key") ||
+			strings.Contains(part, "apikey") ||
+			strings.Contains(part, "secret") ||
+			strings.Contains(part, "token") ||
+			strings.Contains(part, "password") ||
+			strings.Contains(part, "credential") ||
+			strings.Contains(part, "private_key") {
+			return true
+		}
+	}
+	ext := filepath.Ext(normalized)
+	switch ext {
+	case ".key", ".pem", ".p12", ".pfx":
+		return true
+	}
+	return false
 }
 
 // copyFile 複製單一檔案。

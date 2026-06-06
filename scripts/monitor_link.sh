@@ -20,6 +20,6 @@ fi
 cat >&2 <<MSG
 監視頁連結尚未建立。
 請先啟動新版 AI Console，或用：
-  cd "/Users/tester/Desktop/AI攜帶型助手/實作/ui_console/ui_console_wails_v_3.0" && /Users/tester/go/bin/wails dev
+  cd <專案目錄> && wails dev
 MSG
 exit 1

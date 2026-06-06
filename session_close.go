@@ -23,6 +23,7 @@ import (
 
 	"ui_console/data/memory"
 	"ui_console/data/storage"
+	"ui_console/orchestration/dag"
 )
 
 // ──────────────────────────────────────────────
@@ -145,6 +146,26 @@ func (a *App) activeConversationAgent() string {
 		return "main"
 	}
 	return a.activeAgentID
+}
+
+func (a *App) activeTaskRunForClose() (*dag.DAGRun, bool) {
+	a.taskMu.Lock()
+	runID := a.activeTaskRunID
+	a.taskMu.Unlock()
+	if strings.TrimSpace(runID) == "" {
+		return nil, false
+	}
+	projectRoot := storage.ProjectRoot(appDataRoot(), "default")
+	run, err := dag.LoadFullRun(projectRoot, runID)
+	if err != nil {
+		return nil, false
+	}
+	switch run.Status {
+	case "planning", "running", "waiting_review":
+		return run, true
+	default:
+		return run, false
+	}
 }
 
 // ──────────────────────────────────────────────
@@ -378,6 +399,18 @@ func (a *App) beforeClose(ctx context.Context) bool {
 	}
 	a.closeMu.Unlock()
 
+	if run, ok := a.activeTaskRunForClose(); ok {
+		a.eventBus.Emit("session:close_prompt", map[string]interface{}{
+			"analysis": SessionAnalysis{
+				ShouldPrompt:  true,
+				HasContent:    true,
+				Mode:          "active_task",
+				SuggestedName: run.Title,
+			},
+		})
+		return true
+	}
+
 	activeAgent := a.activeConversationAgent()
 	if activeAgent != "main" {
 		a.eventBus.Emit("session:close_prompt", map[string]interface{}{
@@ -413,6 +446,15 @@ func (a *App) ConfirmClose(saveAsSub bool, subName string) error {
 		if _, err := a.SaveMainAsSub(subName); err != nil {
 			log.Printf("session_close: save as sub failed: %v", err)
 			return err
+		}
+	}
+
+	a.taskMu.Lock()
+	activeTaskRunID := a.activeTaskRunID
+	a.taskMu.Unlock()
+	if strings.TrimSpace(activeTaskRunID) != "" {
+		if _, err := a.CancelTaskProgress(activeTaskRunID, "app_close"); err != nil {
+			log.Printf("session_close: cancel active task failed: %v", err)
 		}
 	}
 

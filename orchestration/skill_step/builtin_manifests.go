@@ -2,15 +2,17 @@
 // 啟動時由 app.go 呼叫 RegisterDocumentBuiltins，不寫磁碟。
 package skill_step
 
-// RegisterDocumentBuiltins 註冊文件相關的 4 個內建 manifest。
+// RegisterDocumentBuiltins 註冊全部 7 個內建 manifest。
+// TASK 31 / Phase 0.4：每個 builtin 缺 lifecycle，註冊前補安全預設——
+// 低風險唯讀的 auto_execute=true；workspace_write/medium（write/export/scheduler）為 false。
 func RegisterDocumentBuiltins(r *Router) {
-	r.RegisterBuiltin(builtinDocImport())
-	r.RegisterBuiltin(builtinDocRead())
-	r.RegisterBuiltin(builtinDocWrite())
-	r.RegisterBuiltin(builtinDocExport())
-	r.RegisterBuiltin(builtinLocalSearch())
-	r.RegisterBuiltin(builtinScheduler())
-	r.RegisterBuiltin(builtinGitStatus())
+	for _, m := range []*SkillManifest{
+		builtinDocImport(), builtinDocRead(), builtinDocWrite(), builtinDocExport(),
+		builtinLocalSearch(), builtinWebSearch(), builtinScheduler(), builtinGitStatus(),
+	} {
+		EnsureLifecycle(m) // nil → DefaultLifecycle(依風險/權限決定 auto_execute)
+		r.RegisterBuiltin(m)
+	}
 }
 
 func builtinDocImport() *SkillManifest {
@@ -123,6 +125,29 @@ func builtinLocalSearch() *SkillManifest {
 		Routing: SkillRouting{
 			ActionPatterns:   []string{"本機搜尋ㄌ記憶", "搜尋ㄌ文件", "查找ㄌtrace", "查詢ㄌAPI key", "searchㄌnotes"},
 			TargetAliases:    []string{"記憶", "文件", "紀錄", "trace", "工具", "skill", "memory", "document"},
+			MinimumAutoScore: 0.8,
+		},
+	}
+}
+
+func builtinWebSearch() *SkillManifest {
+	return &SkillManifest{
+		SchemaVersion: "skill_manifest.v1",
+		SkillID:       "builtin.web.search",
+		DisplayName:   "網路搜尋",
+		Version:       "1.0.0",
+		Tags: SkillTags{
+			PurposeTag: []string{"lookup", "research"},
+			ActionTag:  []string{"網路", "網路搜尋", "搜尋網路", "查網路", "上網查", "web_search", "search_web"},
+			DomainTag:  []string{"web", "internet", "latest", "current", "news", "網路", "即時資料"},
+			RiskTag:    []string{"low"},
+		},
+		Permissions: SkillPermissions{
+			Network: "web", Filesystem: "none", Execution: "none",
+		},
+		Routing: SkillRouting{
+			ActionPatterns:   []string{"網路ㄌ最新資料", "網路搜尋ㄌ最新資料", "搜尋網路ㄌ即時資料", "web_searchㄌlatest docs", "search_webㄌcurrent information"},
+			TargetAliases:    []string{"web", "internet", "latest", "current", "news", "網路", "最新", "即時"},
 			MinimumAutoScore: 0.8,
 		},
 	}

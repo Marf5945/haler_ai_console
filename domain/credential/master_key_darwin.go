@@ -15,6 +15,9 @@ type osMasterKeyProvider struct {
 	account string
 }
 
+// macOS stores the AES master key in Keychain. API keys and bot tokens stay
+// encrypted in data/secrets/credentials.enc and require this Keychain item to
+// decrypt.
 func NewOSMasterKeyProvider(_ string, service string, account string) MasterKeyProvider {
 	return osMasterKeyProvider{service: service, account: account}
 }

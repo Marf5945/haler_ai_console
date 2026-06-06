@@ -19,16 +19,18 @@ import "sync"
 // 若不為 nil，adapter 實作應將 Injection 的資訊嵌入 prompt 或系統訊息中，
 // 但絕對不得將 Injection.BlockedUse 裡列舉的操作呈現給 CLI 執行。
 type CLIMessageOptions struct {
-	AdapterID      string     // 目前選中的 CLI adapter ID（claude / codex / gemini...）
-	CLIPath        string     // 已解析的 CLI 可執行檔完整路徑
-	SessionID      string     // 目前的使用者 session ID
-	UserText       string     // 使用者原始輸入文字
-	SkillInjection *Injection // 選填；nil 表示無 skill 上下文注入
-	SystemPrompt   string     // 選填；本次訊息的 system/persona prompt
-	ContinuityKey  string     // 選填；隔離對話連續性狀態的 key
-	TraceID        string     // DEBUG_TRACE_REMOVE: debug-only correlation ID for UI -> CLI tracing
-	SkipContinuity bool       // true = 跳過 SentenceStore / Synthesize（閒聊用）
-	IsCommand      bool       // true = Controller 已判定本輪走命令入口，需蓋 seal
+	AdapterID       string     // 目前選中的 CLI adapter ID（claude / codex / gemini...）
+	CLIPath         string     // 已解析的 CLI 可執行檔完整路徑
+	SessionID       string     // 目前的使用者 session ID
+	UserText        string     // 使用者原始輸入文字
+	Model           string     // 選填；單次呼叫指定 CLI model，空字串則用 adapter 設定
+	SkillInjection  *Injection // 選填；nil 表示無 skill 上下文注入
+	SystemPrompt    string     // 選填；本次訊息的 system/persona prompt
+	ContinuityKey   string     // 選填；隔離對話連續性狀態的 key
+	TraceID         string     // DEBUG_TRACE_REMOVE: debug-only correlation ID for UI -> CLI tracing
+	ToolRoutingMode string     // 空字串=一般工具選擇；judge=第一輪只判斷是否需要工具
+	SkipContinuity  bool       // true = 跳過 SentenceStore / Synthesize（閒聊用）
+	IsCommand       bool       // true = Controller 已判定本輪走命令入口，需蓋 seal
 }
 
 // CLIResponse 是 CLIAdapter.SendMessage 的回傳值。

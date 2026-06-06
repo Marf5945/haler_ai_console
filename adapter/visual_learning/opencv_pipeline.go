@@ -109,11 +109,21 @@ func (p *OpenCVPipeline) Propose(imageData []byte, width, height int) PipelineRe
 
 	// Step 5: 合併鄰近區域
 	merged := mergeRegions(filtered, p.config.MergeThreshold)
+	merged = filterLayoutContainers(merged, width, height)
+
+	// Step 5b: 補抓小型 UI icon / toolbar button。
+	iconRegions := extractUIIconRegions(imageData, width, height)
+	merged = appendUniqueRegions(merged, iconRegions)
 
 	// Step 6: 轉換為 UIFingerprint（含 hash）
 	var candidates []UIFingerprint
 	for i, r := range merged {
 		fp := regionToFingerprint(r, gray, width, height, i)
+		if isIconSizedRegion(r) {
+			fp.Source = "pure_go_pipeline_icon"
+			fp.ElementTypeGuess = "icon/button"
+			fp.Confidence = 0.62
+		}
 		candidates = append(candidates, fp)
 	}
 
@@ -242,6 +252,157 @@ func extractRegions(edges []byte, w, h int) []regionRect {
 		}
 	}
 	return regions
+}
+
+func extractUIIconRegions(data []byte, w, h int) []regionRect {
+	visited := make([]bool, w*h)
+	var regions []regionRect
+
+	isCandidatePixel := func(x, y int) bool {
+		offset := (y*w + x) * 4
+		r := int(data[offset])
+		g := int(data[offset+1])
+		b := int(data[offset+2])
+		maxC := maxInt(r, maxInt(g, b))
+		minC := minInt(r, minInt(g, b))
+		avg := (r + g + b) / 3
+		saturation := maxC - minC
+
+		// 深色筆畫與高飽和色塊常見於小 icon。
+		return avg < 150 || (saturation > 35 && avg < 245)
+	}
+
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			idx := y*w + x
+			if visited[idx] || !isCandidatePixel(x, y) {
+				continue
+			}
+
+			minX, minY, maxX, maxY := x, y, x, y
+			pixels := 0
+			stack := []int{idx}
+			visited[idx] = true
+
+			for len(stack) > 0 {
+				current := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				cy, cx := current/w, current%w
+				pixels++
+				if cx < minX {
+					minX = cx
+				}
+				if cx > maxX {
+					maxX = cx
+				}
+				if cy < minY {
+					minY = cy
+				}
+				if cy > maxY {
+					maxY = cy
+				}
+
+				for dy := -1; dy <= 1; dy++ {
+					for dx := -1; dx <= 1; dx++ {
+						if dx == 0 && dy == 0 {
+							continue
+						}
+						nx, ny := cx+dx, cy+dy
+						if nx < 0 || nx >= w || ny < 0 || ny >= h {
+							continue
+						}
+						ni := ny*w + nx
+						if !visited[ni] && isCandidatePixel(nx, ny) {
+							visited[ni] = true
+							stack = append(stack, ni)
+						}
+					}
+				}
+			}
+
+			rw := maxX - minX + 1
+			rh := maxY - minY + 1
+			boxArea := rw * rh
+			if boxArea == 0 {
+				continue
+			}
+			fillRatio := float64(pixels) / float64(boxArea)
+			if rw >= 8 && rh >= 8 && rw <= 72 && rh <= 72 && boxArea >= 64 && fillRatio >= 0.08 {
+				regions = append(regions, padRegion(regionRect{x: minX, y: minY, w: rw, h: rh}, 4, w, h))
+			}
+		}
+	}
+	return regions
+}
+
+func appendUniqueRegions(base []regionRect, additions []regionRect) []regionRect {
+	result := append([]regionRect{}, base...)
+	for _, candidate := range additions {
+		duplicate := false
+		for _, existing := range result {
+			if regionOverlapRatio(candidate, existing) > 0.55 {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			result = append(result, candidate)
+		}
+	}
+	return result
+}
+
+func filterLayoutContainers(regions []regionRect, imgW, imgH int) []regionRect {
+	var filtered []regionRect
+	for _, r := range regions {
+		if isLayoutContainerRegion(r, imgW, imgH) {
+			continue
+		}
+		filtered = append(filtered, r)
+	}
+	return filtered
+}
+
+func isLayoutContainerRegion(r regionRect, imgW, imgH int) bool {
+	if imgW <= 0 || imgH <= 0 {
+		return false
+	}
+	wRatio := float64(r.w) / float64(imgW)
+	hRatio := float64(r.h) / float64(imgH)
+	areaRatio := wRatio * hRatio
+
+	// 過寬/過長多半是 header、分類列或側欄容器。
+	return (wRatio > 0.58 && hRatio < 0.22) ||
+		(hRatio > 0.62 && wRatio < 0.14) ||
+		areaRatio > 0.24
+}
+
+func regionOverlapRatio(a, b regionRect) float64 {
+	x1 := maxInt(a.x, b.x)
+	y1 := maxInt(a.y, b.y)
+	x2 := minInt(a.x+a.w, b.x+b.w)
+	y2 := minInt(a.y+a.h, b.y+b.h)
+	if x2 <= x1 || y2 <= y1 {
+		return 0
+	}
+	intersection := (x2 - x1) * (y2 - y1)
+	smaller := minInt(a.w*a.h, b.w*b.h)
+	if smaller <= 0 {
+		return 0
+	}
+	return float64(intersection) / float64(smaller)
+}
+
+func padRegion(r regionRect, padding, maxW, maxH int) regionRect {
+	x := maxInt(0, r.x-padding)
+	y := maxInt(0, r.y-padding)
+	x2 := minInt(maxW, r.x+r.w+padding)
+	y2 := minInt(maxH, r.y+r.h+padding)
+	return regionRect{x: x, y: y, w: x2 - x, h: y2 - y}
+}
+
+func isIconSizedRegion(r regionRect) bool {
+	return r.w >= 8 && r.h >= 8 && r.w <= 80 && r.h <= 80
 }
 
 // mergeRegions 合併距離小於 threshold 的鄰近區域。

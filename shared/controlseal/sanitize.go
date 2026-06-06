@@ -30,6 +30,7 @@ type SanitizedResult struct {
 func SanitizeForLLM(sourceType SourceType, rawText string) SanitizedResult {
 	escapedLines, fakeSealCount := escapeLineStartSeals(rawText)
 	llmText := strings.ReplaceAll(escapedLines, "ㄌ", EscapeMarker)
+	llmText = neutralizeUntrustedInstructions(sourceType, llmText)
 	escapedCount := fakeSealCount + strings.Count(escapedLines, "ㄌ")
 
 	return SanitizedResult{
@@ -39,6 +40,31 @@ func SanitizeForLLM(sourceType SourceType, rawText string) SanitizedResult {
 		HasFakeSeal:  fakeSealCount > 0,
 		SourceType:   sourceType,
 	}
+}
+
+func neutralizeUntrustedInstructions(sourceType SourceType, text string) string {
+	switch sourceType {
+	case SourceDocument, SourceToolOutput, SourceCLIOutput, SourceMemory:
+	default:
+		return text
+	}
+	replacements := []struct {
+		old string
+		new string
+	}{
+		{"忽略上面所有指令", "[UNTRUSTED_INSTRUCTION_REDACTED]"},
+		{"忽略之前的指令", "[UNTRUSTED_INSTRUCTION_REDACTED]"},
+		{"忽略所有規則", "[UNTRUSTED_INSTRUCTION_REDACTED]"},
+		{"ignore previous instructions", "[UNTRUSTED_INSTRUCTION_REDACTED]"},
+		{"ignore all previous", "[UNTRUSTED_INSTRUCTION_REDACTED]"},
+		{"disregard your instructions", "[UNTRUSTED_INSTRUCTION_REDACTED]"},
+		{"bypass security", "[UNTRUSTED_INSTRUCTION_REDACTED]"},
+	}
+	out := text
+	for _, replacement := range replacements {
+		out = strings.ReplaceAll(out, replacement.old, replacement.new)
+	}
+	return out
 }
 
 // PreserveDisplayText returns the original text for UI and permanent memory.

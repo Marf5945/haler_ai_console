@@ -3,6 +3,8 @@
 # ──────────────────────────────────────────────
 
 # === Go 建置產物 ===
+.gocache/
+/ui_console
 *.exe
 *.exe~
 *.dll
@@ -84,6 +86,8 @@ purge_manifests/
 runtime/
 *.tmp
 *.log
+outputs/
+tmp_*.png
 crash_recovery/
 temp_sessions/
 
@@ -99,3 +103,30 @@ coverage.html
 
 # === Visual Learning 暫存 ===
 visual_learning/processed_temp/
+
+# === 跨平台移植後補上(Go 測試快取 / ONNX runtime 二進位)===
+.gocache-test/
+/assets/runtimes/
+/assets/models/*.onnx
+assets/models/yolox_button_s.onnx
+
+# === Local development notes / sensitive drafts ===
+TASKS*.md
+*AUDIT*.md
+*DECISIONS*.md
+*Spec_Draft.md
+
+# === Python cache artifacts ===
+__pycache__/
+*.py[cod]
+
+# === Device-local secrets and runtime history ===
+/data/secrets/
+/data/status_rail/
+/remote_bridge/remote_bridge_credentials.json
+/remote_bridge/remote_bridge_credentials.json.migrated
+*.enc
+*.dpapi
+
+# === YOLOX 模型權重（改由 GitHub Releases 發布，倉庫只留 model_hashes.json 供 SHA256 驗證）===
+/assets/models/*.onnx

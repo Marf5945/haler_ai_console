@@ -77,6 +77,12 @@ type SkillRouting struct {
 	MinimumAutoScore float64  `json:"minimum_auto_score"` // 自動選取門檻，預設 0.82
 }
 
+// Manifest schema 版本：新寫入用 v2，loader 同時接受 v1/v2（TASK 31 / Phase 1.2）。
+const (
+	SchemaManifestV1 = "skill_manifest.v1"
+	SchemaManifestV2 = "skill_manifest.v2"
+)
+
 // SkillManifest 是一個已歸檔 skill 的完整機器可讀描述符。
 // 每個 skill 資料夾下必有一個 skill_manifest.json，
 // 這是 Console 用來識別、路由、審查 skill 的唯一來源。
@@ -92,7 +98,11 @@ type SkillManifest struct {
 	Permissions    SkillPermissions `json:"permissions"`
 	Resources      SkillResources   `json:"resources"`
 	Routing        SkillRouting     `json:"routing"`
-	Hash           string           `json:"hash"` // manifest 內容的 SHA-256，用於完整性驗證
+	// TASK 31：以下兩欄皆 optional，舊 v1 manifest 缺欄位 = 零值，向後相容。
+	Lifecycle      *Lifecycle       `json:"lifecycle,omitempty"`      // 可見性/可執行性，nil 時由 EnsureLifecycle 補預設
+	ExpectedChain  *ExpectedChain   `json:"expected_chain,omitempty"` // drift 比對基準，nil 時只跑低階 drift
+	Hash           string           `json:"hash"` // 全欄位 canonical SHA-256（見 canonicalHash）
+	HashMismatch   bool             `json:"-"` // runtime-only：load 時 hash 不符（不持久化）
 }
 
 // LoadManifest 從指定路徑讀取並解析 skill_manifest.json。
@@ -106,6 +116,12 @@ func LoadManifest(path string) (*SkillManifest, error) {
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("skill_step: parse manifest: %w", err)
 	}
+	// 接受 v1/v2：缺 lifecycle 補安全預設（不變式：builtin/舊 skill 不可消失）。
+	EnsureLifecycle(&m)
+	// hash 不符採「警告不硬拒」：避免未來匯入舊 v1（舊算法）skill 被鎖死。
+	if m.Hash != "" && m.Hash != canonicalHash(&m) {
+		m.HashMismatch = true
+	}
 	return &m, nil
 }
 
@@ -116,8 +132,12 @@ func SaveManifest(dir string, m *SkillManifest) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("skill_step: mkdir manifest dir: %w", err)
 	}
-	// 寫入前重新計算 hash，確保內容與 hash 始終一致
-	m.Hash = hashManifest(m)
+	// 寫入前升 schema 版本、補 lifecycle、用全欄位 canonical hash（TASK 31）。
+	if m.SchemaVersion == "" || m.SchemaVersion == SchemaManifestV1 {
+		m.SchemaVersion = SchemaManifestV2
+	}
+	EnsureLifecycle(m)
+	m.Hash = canonicalHash(m)
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return fmt.Errorf("skill_step: marshal manifest: %w", err)
@@ -129,10 +149,13 @@ func SaveManifest(dir string, m *SkillManifest) error {
 	return nil
 }
 
-// hashManifest 計算 skill_id + display_name + version 的 SHA-256 摘要。
-// 只取關鍵識別欄位做雜湊，避免因排版或空白差異造成 hash 不穩定。
-func hashManifest(m *SkillManifest) string {
-	h := sha256.New()
-	h.Write([]byte(m.SkillID + m.DisplayName + m.Version))
-	return hex.EncodeToString(h.Sum(nil))
+// canonicalHash 清空 Hash 欄位後序列化「整份 manifest」再 SHA-256。
+// 這樣 expected_chain / lifecycle / permissions 任何竄改都會反映在 hash，
+// 杜絕「改了 drift 基準卻不改 hash」的信任漏洞（TASK 31 / Phase 1.2）。
+func canonicalHash(m *SkillManifest) string {
+	c := *m
+	c.Hash = "" // 先清空，避免把舊 hash 算進新 hash
+	data, _ := json.Marshal(&c) // struct 欄位順序固定 → 結果具確定性
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }

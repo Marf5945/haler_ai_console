@@ -78,12 +78,20 @@ export function AutoDetectCLI() {
   return window['go']['main']['App']['AutoDetectCLI']();
 }
 
+export function BuildAndSaveSkillDraft(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['BuildAndSaveSkillDraft'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function BuildLLMContext(arg1, arg2, arg3) {
   return window['go']['main']['App']['BuildLLMContext'](arg1, arg2, arg3);
 }
 
 export function BuildSkillContext(arg1, arg2) {
   return window['go']['main']['App']['BuildSkillContext'](arg1, arg2);
+}
+
+export function BuildSkillDraft(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['BuildSkillDraft'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function CancelActiveTaskProgress(arg1) {
@@ -110,6 +118,10 @@ export function CleanOrphanQuarantine(arg1) {
   return window['go']['main']['App']['CleanOrphanQuarantine'](arg1);
 }
 
+export function CleanupEphemeralProfiles() {
+  return window['go']['main']['App']['CleanupEphemeralProfiles']();
+}
+
 export function ClearInspectorHistory() {
   return window['go']['main']['App']['ClearInspectorHistory']();
 }
@@ -126,6 +138,10 @@ export function ClearVoiceDebug() {
   return window['go']['main']['App']['ClearVoiceDebug']();
 }
 
+export function ClearWebSearchConfig() {
+  return window['go']['main']['App']['ClearWebSearchConfig']();
+}
+
 export function CommitPreview() {
   return window['go']['main']['App']['CommitPreview']();
 }
@@ -136,6 +152,10 @@ export function CompleteOnboardingStep(arg1) {
 
 export function ComputeDryRunConfidence(arg1, arg2, arg3) {
   return window['go']['main']['App']['ComputeDryRunConfidence'](arg1, arg2, arg3);
+}
+
+export function ConfirmAndExecuteSkillExecution(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['ConfirmAndExecuteSkillExecution'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function ConfirmClose(arg1, arg2) {
@@ -156,6 +176,10 @@ export function ConfirmRegisterLLMAPIAdapter(arg1, arg2, arg3, arg4, arg5) {
 
 export function ConfirmSkillArchive(arg1) {
   return window['go']['main']['App']['ConfirmSkillArchive'](arg1);
+}
+
+export function ConfirmSkillExecution(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ConfirmSkillExecution'](arg1, arg2, arg3);
 }
 
 export function ConfirmTelegramChatID(arg1, arg2) {
@@ -202,6 +226,10 @@ export function DetectModelPollution(arg1) {
   return window['go']['main']['App']['DetectModelPollution'](arg1);
 }
 
+export function DetectOllamaState() {
+  return window['go']['main']['App']['DetectOllamaState']();
+}
+
 export function DetectRegions(arg1, arg2, arg3) {
   return window['go']['main']['App']['DetectRegions'](arg1, arg2, arg3);
 }
@@ -216,6 +244,10 @@ export function DisableContextualRiskOverride(arg1) {
 
 export function DisableCredentialMigration() {
   return window['go']['main']['App']['DisableCredentialMigration']();
+}
+
+export function DismissEmbeddingPicker() {
+  return window['go']['main']['App']['DismissEmbeddingPicker']();
 }
 
 export function DismissFloatingCandidates() {
@@ -262,6 +294,18 @@ export function EscapeExternalTokens(arg1) {
   return window['go']['main']['App']['EscapeExternalTokens'](arg1);
 }
 
+export function ExecuteNativeLearningReplayStep(arg1) {
+  return window['go']['main']['App']['ExecuteNativeLearningReplayStep'](arg1);
+}
+
+export function ExecuteResolvedSkill(arg1, arg2) {
+  return window['go']['main']['App']['ExecuteResolvedSkill'](arg1, arg2);
+}
+
+export function ExecuteSkillMessage(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ExecuteSkillMessage'](arg1, arg2, arg3, arg4);
+}
+
 export function ExitDegradedMode() {
   return window['go']['main']['App']['ExitDegradedMode']();
 }
@@ -286,6 +330,10 @@ export function ExportVisualLearning(arg1) {
   return window['go']['main']['App']['ExportVisualLearning'](arg1);
 }
 
+export function FetchURLContent(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['FetchURLContent'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function FinalizeNativePersonaExport(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['FinalizeNativePersonaExport'](arg1, arg2, arg3, arg4);
 }
@@ -302,8 +350,16 @@ export function FinishOnboarding() {
   return window['go']['main']['App']['FinishOnboarding']();
 }
 
+export function GenerateLearningRunMetadata(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['GenerateLearningRunMetadata'](arg1, arg2, arg3, arg4);
+}
+
 export function GetActiveLearningRun() {
   return window['go']['main']['App']['GetActiveLearningRun']();
+}
+
+export function GetAdapterModelChoices() {
+  return window['go']['main']['App']['GetAdapterModelChoices']();
 }
 
 export function GetAdapterStatus(arg1) {
@@ -358,6 +414,10 @@ export function GetDeviceTrustProfile(arg1) {
   return window['go']['main']['App']['GetDeviceTrustProfile'](arg1);
 }
 
+export function GetEmbeddingConfig() {
+  return window['go']['main']['App']['GetEmbeddingConfig']();
+}
+
 export function GetHighImpactDomains() {
   return window['go']['main']['App']['GetHighImpactDomains']();
 }
@@ -368,6 +428,14 @@ export function GetHookSummary(arg1) {
 
 export function GetJobExecutionHistory(arg1, arg2) {
   return window['go']['main']['App']['GetJobExecutionHistory'](arg1, arg2);
+}
+
+export function GetLastLearningReplayPlan() {
+  return window['go']['main']['App']['GetLastLearningReplayPlan']();
+}
+
+export function GetLearningReplayPlan(arg1) {
+  return window['go']['main']['App']['GetLearningReplayPlan'](arg1);
 }
 
 export function GetMediaW3AInfo(arg1) {
@@ -384,6 +452,10 @@ export function GetMemoryPipelineState() {
 
 export function GetMonitorLinks() {
   return window['go']['main']['App']['GetMonitorLinks']();
+}
+
+export function GetNativeOCRStatus() {
+  return window['go']['main']['App']['GetNativeOCRStatus']();
 }
 
 export function GetNewSubagentCandidates() {
@@ -458,6 +530,10 @@ export function GetStopRecoveryCard(arg1) {
   return window['go']['main']['App']['GetStopRecoveryCard'](arg1);
 }
 
+export function GetSubExportCapabilities() {
+  return window['go']['main']['App']['GetSubExportCapabilities']();
+}
+
 export function GetSubExportDesktopDirectory() {
   return window['go']['main']['App']['GetSubExportDesktopDirectory']();
 }
@@ -490,12 +566,24 @@ export function GetUISettings() {
   return window['go']['main']['App']['GetUISettings']();
 }
 
+export function GetURLProvenance(arg1) {
+  return window['go']['main']['App']['GetURLProvenance'](arg1);
+}
+
 export function GetVoiceSettings() {
   return window['go']['main']['App']['GetVoiceSettings']();
 }
 
 export function GetW3ATransferGuidance() {
   return window['go']['main']['App']['GetW3ATransferGuidance']();
+}
+
+export function GetWebSearchConfig() {
+  return window['go']['main']['App']['GetWebSearchConfig']();
+}
+
+export function GetYOLODetailedStatus() {
+  return window['go']['main']['App']['GetYOLODetailedStatus']();
 }
 
 export function GetYOLOStatus() {
@@ -566,6 +654,10 @@ export function IsReadOnlyMode() {
   return window['go']['main']['App']['IsReadOnlyMode']();
 }
 
+export function ListAdapterModelOptions(arg1) {
+  return window['go']['main']['App']['ListAdapterModelOptions'](arg1);
+}
+
 export function ListArchivedSkills() {
   return window['go']['main']['App']['ListArchivedSkills']();
 }
@@ -598,8 +690,16 @@ export function ListFormalActions() {
   return window['go']['main']['App']['ListFormalActions']();
 }
 
+export function ListInstalledEmbedModels() {
+  return window['go']['main']['App']['ListInstalledEmbedModels']();
+}
+
 export function ListLLMProviderWhitelist() {
   return window['go']['main']['App']['ListLLMProviderWhitelist']();
+}
+
+export function ListLearningReplayCatalog(arg1) {
+  return window['go']['main']['App']['ListLearningReplayCatalog'](arg1);
 }
 
 export function ListOpenLightweightCards() {
@@ -714,6 +814,10 @@ export function NotifyStatusRail(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['NotifyStatusRail'](arg1, arg2, arg3, arg4);
 }
 
+export function OpenExternalURL(arg1) {
+  return window['go']['main']['App']['OpenExternalURL'](arg1);
+}
+
 export function PauseScheduledJob(arg1) {
   return window['go']['main']['App']['PauseScheduledJob'](arg1);
 }
@@ -754,6 +858,10 @@ export function ProposeRegions(arg1, arg2, arg3) {
   return window['go']['main']['App']['ProposeRegions'](arg1, arg2, arg3);
 }
 
+export function PullEmbedModel(arg1) {
+  return window['go']['main']['App']['PullEmbedModel'](arg1);
+}
+
 export function PurgeBoundaryDir(arg1) {
   return window['go']['main']['App']['PurgeBoundaryDir'](arg1);
 }
@@ -764,6 +872,14 @@ export function PurgeProject(arg1, arg2) {
 
 export function ReadDocumentContent(arg1) {
   return window['go']['main']['App']['ReadDocumentContent'](arg1);
+}
+
+export function RecognizeNativeOCR(arg1) {
+  return window['go']['main']['App']['RecognizeNativeOCR'](arg1);
+}
+
+export function RecordLearningMouseEvent(arg1) {
+  return window['go']['main']['App']['RecordLearningMouseEvent'](arg1);
 }
 
 export function RecordMainInteraction(arg1, arg2) {
@@ -800,6 +916,10 @@ export function RegisterRemoteBridgeChannelWithMode(arg1, arg2, arg3, arg4) {
 
 export function RegisterSchedulerCallback(arg1) {
   return window['go']['main']['App']['RegisterSchedulerCallback'](arg1);
+}
+
+export function RegisterURLOccurrence(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['RegisterURLOccurrence'](arg1, arg2, arg3, arg4);
 }
 
 export function RejectPackageInstall(arg1, arg2) {
@@ -890,6 +1010,10 @@ export function ResolveVLReviewCard(arg1) {
   return window['go']['main']['App']['ResolveVLReviewCard'](arg1);
 }
 
+export function ResolveWindowsClickAnchor(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['ResolveWindowsClickAnchor'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
 export function RestartSidecar() {
   return window['go']['main']['App']['RestartSidecar']();
 }
@@ -954,6 +1078,10 @@ export function SaveVoiceSettings(arg1) {
   return window['go']['main']['App']['SaveVoiceSettings'](arg1);
 }
 
+export function SaveWebSearchConfig(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SaveWebSearchConfig'](arg1, arg2, arg3);
+}
+
 export function ScanLocalModels() {
   return window['go']['main']['App']['ScanLocalModels']();
 }
@@ -968,6 +1096,14 @@ export function ScanOrphanQuarantine() {
 
 export function ScanSkillFolder(arg1) {
   return window['go']['main']['App']['ScanSkillFolder'](arg1);
+}
+
+export function SearchLearningOperations(arg1, arg2) {
+  return window['go']['main']['App']['SearchLearningOperations'](arg1, arg2);
+}
+
+export function SearchWeb(arg1, arg2) {
+  return window['go']['main']['App']['SearchWeb'](arg1, arg2);
 }
 
 export function SelectFloatingCandidate(arg1) {
@@ -990,12 +1126,24 @@ export function SendCLIMessage(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['SendCLIMessage'](arg1, arg2, arg3, arg4);
 }
 
+export function SendInspectorAPIMessage(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SendInspectorAPIMessage'](arg1, arg2, arg3, arg4);
+}
+
 export function SendInspectorMessage(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['SendInspectorMessage'](arg1, arg2, arg3, arg4);
 }
 
+export function SendTopInteractionMessage(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SendTopInteractionMessage'](arg1, arg2, arg3, arg4);
+}
+
 export function SetActiveConversationAgent(arg1) {
   return window['go']['main']['App']['SetActiveConversationAgent'](arg1);
+}
+
+export function SetAdapterModelChoice(arg1, arg2) {
+  return window['go']['main']['App']['SetAdapterModelChoice'](arg1, arg2);
 }
 
 export function SetAdapterStatus(arg1, arg2) {
@@ -1008,6 +1156,10 @@ export function SetAvatarProvider(arg1, arg2) {
 
 export function SetBrowserPreference(arg1, arg2) {
   return window['go']['main']['App']['SetBrowserPreference'](arg1, arg2);
+}
+
+export function SetEmbeddingConfig(arg1, arg2) {
+  return window['go']['main']['App']['SetEmbeddingConfig'](arg1, arg2);
 }
 
 export function SetPersonaPixelAvatarPack(arg1, arg2) {
@@ -1054,6 +1206,10 @@ export function StartTelegramOnboarding(arg1) {
   return window['go']['main']['App']['StartTelegramOnboarding'](arg1);
 }
 
+export function StartURLVisualLearning(arg1, arg2, arg3) {
+  return window['go']['main']['App']['StartURLVisualLearning'](arg1, arg2, arg3);
+}
+
 export function StopDraftSandbox(arg1, arg2) {
   return window['go']['main']['App']['StopDraftSandbox'](arg1, arg2);
 }
@@ -1064,6 +1220,10 @@ export function StopLearningMode() {
 
 export function StopSidecar() {
   return window['go']['main']['App']['StopSidecar']();
+}
+
+export function StopURLVisualLearning() {
+  return window['go']['main']['App']['StopURLVisualLearning']();
 }
 
 export function StoreAvatarCredential(arg1, arg2) {
@@ -1090,6 +1250,10 @@ export function UpdateDAGNodeStatus(arg1, arg2, arg3) {
   return window['go']['main']['App']['UpdateDAGNodeStatus'](arg1, arg2, arg3);
 }
 
+export function UpdateLearningRunMetadata(arg1) {
+  return window['go']['main']['App']['UpdateLearningRunMetadata'](arg1);
+}
+
 export function ValidateMemoryItem(arg1) {
   return window['go']['main']['App']['ValidateMemoryItem'](arg1);
 }
@@ -1100,4 +1264,8 @@ export function VerifyMediaFile(arg1) {
 
 export function WakeLocalAdapter(arg1) {
   return window['go']['main']['App']['WakeLocalAdapter'](arg1);
+}
+
+export function WakeOllamaDaemon() {
+  return window['go']['main']['App']['WakeOllamaDaemon']();
 }

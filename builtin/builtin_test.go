@@ -1,6 +1,7 @@
 // builtin_test.go — builtin package 單元測試。
 // 覆蓋：store CRUD、import txt/md/docx、export txt/md/docx、
-//       encoding 轉換（Big5/UTF-16）、path guard、size guard。
+//
+//	encoding 轉換（Big5/UTF-16）、path guard、size guard。
 package builtin
 
 import (
@@ -222,7 +223,7 @@ func TestImportTxt(t *testing.T) {
 	os.WriteFile(srcPath, []byte("Hello from txt"), 0o600)
 
 	guard := NewPathGuard(storeDir)
-	result, err := ImportFromDrop(store, guard, srcPath)
+	result, err := ImportFromDrop(store, guard, srcPath, TFIDFVectorizer{})
 	if err != nil {
 		t.Fatalf("ImportFromDrop: %v", err)
 	}
@@ -246,7 +247,7 @@ func TestImportMd(t *testing.T) {
 	os.WriteFile(srcPath, []byte("# Title\n\nContent here"), 0o600)
 
 	guard := NewPathGuard(storeDir)
-	result, err := ImportFromDrop(store, guard, srcPath)
+	result, err := ImportFromDrop(store, guard, srcPath, TFIDFVectorizer{})
 	if err != nil {
 		t.Fatalf("ImportFromDrop: %v", err)
 	}
@@ -264,7 +265,7 @@ func TestImportUnsupportedFormat(t *testing.T) {
 	os.WriteFile(srcPath, []byte("fake png"), 0o600)
 
 	guard := NewPathGuard(storeDir)
-	_, err := ImportFromDrop(store, guard, srcPath)
+	_, err := ImportFromDrop(store, guard, srcPath, TFIDFVectorizer{})
 	if err == nil {
 		t.Error("expected error for unsupported format")
 	}
@@ -411,7 +412,7 @@ func TestImportDocx(t *testing.T) {
 	store, _ := NewStore(filepath.Join(storeDir, "documents"))
 	guard := NewPathGuard(storeDir)
 
-	result, err := ImportFromDrop(store, guard, docxPath)
+	result, err := ImportFromDrop(store, guard, docxPath, TFIDFVectorizer{})
 	if err != nil {
 		t.Fatalf("ImportFromDrop docx: %v", err)
 	}
@@ -529,6 +530,57 @@ func TestXlsxRoundtrip(t *testing.T) {
 	}
 	if !strings.Contains(text, "Alice") || !strings.Contains(text, "Bob") {
 		t.Errorf("XLSX roundtrip content missing: %q", text)
+	}
+}
+
+func TestGenerateStyledXlsxWritesStylesAndColumns(t *testing.T) {
+	tmp := t.TempDir()
+	xlsxPath := filepath.Join(tmp, "styled.xlsx")
+
+	err := GenerateStyledXlsx(XlsxSpec{
+		SheetName: "報表",
+		Rows: [][]XlsxCell{
+			{
+				{Value: "Name", Style: "header"},
+				{Value: "Age", Style: "header"},
+			},
+			{
+				{Value: "Alice"},
+				{Value: 30},
+			},
+		},
+		Cells: map[string]XlsxCell{
+			"AA1": {Value: "遠欄", Style: "header"},
+		},
+		Styles: map[string]XlsxStyle{
+			"header": {Bold: true, FontColor: "C00000", FillColor: "FFF2CC", Align: "center"},
+		},
+		ColWidths: map[string]float64{"A": 16, "AA": 20},
+	}, xlsxPath)
+	if err != nil {
+		t.Fatalf("GenerateStyledXlsx: %v", err)
+	}
+
+	styles, err := zipReadFile(xlsxPath, "xl/styles.xml")
+	if err != nil {
+		t.Fatalf("read styles: %v", err)
+	}
+	stylesText := string(styles)
+	for _, want := range []string{`<b/>`, `rgb="FFC00000"`, `rgb="FFFFF2CC"`, `horizontal="center"`, `<cellXfs count="2">`} {
+		if !strings.Contains(stylesText, want) {
+			t.Fatalf("styles.xml missing %s:\n%s", want, stylesText)
+		}
+	}
+
+	sheet, err := zipReadFile(xlsxPath, "xl/worksheets/sheet1.xml")
+	if err != nil {
+		t.Fatalf("read sheet: %v", err)
+	}
+	sheetText := string(sheet)
+	for _, want := range []string{`<col min="1" max="1" width="16.00"`, `<col min="27" max="27" width="20.00"`, `r="AA1"`, `s="1"`} {
+		if !strings.Contains(sheetText, want) {
+			t.Fatalf("sheet1.xml missing %s:\n%s", want, sheetText)
+		}
 	}
 }
 

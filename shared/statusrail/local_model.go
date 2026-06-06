@@ -10,7 +10,14 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"ui_console/internal/urlsafe"
+	"ui_console/shared/controlseal"
 )
+
+// SEC-05 2a: 共用 Safe Client（loopback only 已由 isLocalEndpoint 字面值保證，
+// 這裡補上 dial 層防線）。timeout 交由呼叫端 ctx（900ms）控制。
+var localModelClient = urlsafe.NewSafeClient(urlsafe.PolicyLocalLLM, "status_rail_model", 2*time.Second)
 
 const localModelSystemPrompt = `你是陪伴型對話助手，僅負責閒聊、稱讚使用者、給通用建議。
 你可以看到使用者最近 2 輪工作流對話，但不得摘要、條列、複述工作流細節。
@@ -53,7 +60,7 @@ func localCompanionReply(input string, snapshots []Snapshot) (string, error) {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := localModelClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -82,11 +89,14 @@ func buildPrompt(input string, snapshots []Snapshot) string {
 		builder.WriteString("- ")
 		builder.WriteString(snapshot.Role)
 		builder.WriteString(": ")
-		builder.WriteString(snapshot.Text)
+		// SEC-C 補洞（2026-05-28）：snapshot.Text 是過去 LLM 回應 / 使用者訊息
+		// 的快照，可能含 injection 殘留；sanitize 後再拼進 prompt。
+		builder.WriteString(controlseal.SanitizeForLLM(controlseal.SourceMemory, snapshot.Text).LLMText)
 		builder.WriteString("\n")
 	}
 	builder.WriteString("\n使用者：")
-	builder.WriteString(input)
+	// SEC-C 補洞：input 是當下使用者輸入，跟既有 SourceUserRaw 對齊。
+	builder.WriteString(controlseal.SanitizeForLLM(controlseal.SourceUserRaw, input).LLMText)
 	builder.WriteString("\n回覆：")
 	return builder.String()
 }

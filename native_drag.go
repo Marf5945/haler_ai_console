@@ -11,4 +11,6 @@ type nativeDragResult struct {
 	FallbackRequired bool
 	Message          string
 	LandedPath       string
+	DropTargetKind   string
+	DropTargetDir    string
 }

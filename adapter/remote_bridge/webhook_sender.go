@@ -74,10 +74,9 @@ func SendWebhook(req WebhookRequest) (WebhookResponse, error) {
 		method = "POST"
 	}
 
-	// 建立 HTTP client（每次請求獨立 timeout）
-	client := &http.Client{
-		Timeout: time.Duration(timeout) * time.Second,
-	}
+	// SEC-05: 用 Safe Client（連線當下檢查 resolved IP，防 DNS rebinding /
+	// 網域指向內網），取代裸 http.Client。same-origin redirect 也在這層擋。
+	client := urlsafe.NewSafeClient(policy, "webhook_send", time.Duration(timeout)*time.Second)
 
 	// 建立 HTTP 請求
 	var bodyReader io.Reader

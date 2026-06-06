@@ -162,6 +162,7 @@ static int AIConsoleStartFilePromiseDrag(const char *cpath, char *message, int m
 import "C"
 
 import (
+	"path/filepath"
 	"strings"
 	"unsafe"
 )
@@ -175,11 +176,14 @@ func startNativeFileDrag(path string) nativeDragResult {
 	ok := C.AIConsoleStartFilePromiseDrag(cPath, &buf[0], C.int(len(buf)), &landed[0], C.int(len(landed)))
 	message := C.GoString(&buf[0])
 	if ok == 1 {
+		landedPath := C.GoString(&landed[0])
 		return nativeDragResult{
 			Status:           nativeDragStatusSuccess,
 			FallbackRequired: false,
 			Message:          message,
-			LandedPath:       C.GoString(&landed[0]),
+			LandedPath:       landedPath,
+			DropTargetKind:   "finder",
+			DropTargetDir:    filepath.Dir(landedPath),
 		}
 	}
 	if ok == -1 {

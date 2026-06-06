@@ -4,6 +4,9 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -42,7 +45,10 @@ func (a *App) HandleDocumentDrop(filePath string) (*DocumentImportResult, error)
 		return nil, fmt.Errorf("document service 尚未初始化")
 	}
 
-	result, err := builtin.ImportFromDrop(store, guard, filePath)
+	a.maybeEmitConfigMissing(filepath.Base(filePath))
+	vec := a.currentVectorizer()
+	result, err := builtin.ImportFromDrop(store, guard, filePath, vec)
+	a.persistMeasuredDimensionIfNeeded(vec)
 	if err != nil {
 		return nil, err
 	}
@@ -176,4 +182,126 @@ func (a *App) getPathGuard() *builtin.PathGuard {
 // timeNowUnixNano 用於產生 doc ID（可被 test mock）。
 func timeNowUnixNano() int64 {
 	return time.Now().UnixNano()
+}
+
+// maybeEmitConfigMissing：App 層檢查 EmbeddingConfig 並在必要時發 event。
+// 故意在 App 層做，不下推到 builtin——builtin 不應該知道 eventBus / UI 概念。
+//
+// 規則：ProviderID 空 + PickerDismissed=false → 發 event 給前端開 modal。
+// 不阻塞匯入流程：emit 完就 return，匯入照常走 TF-IDF。
+//
+// displayName 給前端 modal 顯示「是哪份檔觸發了這次提示」用。
+func (a *App) maybeEmitConfigMissing(displayName string) {
+	if a == nil || a.settingsService == nil || a.eventBus == nil {
+		return
+	}
+	cfg := a.settingsService.EmbeddingConfig()
+	if cfg.ProviderID != "" || cfg.PickerDismissed {
+		return
+	}
+	a.eventBus.Emit("embedding:config_missing", map[string]any{
+		"displayName": displayName,
+	})
+}
+
+// currentVectorizer 從 settings 決定 ingest / search 用哪個 vectorizer。
+//
+// 規則：
+//   - EmbeddingConfig.ProviderID == "ollama" 且 ModelID 非空 → OllamaEmbedVectorizer
+//   - 其他（沒設定、不認得的 provider）→ TFIDFVectorizer（fallback）
+//
+// 不快取——每次呼叫重建（Ollama vectorizer 內部有 HTTP client，但 client 本身 reuse connection）。
+// 重建成本可忽略；好處是使用者切換 model 後立即生效，不用重啟 app。
+func (a *App) currentVectorizer() builtin.Vectorizer {
+	if a.settingsService == nil {
+		return builtin.TFIDFVectorizer{}
+	}
+	cfg := a.settingsService.EmbeddingConfig()
+	if cfg.ProviderID == "ollama" && cfg.ModelID != "" {
+		return builtin.NewOllamaEmbedVectorizer("", cfg.ModelID)
+	}
+	return builtin.TFIDFVectorizer{}
+}
+
+// persistMeasuredDimensionIfNeeded 把 Ollama vectorizer 量到的 dimension 寫回 settings。
+// 故意分開呼叫——讓 currentVectorizer() 保持薄，只負責選擇器；測量寫回是 side-effect，由 ingest 流程明確觸發。
+func (a *App) persistMeasuredDimensionIfNeeded(vec builtin.Vectorizer) {
+	if a.settingsService == nil {
+		return
+	}
+	ollama, ok := vec.(*builtin.OllamaEmbedVectorizer)
+	if !ok {
+		return
+	}
+	dim := ollama.MeasuredDimension()
+	if dim <= 0 {
+		return
+	}
+	a.settingsService.SaveEmbeddingDimension(dim)
+}
+
+// ensureReferenceVectorIndexes 啟動時掃描引用文件目錄，重建「缺索引 / metadata 不一致」者。
+//
+// Phase B Y' 升級：
+//   - 索引存在但 ChunkerVersion / VectorMeta / ContentHash 任一不符 → 重建
+//   - 索引不存在 → 建立
+//   - 一致 → 跳過（最常見 path）
+//
+// vectorizer 目前固定 TFIDFVectorizer；M2 會從 settings 讀使用者選的 embed model。
+func (a *App) ensureReferenceVectorIndexes() {
+	root := appDataRoot()
+	refDir := filepath.Join(root, "data", "references", "files")
+	vecDir := filepath.Join(root, "data", "references", "vectors")
+
+	entries, err := os.ReadDir(refDir)
+	if err != nil {
+		return // 目錄不存在則跳過
+	}
+	_ = os.MkdirAll(vecDir, 0o700)
+
+	vec := a.currentVectorizer()
+	defer a.persistMeasuredDimensionIfNeeded(vec)
+	for _, entry := range entries {
+		if entry.IsDir() || len(entry.Name()) == 0 || entry.Name()[0] == '.' {
+			continue
+		}
+		filePath := filepath.Join(refDir, entry.Name())
+		indexPath := filepath.Join(vecDir, entry.Name()+".json")
+
+		// 讀檔案前 64 KiB
+		f, err := os.Open(filePath)
+		if err != nil {
+			continue
+		}
+		buf := make([]byte, 64*1024)
+		n, _ := f.Read(buf)
+		f.Close()
+		content := string(buf[:n])
+		if content == "" {
+			continue
+		}
+		contentHash := sha256Hex64(content)
+
+		// 已有索引 → 讀回比對 metadata；一致就跳過
+		if data, rerr := os.ReadFile(indexPath); rerr == nil {
+			var existing builtin.DocumentVectorIndex
+			if json.Unmarshal(data, &existing) == nil {
+				if !builtin.IndexNeedsRebuild(existing, vec, contentHash) {
+					continue
+				}
+			}
+		}
+		_ = builtin.BuildAndSaveVectorIndexToDir(vecDir, entry.Name(), content, vec)
+	}
+}
+
+// sha256Hex64 — local helper mirroring builtin.sha256Hex（不匯出避免循環）。
+func sha256Hex64(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+// ReferenceVectorsDir 回傳引用文件的向量索引目錄路徑。
+func referenceVectorsDir() string {
+	return filepath.Join(appDataRoot(), "data", "references", "vectors")
 }

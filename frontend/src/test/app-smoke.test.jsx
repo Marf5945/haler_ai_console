@@ -4,6 +4,9 @@ import {cleanup, render, waitFor} from '@testing-library/react';
 import App from '../App.jsx';
 
 function defaultBindingValue(name) {
+  if (name === 'ListReferenceFiles') {
+    return [{name: '測試用教學文件-001.txt', path: '/tmp/測試用教學文件-001.txt', source: 'library', status: 'ready', detail: '已從引用庫載入'}];
+  }
   if (/^(List|Scan|GetRecent|GetPending|GetNew|GetToolRegistry|GetTalkMessages)/.test(name)) return [];
   if (/^(Has|Is|Can)/.test(name)) return false;
   if (name === 'GetConsoleState') return {greeting: 'ready', adapters: [], haoras: ['main'], messages: []};
@@ -63,6 +66,22 @@ describe('App smoke render', () => {
     render(<App />);
     await waitFor(() => {
       expect(document.querySelector('.console-shell')).toBeInTheDocument();
+    });
+  });
+
+  it('renders reference cards without vectorizer badges', async () => {
+    render(<App />);
+    await waitFor(() => {
+      expect(document.querySelector('.reference-file-name')).toBeInTheDocument();
+      expect(document.querySelector('.reference-file-vectorizer-badge')).not.toBeInTheDocument();
+    });
+  });
+
+  it('keeps loaded library reference cards compact', async () => {
+    render(<App />);
+    await waitFor(() => {
+      expect(document.querySelector('.reference-file-status')).toHaveTextContent('已載入');
+      expect(document.querySelector('.reference-file-detail')).not.toBeInTheDocument();
     });
   });
 });

@@ -160,7 +160,7 @@ func TestSaveCriticalNodes(t *testing.T) {
 	}
 
 	// 驗證檔案存在
-	path := filepath.Join(tmpDir, "dag_runs", "test-run.json")
+	path := filepath.Join(tmpDir, "dag_runs", "test-run.critical.json")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		t.Error("persisted file should exist")
 	}
@@ -182,8 +182,8 @@ func TestListPersistedRuns(t *testing.T) {
 	dir := filepath.Join(tmpDir, "dag_runs")
 	os.MkdirAll(dir, 0755)
 
-	os.WriteFile(filepath.Join(dir, "run-1.json"), []byte("{}"), 0644)
-	os.WriteFile(filepath.Join(dir, "run-2.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(dir, "run-1.critical.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(dir, "run-2.critical.json"), []byte("{}"), 0644)
 
 	ids, err := ListPersistedRuns(tmpDir)
 	if err != nil {

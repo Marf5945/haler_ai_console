@@ -11,12 +11,13 @@
 //   - 換 YOLO 版本時只改 yolo_postprocess.go，平台橋接層不動。
 //
 // 硬規範摘要：
-//   §14.6.1 — macOS CoreML bridge 固定使用 .m 檔，不 inline 進 .go
-//   §14.6.2 — CoreML 推論固定 runtime.LockOSThread() worker
-//   §14.6.3 — unsafe 操作只允許在 bridge 檔案內部
-//   §14.6.4 — Windows DLL 載入集中初始化，缺失回傳 typed error + 降級
-//   §14.6.5 — 測試 fixture 用 //go:embed testdata/
-//   §14.6.6 — LoadModel() 前 SHA256 驗證，hash 來自受信任 manifest
+//
+//	§14.6.1 — macOS CoreML bridge 固定使用 .m 檔，不 inline 進 .go
+//	§14.6.2 — CoreML 推論固定 runtime.LockOSThread() worker
+//	§14.6.3 — unsafe 操作只允許在 bridge 檔案內部
+//	§14.6.4 — Windows DLL 載入集中初始化，缺失回傳 typed error + 降級
+//	§14.6.5 — 測試 fixture 用 //go:embed testdata/
+//	§14.6.6 — LoadModel() 前 SHA256 驗證，hash 來自受信任 manifest
 package visual_learning
 
 import (
@@ -51,15 +52,15 @@ var ErrEngineAlreadyClosed = errors.New("inference engine: engine already closed
 // 外部 Go 程式（yolo_postprocess.go）只會拿到這個結構，
 // 不會接觸任何 native pointer 或 unsafe 操作。
 //
-// 典型 YOLO nano 輸出 shape: [1, 25200, 85]
-//   - 25200 = anchor 數量（不同 grid 加總）
+// 典型 YOLOX-Nano 輸出 shape: [1, 3549, 85]（輸入 416、anchor-free）
+//   - 3549 = grid cell 數量（52²+26²+13²，stride 8/16/32 加總，每 cell 1 預測）
 //   - 85 = 4 (x,y,w,h) + 1 (objectness) + 80 (class scores)
 type RawTensor struct {
 	// Data 是推論輸出的浮點數陣列（已從 native memory 複製到 Go heap）。
 	// 平台橋接層負責複製，外部不持有 native pointer。
 	Data []float32 `json:"data"`
 
-	// Shape 描述 tensor 的維度，例如 [1, 25200, 85]。
+	// Shape 描述 tensor 的維度，例如 [1, 3549, 85]。
 	// 後處理層根據 shape 解讀 Data 的排列方式。
 	Shape []int `json:"shape"`
 }
@@ -145,6 +146,9 @@ type InferenceStatus struct {
 
 	// Backend 標示使用的推論後端，例如 "coreml", "directml", "stub"。
 	Backend string `json:"backend"`
+
+	// ModelPath 標示目前嘗試載入的模型基底路徑，供工程監視面板診斷。
+	ModelPath string `json:"model_path,omitempty"`
 
 	// Degraded 為 true 表示引擎處於降級模式（例如模型缺失、DLL 不可用）。
 	Degraded bool `json:"degraded"`

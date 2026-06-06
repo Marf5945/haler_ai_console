@@ -1,4 +1,4 @@
-// visual_learning/yolo_postprocess_test.go — YOLO 後處理單元測試。
+// visual_learning/yolo_postprocess_test.go — YOLOX 後處理單元測試。
 //
 // 規範依據：AI_Console_Spec_v4_2.md §14.6.5
 //
@@ -17,10 +17,11 @@ import (
 // Test Fixture 載入（§14.6.5：用 //go:embed，不硬編碼 float array）
 // ──────────────────────────────────────────────
 
-//go:embed testdata/yolo_nano_output.json
+//go:embed testdata/yolox_nano_output.json
 var testFixtureJSON []byte
 
-// testFixture 是從 testdata/yolo_nano_output.json 解析的測試資料。
+// testFixture 是從 testdata/yolox_nano_output.json 解析的測試資料。
+// YOLOX 為 anchor-free，fixture 不含 anchor 表。
 type testFixture struct {
 	Description string `json:"description"`
 	Tensor      struct {
@@ -28,17 +29,16 @@ type testFixture struct {
 		Shape []int     `json:"shape"`
 	} `json:"tensor"`
 	Config struct {
-		InputSize     int          `json:"input_size"`
-		NumClasses    int          `json:"num_classes"`
-		ConfThreshold float32      `json:"conf_threshold"`
-		NMSThreshold  float32      `json:"nms_threshold"`
-		Anchors       [][][2]int   `json:"anchors"`
-		Strides       []int        `json:"strides"`
+		InputSize     int     `json:"input_size"`
+		NumClasses    int     `json:"num_classes"`
+		ConfThreshold float32 `json:"conf_threshold"`
+		NMSThreshold  float32 `json:"nms_threshold"`
+		Strides       []int   `json:"strides"`
 	} `json:"config"`
 	Expected struct {
-		TotalBeforeNMS      int    `json:"total_before_nms"`
-		TotalAfterNMS       int    `json:"total_after_nms"`
-		KeptProposalID      string `json:"kept_proposal_id"`
+		TotalBeforeNMS       int    `json:"total_before_nms"`
+		TotalAfterNMS        int    `json:"total_after_nms"`
+		KeptProposalID       string `json:"kept_proposal_id"`
 		SuppressedProposalID string `json:"suppressed_proposal_id"`
 	} `json:"expected"`
 }
@@ -53,21 +53,13 @@ func loadFixture(t *testing.T) testFixture {
 	return f
 }
 
-// fixtureToConfig 將 fixture 的 config 轉為 YOLOConfig。
+// fixtureToConfig 將 fixture 的 config 轉為 YOLOConfig（anchor-free）。
 func fixtureToConfig(f testFixture) YOLOConfig {
-	anchors := make([][][2]float32, len(f.Config.Anchors))
-	for i, level := range f.Config.Anchors {
-		anchors[i] = make([][2]float32, len(level))
-		for j, a := range level {
-			anchors[i][j] = [2]float32{float32(a[0]), float32(a[1])}
-		}
-	}
 	return YOLOConfig{
 		InputSize:     f.Config.InputSize,
 		NumClasses:    f.Config.NumClasses,
 		ConfThreshold: f.Config.ConfThreshold,
 		NMSThreshold:  f.Config.NMSThreshold,
-		Anchors:       anchors,
 		Strides:       f.Config.Strides,
 	}
 }
@@ -90,14 +82,21 @@ func TestDecodeYOLOOutput(t *testing.T) {
 		t.Fatalf("DecodeYOLOOutput returned error: %v", err)
 	}
 
-	// 預期：NMS 後只剩 1 個 proposal（高分的 anchor0）
+	// 預期：NMS 後剩下 fixture 指定數量的 proposal
 	if len(proposals) != f.Expected.TotalAfterNMS {
 		t.Errorf("expected %d proposals after NMS, got %d", f.Expected.TotalAfterNMS, len(proposals))
 	}
 
-	// 驗證保留的是高分候選
+	// 驗證保留的第一個（最高分）是預期的高分候選
 	if len(proposals) > 0 && proposals[0].ProposalID != f.Expected.KeptProposalID {
 		t.Errorf("expected kept proposal ID %q, got %q", f.Expected.KeptProposalID, proposals[0].ProposalID)
+	}
+
+	// 驗證被抑制的候選不應出現在結果中
+	for _, p := range proposals {
+		if p.ProposalID == f.Expected.SuppressedProposalID {
+			t.Errorf("proposal %q should have been suppressed by NMS, but survived", p.ProposalID)
+		}
 	}
 
 	// 驗證座標在 [0, 1] 範圍內
@@ -143,22 +142,22 @@ func TestNMS(t *testing.T) {
 // ──────────────────────────────────────────────
 
 func TestScoreFilter(t *testing.T) {
-	// 建立只有 1 個低分 anchor 的 tensor（conf < 0.25 threshold）
+	// 建立只有 1 個低分 grid cell 的 tensor（conf < 0.25 threshold）
 	entryLen := 85
 	data := make([]float32, entryLen)
-	data[0] = invSigmoid(0.5) // tx
-	data[1] = invSigmoid(0.5) // ty
-	data[2] = invSigmoid(0.5) // tw
-	data[3] = invSigmoid(0.5) // th
+	data[0] = 0.5            // tx（grid 偏移）
+	data[1] = 0.5            // ty
+	data[2] = 0.0            // tw（log-scale）→ exp(0)=1
+	data[3] = 0.0            // th
 	data[4] = invSigmoid(0.1) // objectness = 0.1
 	data[5] = invSigmoid(0.1) // class 0 = 0.1 → conf = 0.01
 
+	// anchor-free config：input 8、stride 8 → 1×1 grid，1 個 cell。
 	config := YOLOConfig{
 		InputSize:     8,
 		NumClasses:    80,
 		ConfThreshold: 0.25,
 		NMSThreshold:  0.45,
-		Anchors:       [][][2]float32{{{10, 13}}},
 		Strides:       []int{8},
 	}
 

@@ -75,7 +75,7 @@ func TestUpdateRunIndex(t *testing.T) {
 	})
 
 	// T-DI-02：UpdateNodeStatus → index entry 更新
-	err := UpdateRunIndex(tmpDir, "dag-upd", "failed", "2026-05-17T10:05:00Z", 300000, 2, "timeout on node-3")
+	err := UpdateRunIndex(tmpDir, "dag-upd", "failed", "2026-05-17T10:05:00Z", 300000, 3, 2, "timeout on node-3")
 	if err != nil {
 		t.Fatalf("UpdateRunIndex failed: %v", err)
 	}
@@ -89,6 +89,9 @@ func TestUpdateRunIndex(t *testing.T) {
 	}
 	if runs[0].FailedNodeCount != 2 {
 		t.Errorf("expected 2 failed nodes, got %d", runs[0].FailedNodeCount)
+	}
+	if runs[0].NodeCount != 3 {
+		t.Errorf("expected 3 nodes, got %d", runs[0].NodeCount)
 	}
 	if runs[0].DurationMs != 300000 {
 		t.Errorf("expected 300000ms, got %d", runs[0].DurationMs)
@@ -111,7 +114,7 @@ func TestUpdateRunIndex_ErrorSummaryTruncation(t *testing.T) {
 		longError += "x"
 	}
 
-	UpdateRunIndex(tmpDir, "dag-trunc", "failed", "", 0, 1, longError)
+	UpdateRunIndex(tmpDir, "dag-trunc", "failed", "", 0, 1, 1, longError)
 
 	runs := ListDAGRuns(tmpDir, 10, "")
 	if len([]rune(runs[0].ErrorSummary)) > 120 {

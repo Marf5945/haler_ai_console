@@ -31,6 +31,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"ui_console/internal/urlsafe"
 )
 
 // ──────────────────────────────────────────────
@@ -43,9 +45,10 @@ type ConnectionTester struct {
 }
 
 // NewConnectionTester 建立連線測試器。
+// SEC-05: 使用 Safe Client（PolicyWebhook，僅公網 HTTPS + 連線當下 IP 篩選）。
 func NewConnectionTester() *ConnectionTester {
 	return &ConnectionTester{
-		client: &http.Client{Timeout: 10 * time.Second},
+		client: urlsafe.NewSafeClient(urlsafe.PolicyWebhook, "connection_test", 10*time.Second),
 	}
 }
 
@@ -55,6 +58,16 @@ func (ct *ConnectionTester) TestConnection(rawURL string, channel ChannelType) C
 	now := time.Now()
 
 	if err := ValidateURLFormat(rawURL); err != nil {
+		return ConnectionTestResult{
+			Success:      false,
+			Channel:      channel,
+			ErrorMessage: err.Error(),
+			TestedAt:     now,
+		}
+	}
+
+	// SEC-05: 字面值 SSRF 快速失敗；實質防線仍在 Safe Client 的連線時 IP 篩選。
+	if err := urlsafe.ValidateURL(rawURL, urlsafe.PolicyWebhook); err != nil {
 		return ConnectionTestResult{
 			Success:      false,
 			Channel:      channel,

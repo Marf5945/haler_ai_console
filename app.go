@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -50,37 +51,46 @@ import (
 	"ui_console/shared/browser_pref"
 	"ui_console/shared/controlseal"
 	"ui_console/shared/eventbus"
+	"ui_console/shared/executil"
 	"ui_console/shared/health"
 	"ui_console/shared/localsearch"
 	"ui_console/shared/onboarding"
 	"ui_console/shared/package_import"
 	"ui_console/shared/preference"
+	"ui_console/shared/riskgrant"
 	"ui_console/shared/scheduler"
 	"ui_console/shared/settings"
 	"ui_console/shared/statusrail"
 	"ui_console/shared/taborder"
 	"ui_console/shared/tools"
+	"ui_console/shared/websearch"
 )
 
 type schedulerSkillExecutor struct {
-	router *skill_step.Router
+	app *App
 }
 
 func (e schedulerSkillExecutor) ExecuteSkill(ctx context.Context, actionTarget string, sessionID string) error {
-	if e.router == nil {
-		return fmt.Errorf("scheduler skill executor: skill router is nil")
+	if e.app == nil {
+		return fmt.Errorf("scheduler skill executor: app is nil")
 	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
-	at, err := skill_step.ParseActionTarget(actionTarget)
+	adapterID := e.app.defaultSkillExecutionAdapterID()
+	if adapterID == "" {
+		return fmt.Errorf("scheduler skill executor: no adapter available")
+	}
+	decision, err := e.app.ExecuteSkillMessage(adapterID, sessionID, actionTarget, fmt.Sprintf("scheduler-skill-%d", time.Now().UnixNano()))
 	if err != nil {
 		return err
 	}
-	_, err = e.router.Resolve(at, sessionID)
-	return err
+	if !decision.Executed {
+		return fmt.Errorf("scheduler skill executor: skill %q was not executed (decision=%s)", actionTarget, decision.Decision)
+	}
+	return nil
 }
 
 type llmAPIAdapterConfig struct {
@@ -146,6 +156,7 @@ type App struct {
 	skillRouter     *skill_step.Router
 	skillInjections *skill_step.InjectionStore
 	skillAudit      *skill_step.AuditLog
+	skillGrants     *riskgrant.Store // TASK 31：skill「允許一次」帶 TTL 授權
 
 	// 遺留待重建能力 — Wails 基礎架構遷移 (#1–#7)
 	adapterRegistry *adapter_registry.Service // #1: 動態 adapter 列表
@@ -191,6 +202,7 @@ type App struct {
 	learningService     *visual_learning.LearningService
 	opencvPipeline      *visual_learning.OpenCVPipeline
 	yoloDetector        *visual_learning.YOLODetector
+	nativeInput         *visual_learning.NativeInput
 	canonicalLabelSvc   *visual_learning.CanonicalLabelService
 	elementDictionary   *visual_learning.ElementDictionary
 	actionDictionary    *visual_learning.ActionDictionary
@@ -210,11 +222,15 @@ type App struct {
 
 	// v3.6.4 Readiness Gate UI Interaction Layer
 	// 狀態由 readinessMu + currentGateState 全域管理（輕量級，不需 service 實例）
+	toolReadinessMu        sync.Mutex
+	pendingToolQuestions   map[string]pendingToolQuestion
+	toolBackgroundContexts map[string][]toolBackgroundAnswer
 
 	// #I-801: Node Sidecar 生命週期管理器
 	sidecar *cli_manager.SidecarManager
 	// #I-803: CLIAdapter 透過 Sidecar IPC 與 Node 通訊
-	cliAdapter skill_step.CLIAdapter
+	cliAdapter      skill_step.CLIAdapter
+	adapterHealthMu sync.Mutex
 	// #I-804: DAG 事件節流閥（150ms）
 	dagThrottler *cli_manager.DAGThrottler
 
@@ -279,6 +295,7 @@ func NewApp() *App {
 	sharedSecretStore := credential.NewStore(root)
 
 	cwd, _ := os.Getwd()
+	yoloModelBasePath := visualLearningModelBasePath(cwd)
 	a := &App{
 		greetings:       greetings,
 		statusRail:      statusrail.NewService(root, greetings),
@@ -313,10 +330,13 @@ func NewApp() *App {
 		skillRouter:            skill_step.NewRouter(archiveSvc),
 		skillInjections:        skill_step.NewInjectionStore(),
 		skillAudit:             skill_step.NewAuditLog(root),
+		skillGrants:            riskgrant.NewStore(),
 		previewCache:           make(map[string]*skill_step.ScanPreview),
 		resolveCache:           make(map[string]*skill_step.ResolveResult),
 		globalSessionID:        fmt.Sprintf("session-%d", time.Now().UnixNano()),
 		referencePromptTargets: make(map[string][]string),
+		pendingToolQuestions:   make(map[string]pendingToolQuestion),
+		toolBackgroundContexts: make(map[string][]toolBackgroundAnswer),
 
 		// #I-1002: Review Archive — rejected card 持久化
 		reviewArchive: review.NewArchiveService(hookRoot),
@@ -347,7 +367,8 @@ func NewApp() *App {
 		visualLearning:      visual_learning.NewService(hookRoot),
 		learningService:     visual_learning.NewLearningService(hookRoot),
 		opencvPipeline:      visual_learning.NewOpenCVPipeline(),
-		yoloDetector:        visual_learning.NewYOLODetector(filepath.Join(root, "assets", "models", "yolo_nano"), visual_learning.NewOpenCVPipeline()),
+		yoloDetector:        visual_learning.NewYOLODetector(yoloModelBasePath, visual_learning.NewOpenCVPipeline()),
+		nativeInput:         visual_learning.NewNativeInput(),
 		canonicalLabelSvc:   visual_learning.NewCanonicalLabelService(filepath.Join(hookRoot, "data", "visual_learning")),
 		elementDictionary:   visual_learning.NewElementDictionary(filepath.Join(hookRoot, "data", "visual_learning")),
 		actionDictionary:    visual_learning.NewActionDictionary(filepath.Join(hookRoot, "data", "visual_learning")),
@@ -381,6 +402,11 @@ func NewApp() *App {
 	a.sidecar = sidecarMgr
 	sidecarAdapter := cli_manager.NewSidecarCLIAdapter(sidecarMgr, filepath.Join(root, "cli-workspaces"))
 	sidecarAdapter.SetControlSealSettings(a.settingsService.State().ControlSeal)
+	// UI 雙擊 adapter 卡片時會經 SetAdapterModelChoice 寫入 settings；此 closure 在
+	// 每次 IPC sendMessage 前才查詢，所以使用者一改就生效，不用重啟 sidecar。
+	sidecarAdapter.SetModelProvider(func(adapterID string) string {
+		return a.settingsService.AdapterModelChoices()[adapterID]
+	})
 	a.cliAdapter = sidecarAdapter
 
 	// #I-804: DAG 節流閥，避免高頻事件卡住前端
@@ -392,7 +418,7 @@ func NewApp() *App {
 	a.schedulerService = scheduler.NewService(scheduler.ServiceConfig{
 		DataRoot:  hookRoot,
 		EventBus:  a.eventBus,
-		SkillExec: schedulerSkillExecutor{router: a.skillRouter},
+		SkillExec: schedulerSkillExecutor{app: a},
 	})
 	skill_step.RegisterDocumentBuiltins(a.skillRouter)
 	return a
@@ -422,6 +448,40 @@ func appResourceRoot() string {
 	return ""
 }
 
+func visualLearningModelBasePath(cwd string) string {
+	programRoot := appProgramRoot(cwd)
+	candidates := []string{
+		filepath.Join(cwd, "assets", "models", "yolox_button_s"),
+		filepath.Join(programRoot, "assets", "models", "yolox_button_s"),
+		filepath.Clean(filepath.Join(programRoot, "..", "..", "assets", "models", "yolox_button_s")),
+		filepath.Join(cwd, "assets", "models", "yolox_nano"),
+		filepath.Join(programRoot, "assets", "models", "yolox_nano"),
+		filepath.Clean(filepath.Join(programRoot, "..", "..", "assets", "models", "yolox_nano")),
+	}
+	if resourceRoot := appResourceRoot(); resourceRoot != "" {
+		candidates = append(candidates,
+			filepath.Join(resourceRoot, "assets", "models", "yolox_button_s"),
+			filepath.Join(resourceRoot, "assets", "models", "yolox_nano"),
+		)
+	}
+	for _, candidate := range candidates {
+		if visualLearningModelExists(candidate) {
+			return candidate
+		}
+	}
+	return candidates[0]
+}
+
+func visualLearningModelExists(basePath string) bool {
+	if info, err := os.Stat(basePath + ".mlmodelc"); err == nil && info.IsDir() {
+		return true
+	}
+	if info, err := os.Stat(basePath + ".onnx"); err == nil && !info.IsDir() {
+		return true
+	}
+	return false
+}
+
 // openBrowser 用系統預設瀏覽器開啟 URL。
 // macOS 用 "open"，Linux 用 "xdg-open"，Windows 用 "rundll32"。
 // 這是 fire-and-forget 操作，錯誤只 log 不回傳。
@@ -432,7 +492,7 @@ func appResourceRoot() string {
 // SEC-W06 Phase 1（2026-05-24）：只允許 http / https。
 // 拒絕 file:// (Quick Look 開檔)、smb:// / afp:// (NTLM relay 攻擊)、
 // javascript: / data: / mailto: 等非 web scheme。
-// Phase 2 待辦：前端 BrowserOpenURL 直呼處（App.jsx 9 處）需獨立 wrapper。
+// SEC-05 2b（2026-06-06）：前端直呼處已收口到 OpenExternalURL binding。
 func openBrowser(rawURL string) {
 	if rawURL == "" {
 		return
@@ -452,11 +512,11 @@ func openBrowser(rawURL string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", rawURL)
+		cmd = executil.Command("open", rawURL)
 	case "linux":
-		cmd = exec.Command("xdg-open", rawURL)
+		cmd = executil.Command("xdg-open", rawURL)
 	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL)
+		cmd = executil.Command("rundll32", "url.dll,FileProtocolHandler", rawURL)
 	default:
 		log.Printf("openBrowser: unsupported OS %s", runtime.GOOS)
 		return
@@ -464,6 +524,28 @@ func openBrowser(rawURL string) {
 	if err := cmd.Start(); err != nil {
 		log.Printf("openBrowser: failed to open %s: %v", rawURL, err)
 	}
+}
+
+// OpenExternalURL SEC-05 2b: 前端開外部連結的唯一入口（取代直呼 BrowserOpenURL）。
+// 規則：僅 http/https；metadata 主機名與無條件危險 IP 字面值拒絕；
+// loopback/private 放行——開瀏覽器看本機頁面（debug trace monitor、
+// GetMonitorLinks 連結）是合法用途，風險模型與 App 代抓內容不同。
+func (a *App) OpenExternalURL(rawURL string) error {
+	rawURL = strings.TrimSpace(rawURL)
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("無法解析 URL: %w", err)
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("僅允許 http/https 連結（收到 %q）", scheme)
+	}
+	if err := urlsafe.ScreenExternalOpenTarget(u.Hostname()); err != nil {
+		log.Printf("event=safe_http_blocked operation=open_external policy=browser host=%s decision=blocked reason=%v", u.Hostname(), err)
+		return err
+	}
+	openBrowser(rawURL)
+	return nil
 }
 
 func appDataRoot() string {
@@ -485,6 +567,8 @@ func (a *App) startup(ctx context.Context) {
 		"trace_link": debugtrace.Snapshot(),
 	})
 	writeMonitorLinkSnapshot(debugtrace.Snapshot())
+	// SEC-06: 清掉上次未正常停止的 ephemeral browser profile（冪等）。
+	_ = a.CleanupEphemeralProfiles()
 	// #7: Inject Wails context into event bus so it can emit to frontend.
 	a.eventBus.SetContext(ctx)
 	a.interruptStaleTaskRuns("App 重新啟動")
@@ -535,6 +619,7 @@ func (a *App) startup(ctx context.Context) {
 	go func() {
 		defer a.startupWg.Done()
 		a.adapterRegistry.AutoDetect() // 結果快取在記憶體，前端呼叫 AutoDetectCLI 時回傳
+		a.refreshAdapterRuntimeHealth()
 	}()
 
 	// v3.6.1: 啟動時掃描 allowlist 到期狀態（§9.9）
@@ -544,6 +629,9 @@ func (a *App) startup(ctx context.Context) {
 			a.eventBus.Emit("source_trust:allowlist_expiring", expiring)
 		}
 	}()
+
+	// TASK 31: 啟動時為引用文件建立缺少的向量索引
+	go a.ensureReferenceVectorIndexes()
 
 	// v3.6.1: 啟動時掃描過期暫存檔（§7.5 ScanAndCleanExpired，30 天）
 	go func() {
@@ -1043,20 +1131,95 @@ func (a *App) collectActionTags() []string {
 			add(a.skillRouter.BuiltinActionTags())
 		}
 	}
+	// Visual Learning operation replay is app-owned; LLMs may select it via action-chain.
+	add([]string{"操作"})
 	sort.Strings(tags)
 	return tags
 }
 
-func (a *App) maybeHandleLocalSearch(userText, traceID string) (*skill_step.CLIResponse, bool) {
+func (a *App) maybeHandleLocalSearch(userText, sessionID, traceID string) (*skill_step.CLIResponse, bool) {
+	if isLearningOperationCatalogText(userText) {
+		return nil, false
+	}
+	if resp, ok := a.maybeHandlePendingLocalSearchWebFallback(userText, sessionID, traceID); ok {
+		return resp, true
+	}
+	if resp, ok := a.maybeHandleWebSearch(userText, sessionID, traceID); ok {
+		return resp, true
+	}
 	req, ok := localsearch.ParseUserQuery(userText)
 	if !ok {
 		return nil, false
 	}
-	resp := a.executeLocalSearch(req, traceID)
+	decision := toolRoutingDecision{Kind: toolRoutingDecisionAction, Action: "搜尋", Target: req.Query, Next: actionchain.StandbyNext}
+	if handled, resp := a.maybeAskForToolReadiness(sessionID, decision, traceID); handled {
+		return &resp, true
+	}
+	resp := a.executeLocalSearch(req, sessionID, traceID)
 	return &resp, true
 }
 
-func (a *App) executeLocalSearch(req localsearch.SearchRequest, traceID string) skill_step.CLIResponse {
+type pendingLocalSearchWebFallback struct {
+	Query     string
+	Limit     int
+	ExpiresAt time.Time
+}
+
+var (
+	pendingLocalSearchWebFallbackMu sync.Mutex
+	pendingLocalSearchWebFallbacks  = map[string]pendingLocalSearchWebFallback{}
+)
+
+func (a *App) maybeHandlePendingLocalSearchWebFallback(userText, sessionID, traceID string) (*skill_step.CLIResponse, bool) {
+	text := strings.ToLower(strings.TrimSpace(userText))
+	if text == "" {
+		return nil, false
+	}
+	pendingLocalSearchWebFallbackMu.Lock()
+	pending, has := pendingLocalSearchWebFallbacks[sessionID]
+	if has && time.Now().After(pending.ExpiresAt) {
+		delete(pendingLocalSearchWebFallbacks, sessionID)
+		has = false
+	}
+	pendingLocalSearchWebFallbackMu.Unlock()
+	if !has {
+		return nil, false
+	}
+	if text == "不要" || text == "不用" || text == "no" || text == "n" {
+		pendingLocalSearchWebFallbackMu.Lock()
+		delete(pendingLocalSearchWebFallbacks, sessionID)
+		pendingLocalSearchWebFallbackMu.Unlock()
+		return &skill_step.CLIResponse{Text: "好，我先不改用網路搜尋。"}, true
+	}
+	if !confirmRe.MatchString(text) {
+		return nil, false
+	}
+	pendingLocalSearchWebFallbackMu.Lock()
+	delete(pendingLocalSearchWebFallbacks, sessionID)
+	pendingLocalSearchWebFallbackMu.Unlock()
+	req := websearch.SearchRequest{Query: pending.Query, Limit: pending.Limit}
+	resp := a.executeWebSearch(req, traceID)
+	return &resp, true
+}
+
+func rememberLocalSearchWebFallback(sessionID string, req localsearch.SearchRequest) {
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(req.Query) == "" {
+		return
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = localsearch.DefaultLimit
+	}
+	pendingLocalSearchWebFallbackMu.Lock()
+	pendingLocalSearchWebFallbacks[sessionID] = pendingLocalSearchWebFallback{
+		Query:     strings.TrimSpace(req.Query),
+		Limit:     limit,
+		ExpiresAt: time.Now().Add(5 * time.Minute),
+	}
+	pendingLocalSearchWebFallbackMu.Unlock()
+}
+
+func (a *App) executeLocalSearch(req localsearch.SearchRequest, sessionID, traceID string) skill_step.CLIResponse {
 	debugtrace.Record("local_search.enter", traceID, map[string]interface{}{
 		"query": req.Query,
 		"scope": req.Scope,
@@ -1070,7 +1233,7 @@ func (a *App) executeLocalSearch(req localsearch.SearchRequest, traceID string) 
 	ctx, cancel := context.WithTimeout(baseCtx, 2*time.Second)
 	defer cancel()
 
-	service := localsearch.NewService(a.localSearchRoots(), a.localSearchItems())
+	service := localsearch.NewService(a.localSearchRoots(), a.localSearchItems(traceID))
 	outcome, err := service.SearchWithContext(ctx, req)
 	if err != nil {
 		if errors.Is(err, localsearch.ErrEmptyQuery) {
@@ -1088,6 +1251,10 @@ func (a *App) executeLocalSearch(req localsearch.SearchRequest, traceID string) 
 		"files_scanned": outcome.FilesScanned,
 		"bytes_scanned": outcome.BytesScanned,
 	})
+	if len(outcome.Results) == 0 {
+		rememberLocalSearchWebFallback(sessionID, req)
+		return skill_step.CLIResponse{Text: fmt.Sprintf("本機資料裡找不到「%s」。要改用網路搜尋嗎？", req.Query)}
+	}
 	return skill_step.CLIResponse{Text: localsearch.FormatSearchOutcome(req, outcome)}
 }
 
@@ -1105,7 +1272,7 @@ func (a *App) localSearchRoots() []localsearch.Root {
 	}
 }
 
-func (a *App) localSearchItems() []localsearch.Item {
+func (a *App) localSearchItems(excludeTraceID string) []localsearch.Item {
 	var items []localsearch.Item
 	if a.toolsService != nil {
 		for _, tool := range a.toolsService.List() {
@@ -1134,6 +1301,9 @@ func (a *App) localSearchItems() []localsearch.Item {
 		}
 	}
 	for _, event := range debugtrace.EventsSnapshot() {
+		if strings.TrimSpace(excludeTraceID) != "" && event.TraceID == excludeTraceID {
+			continue
+		}
 		payload, _ := json.Marshal(event.Data)
 		items = append(items, localsearch.Item{
 			Source: "trace",
@@ -1551,29 +1721,60 @@ func (a *App) ensureSidecarRunning() error {
 // 自動從 InjectionStore 取得當前 session 的 SkillInjection 並附加。
 // 若 CLIAdapter 尚未設定（cliAdapter == nil），回傳 stub 回應。
 func (a *App) SendCLIMessage(adapterID string, sessionID string, userText string, traceID string) (*skill_step.CLIResponse, error) {
+	return a.sendCLIMessage(adapterID, sessionID, userText, traceID, "")
+}
+
+func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string, traceID string, modelOverride string) (*skill_step.CLIResponse, error) {
 	// === 診斷 log：記錄每次 CLI 呼叫的關鍵參數，方便追蹤問題 ===
 	log.Printf("SendCLIMessage: adapter=%q session=%q text_len=%d", adapterID, sessionID, len(userText))
 	// DEBUG_TRACE_REMOVE: Captures the Wails binding input with full dev-mode text.
-	debugtrace.Record("go.SendCLIMessage.enter", traceID, map[string]interface{}{
+	sendTrace := map[string]interface{}{
 		"adapter_id": adapterID,
 		"session_id": sessionID,
-		"user_text":  userText,
 		"text_len":   len(userText),
-	})
+	}
+	addDebugTraceUserText(sendTrace, traceID, userText)
+	debugtrace.Record("go.SendCLIMessage.enter", traceID, sendTrace)
 
 	var inj *skill_step.Injection
 	if a.skillInjections != nil {
 		inj = a.skillInjections.Get(sessionID)
 	}
 	actionTags := a.syncActionTagsToCLIAdapter(traceID)
-	if resp, handled := a.maybeHandleLocalSearch(userText, traceID); handled {
-		debugtrace.Record("go.cliAdapter.response", traceID, map[string]interface{}{
-			"text":          resp.Text,
-			"error":         resp.Error,
-			"auth_required": false,
-			"auth_url":      "",
-		})
-		return resp, nil
+	isTaskProgressInternal := isTaskProgressTraceID(traceID)
+	if !isTaskProgressInternal {
+		if resp, handled := a.maybeHandleResourceGate(userText, sessionID, traceID); handled {
+			debugtrace.Record("go.SendCLIMessage.resource_gate.direct", traceID, map[string]interface{}{
+				"text":   resp.Text,
+				"action": resp.Action,
+				"target": resp.Target,
+				"next":   resp.Next,
+			})
+			return resp, nil
+		}
+		if decision, handled := a.consumePendingToolAnswer(sessionID, userText, traceID); handled {
+			if routed, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID); routed {
+				return &routedResp, nil
+			}
+		}
+		if resp, handled := a.maybeHandleWebSearch(userText, sessionID, traceID); handled {
+			debugtrace.Record("go.SendCLIMessage.web_search.direct", traceID, map[string]interface{}{
+				"text":          resp.Text,
+				"error":         resp.Error,
+				"auth_required": false,
+				"auth_url":      "",
+			})
+			return resp, nil
+		}
+		if resp, handled := a.maybeHandleLocalSearch(userText, sessionID, traceID); handled {
+			debugtrace.Record("go.SendAPIMessage.local_search.direct", traceID, map[string]interface{}{
+				"text":          resp.Text,
+				"error":         resp.Error,
+				"auth_required": false,
+				"auth_url":      "",
+			})
+			return resp, nil
+		}
 	}
 
 	// 從 adapter_registry 解析 CLI 的實際執行檔路徑。
@@ -1599,6 +1800,15 @@ func (a *App) SendCLIMessage(adapterID string, sessionID string, userText string
 		}
 	} else {
 		log.Printf("SendCLIMessage: WARNING — adapterID is empty or registry is nil")
+	}
+	if isOllamaPromptCLI(adapterID, cliPath) {
+		message := "Ollama 不能用 CLI adapter 方式聊天；請在引用連結貼 %%USERPROFILE%%\\.ollama\\models 註冊成本地模型。"
+		debugtrace.Record("go.SendCLIMessage.ollama_cli_blocked", traceID, map[string]interface{}{
+			"adapter_id": adapterID,
+			"cli_path":   cliPath,
+			"message":    message,
+		})
+		return &skill_step.CLIResponse{Error: message}, nil
 	}
 
 	// 記錄 sidecar 目前狀態，方便判斷是 sidecar 沒跑還是 CLI 找不到
@@ -1630,35 +1840,121 @@ func (a *App) SendCLIMessage(adapterID string, sessionID string, userText string
 		return nil, err
 	}
 
-	referencePlan := a.planReferenceSearchWithCLI(adapterID, cliPath, sessionID, userText, traceID)
-	systemPrompt := a.buildMainComposerPrompt(a.getActivePersona())
-	referenceContext := a.buildReferencePromptContextFromPlan(sessionID, userText, traceID, referencePlan)
-	if referenceContext != "" {
-		systemPrompt += referenceContext
+	personaPrompt := a.buildMainComposerPrompt(a.getActivePersona())
+	if bg := a.formatToolBackgroundContext(sessionID); bg != "" {
+		personaPrompt += "\n\n" + bg + "\n回答或組織工具結果時，只能使用已補充背景與工具結果，不可新增未確認的地點、時間、數字或來源。"
+	}
+	routingContextForToolPrompt := ""
+	if !isTaskProgressInternal {
+		keywordResp, keywordErr := a.cliAdapter.SendMessage(skill_step.CLIMessageOptions{
+			AdapterID:      adapterID,
+			CLIPath:        cliPath,
+			SessionID:      sessionID,
+			UserText:       buildSearchTermExtractionPrompt(personaPrompt, userText),
+			Model:          strings.TrimSpace(modelOverride),
+			SystemPrompt:   personaPrompt,
+			ContinuityKey:  conversationContinuityKey("tool-keywords", sessionID),
+			TraceID:        traceID,
+			SkipContinuity: true,
+		})
+		debugtrace.Record("go.searchTerms.extract", traceID, map[string]interface{}{
+			"text":  keywordResp.Text,
+			"error": keywordResp.Error,
+			"err":   errorString(keywordErr),
+		})
+		if keywordErr != nil || keywordResp.Error != "" || keywordResp.AuthRequired {
+			return &keywordResp, keywordErr
+		}
+		terms := parseSearchTerms(keywordResp.Text, userText)
+		routingLookup := a.lookupToolRoutingContext(terms, userText, traceID)
+		// SEC-06: 若上一輪系統發過確認問句，judge prompt 帶 pending 摘要，
+		// 讓「我要取消」這類回應不被誤判成操作/查詢。
+		routingContextForToolPrompt = formatToolRoutingLookupContext(routingLookup) + pendingConfirmPromptContext(sessionID)
+		judgeResp, judgeErr := a.cliAdapter.SendMessage(skill_step.CLIMessageOptions{
+			AdapterID:      adapterID,
+			CLIPath:        cliPath,
+			SessionID:      sessionID,
+			UserText:       buildToolRoutingDecisionPrompt(personaPrompt, userText, routingContextForToolPrompt),
+			Model:          strings.TrimSpace(modelOverride),
+			SystemPrompt:   personaPrompt,
+			ContinuityKey:  conversationContinuityKey("tool-judge", sessionID),
+			TraceID:        traceID,
+			SkipContinuity: true,
+		})
+		decision := normalizeToolRoutingDecision(parseToolRoutingDecision(judgeResp.Text), userText, routingLookup)
+		debugtrace.Record("go.toolRouting.judge", traceID, map[string]interface{}{
+			"text":           judgeResp.Text,
+			"error":          judgeResp.Error,
+			"decision":       decision.Kind,
+			"action":         decision.Action,
+			"target":         decision.Target,
+			"next":           decision.Next,
+			"need_tool":      decision.Kind == toolRoutingDecisionNeedTool,
+			"lookup_query":   routingLookup.Query,
+			"operation_hits": len(routingLookup.Operations),
+			"recent_ops":     len(routingLookup.RecentOperations),
+			"local_hits":     len(routingLookup.LocalMatches),
+			"judge_error":    errorString(judgeErr),
+		})
+		if judgeErr != nil || judgeResp.Error != "" || judgeResp.AuthRequired {
+			return &judgeResp, judgeErr
+		}
+		if handled, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID); handled {
+			return &routedResp, nil
+		}
+	}
+
+	var referencePlan referenceSearchPlan
+	if isTaskProgressInternal {
+		referencePlan = planTaskProgressReferenceSearch(traceID, userText)
+	} else if isLearningOperationCatalogText(userText) {
+		referencePlan = referenceSearchPlan{}
+	} else {
+		referencePlan = a.planReferenceSearchWithCLI(adapterID, cliPath, sessionID, userText, traceID)
+	}
+	systemPrompt := personaPrompt + webSearchRoutingPrompt()
+	if routingContextForToolPrompt != "" {
+		systemPrompt += routingContextForToolPrompt
+	}
+	docSearchContext := a.buildDocSearchContext(sessionID, userText, adapterID, traceID, referencePlan)
+	if docSearchContext != "" {
+		systemPrompt += docSearchContext
+	}
+	if !isTaskProgressInternal {
+		systemPrompt += a.buildLearningReplayPromptContext(traceID)
+		systemPrompt += a.buildLearningOperationPromptContext(userText, traceID)
+	}
+	continuityKey := conversationContinuityKey("composer", sessionID)
+	if isTaskProgressInternal {
+		continuityKey = conversationContinuityKey("task-progress", sessionID)
 	}
 	opts := skill_step.CLIMessageOptions{
 		AdapterID:      adapterID,
 		CLIPath:        cliPath,
 		SessionID:      sessionID,
 		UserText:       userText,
+		Model:          strings.TrimSpace(modelOverride),
 		SkillInjection: inj,
 		SystemPrompt:   systemPrompt,
-		ContinuityKey:  conversationContinuityKey("composer", sessionID),
+		ContinuityKey:  continuityKey,
 		TraceID:        traceID,
+		SkipContinuity: isTaskProgressInternal,
 	}
 	// DEBUG_TRACE_REMOVE: Captures the final Go options before the sidecar adapter.
-	debugtrace.Record("go.CLIMessageOptions", traceID, map[string]interface{}{
+	optionsTrace := map[string]interface{}{
 		"adapter_id":          opts.AdapterID,
 		"cli_path":            opts.CLIPath,
 		"session_id":          opts.SessionID,
-		"user_text":           opts.UserText,
+		"model":               opts.Model,
 		"continuity_key":      opts.ContinuityKey,
 		"system_prompt_len":   len([]rune(opts.SystemPrompt)),
 		"reference_plan":      referencePlan,
-		"has_reference_ctx":   referenceContext != "",
+		"has_doc_search_ctx":  docSearchContext != "",
 		"has_skill_injection": opts.SkillInjection != nil,
 		"action_tags":         actionTags,
-	})
+	}
+	addDebugTraceUserText(optionsTrace, traceID, opts.UserText)
+	debugtrace.Record("go.CLIMessageOptions", traceID, optionsTrace)
 	resp, err := a.cliAdapter.SendMessage(opts)
 	if err != nil {
 		log.Printf("SendCLIMessage: ERROR — cliAdapter.SendMessage failed: %v", err)
@@ -1679,9 +1975,21 @@ func (a *App) SendCLIMessage(adapterID string, sessionID string, userText string
 	if resp.Action == "版控" {
 		resp.Text = executeGitStatusShort()
 	}
+	decision := toolRoutingDecision{Kind: toolRoutingDecisionAction, Action: resp.Action, Target: resp.Target, Next: resp.Next}
+	if handled, readinessResp := a.maybeAskForToolReadiness(sessionID, decision, traceID); handled {
+		return &readinessResp, nil
+	}
+	target := resp.Target
+	if resp.Action == "網路" {
+		target = a.targetWithBackground(sessionID, target)
+	}
+	if req, ok := websearch.RequestFromAction(resp.Action, target); ok {
+		webResp := a.executeWebSearch(req, traceID)
+		return &webResp, nil
+	}
 	if req, ok := localsearch.RequestFromAction(resp.Action, resp.Target); ok {
 		// CLI/local model only chooses the builtin action; App owns the actual local scan.
-		localResp := a.executeLocalSearch(req, traceID)
+		localResp := a.executeLocalSearch(req, sessionID, traceID)
 		return &localResp, nil
 	}
 	// DEBUG_TRACE_REMOVE: Response returned from sidecar/CLI to Go.
@@ -1746,14 +2054,31 @@ func (a *App) SendAPIMessage(adapterID string, sessionID string, userText string
 		"text_len":   len(userText),
 	})
 	actionTags := a.syncActionTagsToCLIAdapter(traceID)
-	if resp, handled := a.maybeHandleLocalSearch(userText, traceID); handled {
-		debugtrace.Record("go.apiAdapter.response", traceID, map[string]interface{}{
-			"text":          resp.Text,
-			"error":         resp.Error,
-			"auth_required": false,
-			"auth_url":      "",
-		})
-		return resp, nil
+	isTaskProgressInternal := isTaskProgressTraceID(traceID)
+	if !isTaskProgressInternal {
+		if resp, handled := a.maybeHandleResourceGate(userText, sessionID, traceID); handled {
+			debugtrace.Record("go.SendAPIMessage.resource_gate.direct", traceID, map[string]interface{}{
+				"text":   resp.Text,
+				"action": resp.Action,
+				"target": resp.Target,
+				"next":   resp.Next,
+			})
+			return resp, nil
+		}
+		if decision, handled := a.consumePendingToolAnswer(sessionID, userText, traceID); handled {
+			if routed, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID); routed {
+				return &routedResp, nil
+			}
+		}
+		if resp, handled := a.maybeHandleWebSearch(userText, sessionID, traceID); handled {
+			debugtrace.Record("go.SendAPIMessage.web_search.direct", traceID, map[string]interface{}{
+				"text":          resp.Text,
+				"error":         resp.Error,
+				"auth_required": false,
+				"auth_url":      "",
+			})
+			return resp, nil
+		}
 	}
 	cfg, err := a.loadLLMAPIAdapterConfig(adapterID)
 	if err != nil {
@@ -1793,7 +2118,8 @@ func (a *App) SendAPIMessage(adapterID string, sessionID string, userText string
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	client := &http.Client{Timeout: 45 * time.Second}
+	// SEC-05 2a: Safe Client，policy 由 PolicyForLLMEndpoint 集中決定。
+	client := urlsafe.NewSafeClient(urlsafe.PolicyForLLMEndpoint(cfg.ProviderID, cfg.BaseURL), "llm_chat", 45*time.Second)
 	doRequest := func(prompt string) (*http.Response, error) {
 		reqBody := openAIChatRequest{
 			Model: model,
@@ -1868,11 +2194,70 @@ func (a *App) SendAPIMessage(adapterID string, sessionID string, userText string
 		return parsed.Choices[0].Message.Content, nil
 	}
 
-	referencePlan := a.planReferenceSearchWithAPI(sessionID, userText, traceID, callAPI)
-	basePrompt := a.buildMainComposerPrompt(a.getActivePersona())
-	referenceContext := a.buildReferencePromptContextFromPlan(sessionID, userText, traceID, referencePlan)
-	if referenceContext != "" {
-		basePrompt += referenceContext
+	personaPrompt := a.buildMainComposerPrompt(a.getActivePersona())
+	if bg := a.formatToolBackgroundContext(sessionID); bg != "" {
+		personaPrompt += "\n\n" + bg + "\n回答或組織工具結果時，只能使用已補充背景與工具結果，不可新增未確認的地點、時間、數字或來源。"
+	}
+	routingContextForToolPrompt := ""
+	if !isTaskProgressInternal && !isLocalAdapter {
+		keywordText, keywordErr := callAPI(buildSearchTermExtractionPrompt(personaPrompt, userText))
+		debugtrace.Record("go.searchTerms.extract", traceID, map[string]interface{}{
+			"text":         keywordText,
+			"error":        errorString(keywordErr),
+			"adapter_kind": "api",
+		})
+		if keywordErr != nil {
+			return &skill_step.CLIResponse{Error: keywordErr.Error()}, nil
+		}
+		terms := parseSearchTerms(keywordText, userText)
+		routingLookup := a.lookupToolRoutingContext(terms, userText, traceID)
+		// SEC-06: judge prompt 帶 pending 確認摘要（同 CLI 路徑）。
+		routingContextForToolPrompt = formatToolRoutingLookupContext(routingLookup) + pendingConfirmPromptContext(sessionID)
+		judgeText, judgeErr := callAPI(buildToolRoutingDecisionPrompt(personaPrompt, userText, routingContextForToolPrompt))
+		decision := normalizeToolRoutingDecision(parseToolRoutingDecision(judgeText), userText, routingLookup)
+		debugtrace.Record("go.toolRouting.judge", traceID, map[string]interface{}{
+			"text":           judgeText,
+			"error":          errorString(judgeErr),
+			"decision":       decision.Kind,
+			"action":         decision.Action,
+			"target":         decision.Target,
+			"next":           decision.Next,
+			"need_tool":      decision.Kind == toolRoutingDecisionNeedTool,
+			"lookup_query":   routingLookup.Query,
+			"operation_hits": len(routingLookup.Operations),
+			"recent_ops":     len(routingLookup.RecentOperations),
+			"local_hits":     len(routingLookup.LocalMatches),
+			"adapter_kind":   "api",
+		})
+		if judgeErr != nil {
+			return &skill_step.CLIResponse{Error: judgeErr.Error()}, nil
+		}
+		if handled, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID); handled {
+			return &routedResp, nil
+		}
+	}
+
+	var referencePlan referenceSearchPlan
+	if isTaskProgressInternal {
+		referencePlan = planTaskProgressReferenceSearch(traceID, userText)
+	} else if isLocalAdapter {
+		referencePlan = referenceSearchPlan{}
+	} else if isLearningOperationCatalogText(userText) {
+		referencePlan = referenceSearchPlan{}
+	} else {
+		referencePlan = a.planReferenceSearchWithAPI(sessionID, userText, traceID, callAPI)
+	}
+	basePrompt := personaPrompt + webSearchRoutingPrompt()
+	if routingContextForToolPrompt != "" {
+		basePrompt += routingContextForToolPrompt
+	}
+	docSearchContext := a.buildDocSearchContext(sessionID, userText, adapterID, traceID, referencePlan)
+	if docSearchContext != "" {
+		basePrompt += docSearchContext
+	}
+	if !isTaskProgressInternal {
+		basePrompt += a.buildLearningReplayPromptContext(traceID)
+		basePrompt += a.buildLearningOperationPromptContext(userText, traceID)
 	}
 	var synthesizedPrompt string
 	if isLocalAdapter {
@@ -1881,18 +2266,18 @@ func (a *App) SendAPIMessage(adapterID string, sessionID string, userText string
 		synthesizedPrompt = buildAPIActionChainPrompt(basePrompt, actionTags, userText)
 	}
 	debugtrace.Record("go.APIMessageOptions", traceID, map[string]interface{}{
-		"adapter_id":        adapterID,
-		"session_id":        sessionID,
-		"user_text":         userText,
-		"system_prompt_len": len([]rune(basePrompt)),
-		"synth_prompt_len":  len([]rune(synthesizedPrompt)),
-		"reference_plan":    referencePlan,
-		"has_reference_ctx": referenceContext != "",
-		"has_now":           strings.Contains(synthesizedPrompt, "now="),
-		"has_action_chain":  strings.Contains(synthesizedPrompt, "動作ㄌ目標ㄌ下一步"),
-		"has_control_seal":  strings.Contains(synthesizedPrompt, "本輪命令前綴"),
-		"action_tags":       actionTags,
-		"action_tags_count": len(actionTags),
+		"adapter_id":         adapterID,
+		"session_id":         sessionID,
+		"user_text":          userText,
+		"system_prompt_len":  len([]rune(basePrompt)),
+		"synth_prompt_len":   len([]rune(synthesizedPrompt)),
+		"reference_plan":     referencePlan,
+		"has_doc_search_ctx": docSearchContext != "",
+		"has_now":            strings.Contains(synthesizedPrompt, "now="),
+		"has_action_chain":   strings.Contains(synthesizedPrompt, "動作ㄌ目標ㄌ下一步"),
+		"has_control_seal":   strings.Contains(synthesizedPrompt, "本輪命令前綴"),
+		"action_tags":        actionTags,
+		"action_tags_count":  len(actionTags),
 	})
 
 	var resp skill_step.CLIResponse
@@ -1969,9 +2354,214 @@ func (a *App) SendAPIMessage(adapterID string, sessionID string, userText string
 	return &resp, nil
 }
 
+const visualLearningReplayDirective = "[[控制:回放剛剛示範]]"
+const learningPromptMaxSteps = 8
+
+func (a *App) buildLearningReplayPromptContext(traceID string) string {
+	if a == nil || a.learningService == nil {
+		return ""
+	}
+	catalog, catalogErr := a.learningService.ListReplayCatalog(1)
+	if catalogErr != nil || len(catalog) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n[系統提供: screen_control_demo 內建控制]\n")
+	b.WriteString("已有保存的螢幕操作，但此處不提供 catalog 或步驟明細以節省 token。\n")
+	b.WriteString("若使用者要求查詢、重現、回放、照錄製內容操作，先輸出「查詢ㄌ<自然語言關鍵詞>ㄌ操作」。\n")
+	b.WriteString("系統會用關鍵詞搜尋候選操作，再把少量候選交給你選；不要直接輸出 demo tag、replay tag 或 [[控制:...]]。\n")
+	b.WriteString("[/系統提供]\n")
+	debugtrace.Record("go.learningReplay.prompt_context", traceID, map[string]interface{}{
+		"catalog_count": len(catalog),
+		"mode":          "thin_lookup_hint",
+	})
+	return b.String()
+}
+
+func compactLearningReplayStepForPrompt(step visual_learning.LearningReplayStep) string {
+	action := strings.TrimSpace(step.Action)
+	if action == "" {
+		action = "click"
+	}
+	target := firstNonEmpty(
+		step.WindowTitle,
+		step.Label,
+		step.Role,
+		step.CSSSelector,
+		step.Tag,
+		"unknown target",
+	)
+	method := "DOM selector/viewport coordinate"
+	if step.Source == "native" || step.CoordinateSpace == "screen" {
+		method = "native screen coordinate"
+	}
+	process := strings.TrimSpace(step.WindowProcess)
+	if process == "" {
+		process = strings.TrimSpace(step.Tag)
+	}
+	process = filepath.Base(process)
+	if process != "." && process != string(filepath.Separator) && process != "" {
+		return fmt.Sprintf("%s via %s at (%d,%d), target=%q, process=%s", action, method, step.X, step.Y, target, process)
+	}
+	return fmt.Sprintf("%s via %s at (%d,%d), target=%q", action, method, step.X, step.Y, target)
+}
+
+func buildLearningMetadataPrompt(plan *visual_learning.LearningReplayPlan) string {
+	var b strings.Builder
+	b.WriteString("你要替一段使用者示範的螢幕操作命名。只輸出一個 JSON object，不要 Markdown，不要解釋。\n")
+	b.WriteString("JSON schema: {\"title\":\"自然語言操作名稱\",\"summary\":\"一句話摘要\",\"keywords\":[\"關鍵詞\"],\"operation_tag\":\"短分類詞\"}\n")
+	b.WriteString("規則：title 要讓使用者看得懂；operation_tag 用 1-3 個可搜尋詞，例如 chatgpt、line、chrome-chatgpt，不要用 demo 編號，不要用 op- 前綴；keywords 放 3-8 個詞。\n")
+	if plan == nil {
+		b.WriteString("步驟：none\n")
+		return b.String()
+	}
+	fmt.Fprintf(&b, "既有 fallback title=%q summary=%q risk=%s steps=%d\n", strings.TrimSpace(plan.Title), strings.TrimSpace(plan.RunSummary), learningRiskLevel(plan.Risk), len(plan.Steps))
+	for i, step := range plan.Steps {
+		if i >= learningPromptMaxSteps {
+			fmt.Fprintf(&b, "...另有 %d 個步驟省略。\n", len(plan.Steps)-learningPromptMaxSteps)
+			break
+		}
+		fmt.Fprintf(&b, "%d. %s\n", i+1, compactLearningReplayStepForPrompt(step))
+	}
+	return b.String()
+}
+
+type learningMetadataLLMResponse struct {
+	Title        string   `json:"title"`
+	Summary      string   `json:"summary"`
+	Keywords     []string `json:"keywords"`
+	OperationTag string   `json:"operation_tag"`
+}
+
+func parseLearningMetadataResponse(text string) (visual_learning.LearningRunMetadataUpdate, error) {
+	raw := strings.TrimSpace(text)
+	if raw == "" {
+		return visual_learning.LearningRunMetadataUpdate{}, fmt.Errorf("learning metadata: empty LLM response")
+	}
+	start := strings.Index(raw, "{")
+	end := strings.LastIndex(raw, "}")
+	if start < 0 || end <= start {
+		return visual_learning.LearningRunMetadataUpdate{}, fmt.Errorf("learning metadata: response did not contain JSON object")
+	}
+	var parsed learningMetadataLLMResponse
+	if err := json.Unmarshal([]byte(raw[start:end+1]), &parsed); err != nil {
+		return visual_learning.LearningRunMetadataUpdate{}, fmt.Errorf("learning metadata: parse JSON: %w", err)
+	}
+	update := visual_learning.LearningRunMetadataUpdate{
+		Title:        strings.TrimSpace(parsed.Title),
+		Summary:      strings.TrimSpace(parsed.Summary),
+		Keywords:     parsed.Keywords,
+		OperationTag: strings.TrimSpace(parsed.OperationTag),
+	}
+	if update.Title == "" && update.Summary == "" && len(update.Keywords) == 0 && update.OperationTag == "" {
+		return visual_learning.LearningRunMetadataUpdate{}, fmt.Errorf("learning metadata: JSON had no usable metadata")
+	}
+	return update, nil
+}
+
+func learningRiskLevel(risk *visual_learning.OperationRisk) string {
+	if risk == nil {
+		return ""
+	}
+	return strings.TrimSpace(risk.Level)
+}
+
+func (a *App) buildLearningOperationPromptContext(userText, traceID string) string {
+	if a == nil || a.learningService == nil {
+		return ""
+	}
+	if strings.Contains(userText, "[系統提供: operation_candidates]") {
+		return ""
+	}
+	query, listOnly, ok := learningOperationQueryFromText(userText)
+	if !ok {
+		return ""
+	}
+	debugtrace.Record("go.learningOperation.prompt_context", traceID, map[string]interface{}{
+		"query":     query,
+		"list_only": listOnly,
+		"mode":      "thin_lookup_hint",
+	})
+	var b strings.Builder
+	b.WriteString("\n\n[系統提供: saved_operations 已保存螢幕操作]\n")
+	b.WriteString("使用者可能正在詢問或要求已保存的螢幕操作；這不是本機文件搜尋。\n")
+	if query != "" {
+		fmt.Fprintf(&b, "operation_query=%q\n", query)
+	}
+	b.WriteString("不要猜 demo tag，也不要直接執行。請先輸出「查詢ㄌ<關鍵詞>ㄌ操作」，讓系統搜尋少量候選。\n")
+	b.WriteString("若只是列出全部操作，關鍵詞可留空：查詢ㄌㄌ操作。\n")
+	b.WriteString("系統回傳候選後，若使用者意圖是重現/回放/執行，再從候選中選自然關鍵詞輸出「操作ㄌ<關鍵詞>ㄌ待命」。\n")
+	b.WriteString("[/系統提供]\n")
+	return b.String()
+}
+
+func isLearningOperationCatalogText(text string) bool {
+	_, _, ok := learningOperationQueryFromText(text)
+	return ok
+}
+
+func learningOperationQueryFromText(text string) (query string, listOnly bool, ok bool) {
+	raw := strings.TrimSpace(text)
+	if raw == "" {
+		return "", false, false
+	}
+	lower := strings.ToLower(raw)
+	hasOperationWord := strings.Contains(raw, "操作") || strings.Contains(raw, "操做") || strings.Contains(lower, "operation")
+	hasReplayWord := containsAny(raw, []string{"重現", "復現", "回放", "重播", "錄製", "錄影", "示範", "剛剛做", "剛剛的", "做了什麼", "做了甚麼"})
+	asksSavedTag := strings.Contains(lower, "tag") && containsAny(raw, []string{"儲存", "保存", "已保存", "已儲存", "畫面", "錄影", "錄製", "示範", "紀錄", "記錄", "操作"})
+	asksCatalog := containsAny(raw, []string{"有哪些", "列出", "清單", "查看", "看看", "知道"}) && (hasOperationWord || containsAny(raw, []string{"錄影", "錄製", "示範", "紀錄", "記錄"}) || strings.Contains(lower, "tag"))
+	if !hasOperationWord && !hasReplayWord && !asksSavedTag && !asksCatalog {
+		return "", false, false
+	}
+	query = normalizeLearningOperationQueryText(raw)
+	if asksSavedTag || asksCatalog {
+		return query, query == "", true
+	}
+	if query == "" {
+		return "", true, true
+	}
+	return query, false, true
+}
+
+func normalizeLearningOperationQueryText(text string) string {
+	replacer := strings.NewReplacer(
+		"操作", " ", "操做", " ", "operation", " ",
+		"相關", " ", "關於", " ", "有關", " ",
+		"已保存", " ", "已儲存", " ", "保存", " ", "儲存", " ",
+		"錄影紀錄", " ", "錄製紀錄", " ", "示範紀錄", " ", "紀錄", " ", "記錄", " ",
+		"示範", " ", "流程", " ", "畫面", " ", "tag", " ",
+		"重現", " ", "復現", " ", "回放", " ", "重播", " ", "錄製", " ", "錄影", " ",
+		"幫我", " ", "請", " ", "查詢", " ", "搜尋", " ", "查找", " ", "尋找", " ", "找", " ",
+		"列出", " ", "查看", " ", "看看", " ", "知道", " ",
+		"執行", " ", "回放", " ", "重播", " ", "開啟", " ", "打開", " ",
+		"有哪些", " ", "什麼", " ", "甚麼", " ", "樣", " ", "的", " ",
+		"，", " ", "。", " ", "！", " ", "？", " ", "、", " ",
+		",", " ", ".", " ", "!", " ", "?", " ", ":", " ", ";", " ",
+		"(", " ", ")", " ", "[", " ", "]", " ", "{", " ", "}", " ",
+		"\"", " ", "'", " ", "`", " ", "<", " ", ">", " ", "|", " ", "/", " ", "\\", " ",
+	)
+	return strings.Join(strings.Fields(replacer.Replace(text)), " ")
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func minInt(a int, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func buildAPIActionChainPrompt(systemPrompt string, actionTags []string, userText string) string {
 	return conversation.Synthesize(conversation.SynthesisConfig{
-		SystemPrompt: systemPrompt,
+		SystemPrompt: systemPrompt + webSearchRoutingPrompt(),
 		ActionTags:   append([]string(nil), actionTags...),
 		CurrentInput: userText,
 		CommandSeal:  controlseal.CurrentSeal(),
@@ -1979,14 +2569,409 @@ func buildAPIActionChainPrompt(systemPrompt string, actionTags []string, userTex
 	})
 }
 
+type toolRoutingLookupContext struct {
+	Query            string
+	Terms            []string
+	Operations       []visual_learning.OperationSearchResult
+	RecentOperations []visual_learning.LearningRunCatalogItem
+	LocalMatches     []localsearch.SearchResult
+}
+
+const (
+	toolRoutingDecisionNeedTool = "need_tool"
+	toolRoutingDecisionChat     = "chat"
+	toolRoutingDecisionAction   = "action"
+)
+
+type toolRoutingDecision struct {
+	Kind   string
+	Text   string
+	Action string
+	Target string
+	Next   string
+	Raw    string
+}
+
+func webSearchRoutingPrompt() string {
+	return "\n\n[web_search_routing]\n" +
+		"網路路由：凡需網路搜尋才能判斷的變動資料，如網路、即時、今天、今日、最新、現在等關鍵字，輸出：網路ㄌ<搜尋關鍵字>ㄌ" + actionchain.StandbyNext + "。\n" +
+		"[/web_search_routing]"
+}
+
+func buildSearchTermExtractionPrompt(systemPrompt string, userText string) string {
+	return conversation.Synthesize(conversation.SynthesisConfig{
+		SystemPrompt: systemPrompt + "\n\n請解析使用者訊息中的查詢詞與指代詞，只輸出可用來搜尋、比對資料的關鍵字詞。\n\n規則：\n- 不回答使用者問題。\n- 不判斷是否閒聊。\n- 不判斷是否使用工具。\n- 若具網路搜尋目標，輸出適合網路搜尋的關鍵字。\n- 保留使用者提到的動作、物件、App、時間指代、文件/skill/操作/對話等詞。\n- 若提到剛剛、最近、上一個、錄製、回放、重現、點擊、開啟、關閉，請保留這些指代或操作詞。\n- 請用空格分隔詞，不要句子，不要 JSON，不要 Markdown。",
+		CurrentInput: userText,
+		SanitizeLLM:  true,
+	})
+}
+
+func parseSearchTerms(text string, userText string) []string {
+	raw := strings.TrimSpace(text)
+	replacer := strings.NewReplacer(
+		"、", " ", "，", " ", ",", " ", "\n", " ", "\t", " ",
+		"：", " ", ":", " ", ";", " ", "；", " ",
+		"[", " ", "]", " ", "{", " ", "}", " ", "\"", " ",
+		"「", " ", "」", " ", "『", " ", "』", " ",
+	)
+	terms := strings.Fields(replacer.Replace(raw))
+	if len(terms) == 0 {
+		terms = strings.Fields(compactReferenceQuery(userText))
+	}
+	return normalizeSearchTerms(terms, 16)
+}
+
+func normalizeSearchTerms(values []string, limit int) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		value = strings.Trim(value, "。.!！?？,，、:：;；\"'`[]{}()（）")
+		if value == "" {
+			continue
+		}
+		lower := strings.ToLower(value)
+		if seen[lower] {
+			continue
+		}
+		seen[lower] = true
+		out = append(out, value)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func (a *App) lookupToolRoutingContext(terms []string, userText string, traceID string) toolRoutingLookupContext {
+	query := strings.Join(normalizeSearchTerms(terms, 16), " ")
+	if strings.TrimSpace(query) == "" {
+		query = compactReferenceQuery(userText)
+	}
+	ctx := toolRoutingLookupContext{
+		Query: query,
+		Terms: normalizeSearchTerms(append([]string{}, terms...), 16),
+	}
+	if a != nil && a.learningService != nil && strings.TrimSpace(query) != "" {
+		if operations, err := a.learningService.SearchOperations(query, 5); err == nil {
+			ctx.Operations = operations
+		} else {
+			debugtrace.Record("go.toolRouting.lookup.operations_error", traceID, map[string]interface{}{"error": err.Error()})
+		}
+		if len(ctx.Operations) == 0 {
+			if recent, err := a.learningService.ListReplayCatalog(5); err == nil {
+				ctx.RecentOperations = recent
+			} else {
+				debugtrace.Record("go.toolRouting.lookup.recent_operations_error", traceID, map[string]interface{}{"error": err.Error()})
+			}
+		}
+	}
+	if a != nil && strings.TrimSpace(query) != "" {
+		searchCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		service := localsearch.NewService(a.localSearchRoots(), a.localSearchItems(""))
+		outcome, err := service.SearchWithContext(searchCtx, localsearch.SearchRequest{
+			Query: query,
+			Scope: []string{"all"},
+			Limit: 6,
+		})
+		if err == nil {
+			ctx.LocalMatches = outcome.Results
+		} else if !errors.Is(err, localsearch.ErrEmptyQuery) {
+			debugtrace.Record("go.toolRouting.lookup.local_error", traceID, map[string]interface{}{"error": err.Error()})
+		}
+	}
+	debugtrace.Record("go.toolRouting.lookup", traceID, map[string]interface{}{
+		"query":          ctx.Query,
+		"terms":          ctx.Terms,
+		"operation_hits": len(ctx.Operations),
+		"recent_ops":     len(ctx.RecentOperations),
+		"local_hits":     len(ctx.LocalMatches),
+	})
+	return ctx
+}
+
+func formatToolRoutingLookupContext(ctx toolRoutingLookupContext) string {
+	var b strings.Builder
+	b.WriteString("\n\n[系統提供: routing_lookup]\n")
+	fmt.Fprintf(&b, "query=%q\n", ctx.Query)
+	if len(ctx.Terms) > 0 {
+		fmt.Fprintf(&b, "terms=%q\n", strings.Join(ctx.Terms, " "))
+	}
+	b.WriteString("saved_operations:\n")
+	if len(ctx.Operations) == 0 {
+		b.WriteString("- none\n")
+	} else {
+		for i, op := range ctx.Operations {
+			if i >= 5 {
+				break
+			}
+			risk := learningRiskLevel(op.Risk)
+			fmt.Fprintf(&b, "- tag=%q run_id=%q title=%q summary=%q operation_tag=%q keywords=%q risk=%q score=%.2f\n",
+				op.Tag, op.RunID, op.Title, op.Summary, op.OperationTag, strings.Join(op.Keywords, ", "), risk, op.Score)
+		}
+	}
+	b.WriteString("recent_operations_when_no_match:\n")
+	if len(ctx.RecentOperations) == 0 {
+		b.WriteString("- none\n")
+	} else {
+		for i, op := range ctx.RecentOperations {
+			if i >= 5 {
+				break
+			}
+			risk := learningRiskLevel(op.Risk)
+			fmt.Fprintf(&b, "- tag=%q run_id=%q title=%q summary=%q operation_tag=%q keywords=%q risk=%q steps=%d stopped_at=%q\n",
+				op.Tag, op.RunID, op.Title, op.Summary, op.OperationTag, strings.Join(op.Keywords, ", "), risk, op.StepCount, op.StoppedAt.Format(time.RFC3339))
+		}
+	}
+	b.WriteString("local_matches:\n")
+	if len(ctx.LocalMatches) == 0 {
+		b.WriteString("- none\n")
+	} else {
+		for i, item := range ctx.LocalMatches {
+			if i >= 6 {
+				break
+			}
+			fmt.Fprintf(&b, "- source=%q title=%q path=%q snippet=%q score=%d\n",
+				item.Source, item.Title, item.Path, item.Snippet, item.Score)
+		}
+	}
+	b.WriteString("[/系統提供: routing_lookup]\n")
+	return b.String()
+}
+
+func buildToolRoutingDecisionPrompt(systemPrompt string, userText string, lookupContext string) string {
+	systemPrompt += webSearchRoutingPrompt()
+	routingRules := strings.Join([]string{
+		fmt.Sprintf("In this app, plain search/find/query defaults to local search unless web_search_routing applies. If local_matches is none and the user appears to ask for search/find/query, do not answer from general knowledge; output %s%s<query>%s%s so the local-search tool can report no local result and ask whether to use web search.", "\u641c\u5c0b", actionchain.Separator, actionchain.Separator, "\u6587\u4ef6"),
+		"只能輸出以下格式之一，不可輸出其他文字：",
+		"閒聊ㄌ<回答>",
+		"操作ㄌ<候選tag/名稱/關鍵詞>ㄌ待命",
+		"查詢ㄌ<關鍵詞>ㄌ操作",
+		"搜尋ㄌ<關鍵詞>ㄌ文件",
+		"網路ㄌ<搜尋關鍵字>ㄌ待命",
+		"需要工具",
+		"判斷：",
+		"- 需要工具：需要其他工具，或候選不足但不像閒聊。",
+		"- 網路路由：凡需網路搜尋才能判斷的變動資料，如網路、即時、今天、今日、最新、現在等關鍵字，輸出：網路ㄌ<搜尋關鍵字>ㄌ待命。",
+		"- 操作：明確要求重現、回放、照做、執行、開始已保存操作，且 saved_operations 明確；只有 recent_operations 不算明確。",
+		"- 查詢：找、列出、查詢已保存操作，或操作候選不明。",
+		"- 搜尋：找本機資料、文件、skill、記憶、對話、trace、專案內容。",
+		"- 閒聊：明顯聊天且候選無關。",
+	}, "\n")
+	return conversation.Synthesize(conversation.SynthesisConfig{
+		SystemPrompt: systemPrompt + lookupContext + "\n\n" + routingRules,
+		CurrentInput: userText,
+		SanitizeLLM:  true,
+	})
+}
+
+func parseToolRoutingDecision(text string) toolRoutingDecision {
+	raw := strings.TrimSpace(text)
+	decision := toolRoutingDecision{Kind: toolRoutingDecisionNeedTool, Raw: raw}
+	if raw == "" {
+		return decision
+	}
+	firstLine := strings.TrimSpace(strings.Split(raw, "\n")[0])
+	if isNeedToolResponse(firstLine) {
+		return decision
+	}
+	chain, err := actionchain.Parse(firstLine)
+	if err == nil {
+		if chain.Action == "聊天" {
+			decision.Kind = toolRoutingDecisionChat
+			decision.Text = chain.Target
+			return decision
+		}
+		decision.Kind = toolRoutingDecisionAction
+		decision.Action = chain.Action
+		decision.Target = chain.Target
+		decision.Next = chain.Next
+		return decision
+	}
+	return decision
+}
+
+func normalizeToolRoutingDecision(decision toolRoutingDecision, userText string, lookup toolRoutingLookupContext) toolRoutingDecision {
+	if shouldRouteUserTextToWebSearch(userText) && shouldPromoteDecisionToWebSearch(decision) {
+		target := firstNonEmpty(decision.Target, lookup.Query, compactReferenceQuery(userText), userText)
+		if strings.TrimSpace(target) != "" {
+			decision.Kind = toolRoutingDecisionAction
+			decision.Action = "網路"
+			decision.Target = strings.TrimSpace(target)
+			decision.Next = actionchain.StandbyNext
+			return decision
+		}
+	}
+	if decision.Kind != toolRoutingDecisionAction {
+		return decision
+	}
+	action := strings.TrimSpace(decision.Action)
+	next := strings.TrimSpace(decision.Next)
+	if (action != "查詢" && action != "搜尋" && action != "query" && action != "search") || (next != "操作" && next != "操做") {
+		return decision
+	}
+	if !isLearningOperationExecutionRequest(userText) || len(lookup.Operations) == 0 {
+		return decision
+	}
+	best := lookup.Operations[0]
+	target := firstNonEmpty(best.Tag, best.Title, best.OperationTag, decision.Target, lookup.Query)
+	decision.Action = "操作"
+	decision.Target = target
+	decision.Next = actionchain.StandbyNext
+	return decision
+}
+
+func shouldPromoteDecisionToWebSearch(decision toolRoutingDecision) bool {
+	if decision.Kind == toolRoutingDecisionNeedTool {
+		return true
+	}
+	if decision.Kind != toolRoutingDecisionAction {
+		return false
+	}
+	action := strings.ToLower(strings.TrimSpace(decision.Action))
+	switch action {
+	case "搜尋", "查找", "本機搜尋", "search", "find":
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldRouteUserTextToWebSearch(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" || isExplicitLocalSearchRequest(trimmed) {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	if containsAny(lower, []string{
+		"web", "internet", "online", "latest", "current", "today", "news", "weather",
+		"stock price", "exchange rate", "horoscope", "realtime", "real-time",
+	}) {
+		return true
+	}
+	return containsAny(trimmed, []string{
+		"網路", "上網", "線上", "即時", "最新", "今天", "今日", "現在", "新聞", "天氣",
+		"股價", "匯率", "星座運勢", "運勢", "目前", "最近",
+	})
+}
+
+func isExplicitLocalSearchRequest(text string) bool {
+	lower := strings.ToLower(text)
+	if containsAny(lower, []string{"local", "file", "workspace", "project", "trace", "log"}) {
+		return true
+	}
+	return containsAny(text, []string{
+		"本機", "檔案", "文件", "專案", "工作區", "記憶", "紀錄", "對話紀錄", "trace", "日誌",
+	})
+}
+
+func isLearningOperationExecutionRequest(text string) bool {
+	return containsAny(text, []string{
+		"重現", "回放", "重播", "照做", "照著做", "照錄製", "照示範", "執行", "開始",
+		"replay", "rerun", "repeat", "execute", "run",
+	})
+}
+
+func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sessionID, traceID string) (bool, skill_step.CLIResponse) {
+	switch decision.Kind {
+	case toolRoutingDecisionChat:
+		return true, skill_step.CLIResponse{Text: strings.TrimSpace(decision.Text)}
+	case toolRoutingDecisionAction:
+		if strings.TrimSpace(decision.Target) == "" {
+			return false, skill_step.CLIResponse{}
+		}
+		if resp, handled := a.maybeHandleResourceGate(strings.TrimSpace(decision.Action+" "+decision.Target), sessionID, traceID); handled {
+			return true, *resp
+		}
+		if handled, resp := a.maybeAskForToolReadiness(sessionID, decision, traceID); handled {
+			return true, resp
+		}
+		next := strings.TrimSpace(decision.Next)
+		if next == "操作" || next == "操做" || decision.Action == "操作" || decision.Action == "操做" {
+			return true, skill_step.CLIResponse{
+				Text:   decision.Target,
+				Action: decision.Action,
+				Target: decision.Target,
+				Next:   decision.Next,
+			}
+		}
+		target := decision.Target
+		if decision.Action == "網路" {
+			target = a.targetWithBackground(sessionID, target)
+		}
+		if req, ok := websearch.RequestFromAction(decision.Action, target); ok {
+			webResp := a.executeWebSearch(req, traceID)
+			webResp.Action = decision.Action
+			webResp.Target = target
+			webResp.Next = decision.Next
+			return true, webResp
+		}
+		if req, ok := localsearch.RequestFromAction(decision.Action, decision.Target); ok {
+			localResp := a.executeLocalSearch(req, sessionID, traceID)
+			localResp.Action = decision.Action
+			localResp.Target = decision.Target
+			localResp.Next = decision.Next
+			return true, localResp
+		}
+	}
+	return false, skill_step.CLIResponse{}
+}
+
+func buildToolRoutingJudgePrompt(systemPrompt string, userText string) string {
+	return conversation.Synthesize(conversation.SynthesisConfig{
+		SystemPrompt: systemPrompt + "\n\n工具判斷規則：只能輸出兩種格式之一：\n1. 需要工具\n2. 閒聊ㄌ<回答>\n若需要搜尋本機文件、讀取資料、開啟/寫入/匯出、排程、已保存螢幕操作、DAG/自動流程或任何系統工具，只輸出「需要工具」。\nReplay / 重現 / 操作 / 開啟 / 關閉 / 點擊 / 已保存示範相關請求必須輸出「需要工具」。\n不要輸出動作清單，不要猜工具名稱，不要直接輸出無前綴自然語言。",
+		CurrentInput: userText,
+		SanitizeLLM:  true,
+	})
+}
+
+func isNeedToolResponse(text string) bool {
+	firstLine := strings.TrimSpace(strings.Split(strings.TrimSpace(text), "\n")[0])
+	firstLine = strings.Trim(firstLine, "。.!！ \t\r\n")
+	return firstLine == "需要工具"
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
 // buildLocalModelPrompt produces a dead-simple prompt for small local models.
 // Instead of the ㄌ protocol, it asks for three short lines.
 func buildLocalModelPrompt(systemPrompt string, actionTags []string, userText string) string {
 	tagList := strings.Join(conversation.PromptActionTags(actionTags), "、")
 	return fmt.Sprintf(
-		"%s\n回答規則：用三行回答，每行一個欄位。\n第一行寫動作（從候選中選：%s）\n動作定義：已知答案用 輸出；需要系統查資料用 搜尋；讀取=取得內容並回報；開啟=用外部應用程式呈現；寫入=新增或修改檔案；匯出=產生檔案；提問=補問必要資訊；選項=顯示選項卡。\n第二行寫內容；若第一行是選項且沒有問題文字，必須用 ㄤ 開頭，例如 ㄤ紅色ㄤ綠色ㄤ藍色；若有問題文字，寫 問題ㄤ選項一ㄤ選項二。\n第三行只寫 待命、輸出、選項 其中之一；通常寫 待命。\n範例：\n輸出\n你好啊\n待命\n\nQ: %s\n",
+		"%s\n回答規則：用三行回答，每行一個欄位，但不要寫欄位名稱（不要寫 動作:、內容:、下一步:）。\n第一行寫動作（從候選中選：%s）\n動作定義：已知答案、一般聊天、寒暄、情緒回應用 輸出；需要系統查資料用 搜尋；操作=只代表執行或重現已保存的螢幕 replay 操作，不是一般的處理/回答；讀取=取得內容並回報；開啟=用外部應用程式呈現；寫入=新增或修改檔案；匯出=產生檔案；提問=只有缺少必要資訊時才補問；選項=只有使用者明確要求選擇時才顯示選項卡。\n第二行直接寫要顯示給使用者的內容，不要加 內容:；若第一行是選項且沒有問題文字，必須用 ㄤ 開頭，例如 ㄤ紅色ㄤ綠色ㄤ藍色；若有問題文字，寫 問題ㄤ選項一ㄤ選項二。\n第三行只寫 待命、輸出、選項 其中之一；通常寫 待命。\n沒有明確重現、回放、照做、執行已保存操作的意思時，不要選 操作。\n範例：\n輸出\n你好啊\n待命\n\nQ: %s\n",
 		systemPrompt, tagList, userText,
 	)
+}
+
+func stripLocalModelFieldLabel(line string) string {
+	text := strings.TrimSpace(line)
+	if text == "" {
+		return ""
+	}
+	lower := strings.ToLower(text)
+	for _, label := range []string{
+		"\u52d5\u4f5c",       // 動作
+		"\u5167\u5bb9",       // 內容
+		"\u4e0b\u4e00\u6b65", // 下一步
+		"action",
+		"content",
+		"next",
+	} {
+		if strings.HasPrefix(lower, label) {
+			rest := strings.TrimLeft(strings.TrimSpace(text[len(label):]), ":：")
+			rest = strings.TrimSpace(rest)
+			if rest != "" {
+				return rest
+			}
+		}
+	}
+	return text
 }
 
 // assembleLocalResponse parses a local model's 3-line output into an ActionChain.
@@ -1996,7 +2981,7 @@ func assembleLocalResponse(raw string) actionchain.ActionChain {
 	// Filter out empty lines.
 	var nonEmpty []string
 	for _, l := range lines {
-		l = strings.TrimSpace(l)
+		l = stripLocalModelFieldLabel(l)
 		if l != "" {
 			nonEmpty = append(nonEmpty, l)
 		}
@@ -2033,7 +3018,7 @@ func executeGitStatusShort() string {
 	if err != nil {
 		return "無法取得工作目錄：" + err.Error()
 	}
-	cmd := exec.Command("git", "status", "--short")
+	cmd := executil.Command("git", "status", "--short")
 	cmd.Dir = cwd
 	// SEC-W17（2026-05-24）：鎖住 git 不讀外部 config，避免 CVE-2022-39253 系
 	// （core.fsmonitor / core.attributesfile 等 config 注入路徑）。cwd 保留原語意。
@@ -2077,9 +3062,24 @@ func (a *App) resolveActionChainResponse(rawText string, actionTags []string, tr
 			"next":   chain.Next,
 		})
 	}
+	decision := toolRoutingDecision{Kind: toolRoutingDecisionAction, Action: chain.Action, Target: chain.Target, Next: chain.Next}
+	if handled, resp := a.maybeAskForToolReadiness(sessionID, decision, traceID); handled {
+		return resp
+	}
+	target := chain.Target
+	if chain.Action == "網路" {
+		target = a.targetWithBackground(sessionID, target)
+	}
+	if req, ok := websearch.RequestFromAction(chain.Action, target); ok {
+		resp := a.executeWebSearch(req, traceID)
+		resp.Action = chain.Action
+		resp.Target = target
+		resp.Next = chain.Next
+		return resp
+	}
 	if req, ok := localsearch.RequestFromAction(chain.Action, chain.Target); ok {
 		// LLM only routes intent with ㄌ syntax; search results never go back to the model.
-		resp := a.executeLocalSearch(req, traceID)
+		resp := a.executeLocalSearch(req, sessionID, traceID)
 		resp.Action = chain.Action
 		resp.Target = chain.Target
 		resp.Next = chain.Next
@@ -2256,6 +3256,14 @@ func parsedErrorMessage(resp openAIChatResponse) string {
 	return resp.Error.Message
 }
 
+func isOllamaPromptCLI(adapterID, cliPath string) bool {
+	id := strings.ToLower(strings.TrimSpace(adapterID))
+	if id == "ollama-cli" {
+		return true
+	}
+	return adapter_registry.IsOllamaExecutablePath(cliPath)
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // 上方互動路徑 — SendInspectorMessage
 // 共用人格 + 三句限制 + 記憶體短歷史（不進下方 SentenceStore）
@@ -2277,6 +3285,15 @@ func (a *App) SendInspectorMessage(adapterID, sessionID, userText, traceID strin
 		if resolved, err := a.adapterRegistry.ResolveExecutable(adapterID); err == nil {
 			cliPath = resolved
 		}
+	}
+	if isOllamaPromptCLI(adapterID, cliPath) {
+		message := "Ollama 不能用 CLI adapter 方式聊天；請在引用連結貼 %%USERPROFILE%%\\.ollama\\models 註冊成本地模型。"
+		debugtrace.Record("go.SendInspectorMessage.ollama_cli_blocked", traceID, map[string]interface{}{
+			"adapter_id": adapterID,
+			"cli_path":   cliPath,
+			"message":    message,
+		})
+		return &skill_step.CLIResponse{Error: message}, nil
 	}
 
 	// ── 確保 sidecar 已啟動 ──
@@ -2312,15 +3329,202 @@ func (a *App) SendInspectorMessage(adapterID, sessionID, userText, traceID strin
 
 	// 上方短歷史只在記憶體內，程式關閉後自然清空。
 	if resp.Text != "" {
-		a.appendInspectorHistory("user", userText)
-		a.appendInspectorHistory("assistant", resp.Text)
-
-		// 上方輸出只同步 statusRail/greeting，不進下方 messages。
-		view := a.statusRail.SetText(resp.Text)
-		a.eventBus.Emit(eventbus.EventStatusRailUpdated, view)
+		a.finishInspectorReply(adapterID, userText, &resp)
 	}
 
 	return &resp, nil
+}
+
+// SendTopInteractionMessage keeps the frontend on one top-lane contract.
+// Backend drivers still differ: CLI uses sidecar; API/local uses HTTP.
+func (a *App) SendTopInteractionMessage(adapterID, sessionID, userText, traceID string) (*skill_step.CLIResponse, error) {
+	if a.isAPIOrLocalAdapter(adapterID) {
+		return a.SendInspectorAPIMessage(adapterID, sessionID, userText, traceID)
+	}
+	return a.SendInspectorMessage(adapterID, sessionID, userText, traceID)
+}
+
+// SendInspectorAPIMessage is the top interaction lane for API/local adapters.
+// It intentionally avoids the main composer action-chain so the top and bottom
+// chat lanes stay separate even when both use the same local model.
+func (a *App) SendInspectorAPIMessage(adapterID, sessionID, userText, traceID string) (*skill_step.CLIResponse, error) {
+	log.Printf("SendInspectorAPIMessage: adapter=%q text_len=%d", adapterID, len(userText))
+	debugtrace.Record("go.SendInspectorAPIMessage.enter", traceID, map[string]interface{}{
+		"adapter_id": adapterID,
+		"session_id": sessionID,
+		"text_len":   len(userText),
+	})
+
+	cfg, err := a.loadLLMAPIAdapterConfig(adapterID)
+	if err != nil {
+		a.setAdapterRuntimeStatus(adapterID, adapter_registry.StatusDegraded)
+		return nil, err
+	}
+
+	isLocalAdapter := false
+	var localAdapterInfo adapter_registry.Adapter
+	if a.adapterRegistry != nil {
+		if adapterInfo, adapterErr := a.adapterRegistry.GetStatus(adapterID); adapterErr == nil && adapterInfo.Kind == "local" {
+			isLocalAdapter = true
+			localAdapterInfo = adapterInfo
+		}
+	}
+
+	apiKey := ""
+	if !isLocalAdapter {
+		var keyErr error
+		apiKey, keyErr = a.secretStore.Load("llm_provider:" + adapterID + ":api_key")
+		if keyErr != nil || strings.TrimSpace(apiKey) == "" {
+			a.setAdapterRuntimeStatus(adapterID, adapter_registry.StatusDegraded)
+			return nil, fmt.Errorf("API key not found for adapter %s", adapterID)
+		}
+	}
+	if !isOpenAICompatibleProvider(cfg.ProviderID) {
+		a.setAdapterRuntimeStatus(adapterID, adapter_registry.StatusDegraded)
+		return &skill_step.CLIResponse{
+			Error: fmt.Sprintf("%s 目前尚未接上直接 API 協議；請先使用 DeepSeek/OpenAI-compatible provider。", cfg.Name),
+		}, nil
+	}
+
+	model := strings.TrimSpace(cfg.Model)
+	if model == "" {
+		a.setAdapterRuntimeStatus(adapterID, adapter_registry.StatusDegraded)
+		return nil, fmt.Errorf("API model is missing for adapter %s", adapterID)
+	}
+
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// SEC-05 2a: Safe Client，policy 由 PolicyForLLMEndpoint 集中決定。
+	client := urlsafe.NewSafeClient(urlsafe.PolicyForLLMEndpoint(cfg.ProviderID, cfg.BaseURL), "llm_inspector", 45*time.Second)
+	prompt := a.buildInspectorPrompt(a.getActivePersona(), userText)
+	reqBody := openAIChatRequest{
+		Model: model,
+		Messages: []openAIChatMessage{
+			{Role: "user", Content: prompt},
+		},
+	}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+	doRequest := func() (*http.Response, error) {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, openAIChatCompletionsURL(cfg.BaseURL), bytes.NewReader(body))
+		if reqErr != nil {
+			return nil, reqErr
+		}
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(apiKey))
+		req.Header.Set("Content-Type", "application/json")
+		return client.Do(req)
+	}
+
+	res, err := doRequest()
+	if err != nil && isLocalAdapter && strings.Contains(localAdapterInfo.Endpoint, ":11434") {
+		debugtrace.Record("go.SendInspectorAPIMessage.local.wake_retry", traceID, map[string]interface{}{
+			"adapter_id": adapterID,
+			"error":      err.Error(),
+		})
+		if _, wakeErr := a.wakeOllamaAdapter(localAdapterInfo); wakeErr == nil {
+			res, err = doRequest()
+		} else {
+			debugtrace.Record("go.SendInspectorAPIMessage.local.wake_error", traceID, map[string]interface{}{
+				"adapter_id": adapterID,
+				"error":      wakeErr.Error(),
+			})
+		}
+	}
+	if err != nil {
+		a.setAdapterRuntimeStatus(adapterID, adapter_registry.StatusDegraded)
+		debugtrace.Record("go.SendInspectorAPIMessage.http.error", traceID, map[string]interface{}{"error": err.Error()})
+		if isLocalAdapter {
+			return &skill_step.CLIResponse{Error: localAdapterReconnectHint(localAdapterInfo, err.Error())}, nil
+		}
+		return &skill_step.CLIResponse{Error: err.Error()}, nil
+	}
+	defer res.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(res.Body, 2*1024*1024))
+	if err != nil {
+		a.setAdapterRuntimeStatus(adapterID, adapter_registry.StatusDegraded)
+		return &skill_step.CLIResponse{Error: err.Error()}, nil
+	}
+	var parsed openAIChatResponse
+	_ = json.Unmarshal(raw, &parsed)
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		a.setAdapterRuntimeStatus(adapterID, adapter_registry.StatusDegraded)
+		msg := strings.TrimSpace(parsedErrorMessage(parsed))
+		if msg == "" {
+			msg = strings.TrimSpace(string(raw))
+		}
+		if isLocalAdapter && res.StatusCode >= 500 {
+			msg = localAdapterReconnectHint(localAdapterInfo, fmt.Sprintf("API HTTP %d: %s", res.StatusCode, msg))
+		} else {
+			msg = fmt.Sprintf("API HTTP %d: %s", res.StatusCode, msg)
+		}
+		return &skill_step.CLIResponse{Error: msg}, nil
+	}
+	if parsed.Error != nil && strings.TrimSpace(parsed.Error.Message) != "" {
+		a.setAdapterRuntimeStatus(adapterID, adapter_registry.StatusDegraded)
+		return &skill_step.CLIResponse{Error: parsed.Error.Message}, nil
+	}
+	if len(parsed.Choices) == 0 || strings.TrimSpace(parsed.Choices[0].Message.Content) == "" {
+		a.setAdapterRuntimeStatus(adapterID, adapter_registry.StatusDegraded)
+		return &skill_step.CLIResponse{Error: "API response did not include assistant content"}, nil
+	}
+
+	text := strings.TrimSpace(parsed.Choices[0].Message.Content)
+	resp := &skill_step.CLIResponse{Text: text, AdapterID: adapterID}
+	a.finishInspectorReply(adapterID, userText, resp)
+	a.setAdapterRuntimeStatus(adapterID, adapter_registry.StatusOnline)
+	debugtrace.Record("go.SendInspectorAPIMessage.response", traceID, map[string]interface{}{
+		"text":        resp.Text,
+		"local_model": isLocalAdapter,
+	})
+	return resp, nil
+}
+
+func (a *App) finishInspectorReply(adapterID, userText string, resp *skill_step.CLIResponse) {
+	if resp == nil {
+		return
+	}
+	resp.Text = cleanInspectorReply(resp.Text)
+	if resp.AdapterID == "" {
+		resp.AdapterID = adapterID
+	}
+	if resp.Text == "" {
+		return
+	}
+	a.appendInspectorHistory("user", userText)
+	a.appendInspectorHistory("assistant", resp.Text)
+	// Top replies only update the status rail; main conversation storage stays untouched.
+	if a.statusRail != nil {
+		view := a.statusRail.SetText(resp.Text)
+		if a.eventBus != nil {
+			a.eventBus.Emit(eventbus.EventStatusRailUpdated, view)
+		}
+	}
+}
+
+func cleanInspectorReply(text string) string {
+	cleaned := strings.TrimSpace(text)
+	for {
+		next := stripInspectorInternalSuffix(cleaned)
+		if next == cleaned {
+			return cleaned
+		}
+		cleaned = next
+	}
+}
+
+func stripInspectorInternalSuffix(text string) string {
+	cleaned := strings.TrimSpace(text)
+	lower := strings.ToLower(cleaned)
+	for _, suffix := range []string{"_top", " lane=top", " lane: top", " [top]", " (top)"} {
+		if strings.HasSuffix(lower, suffix) {
+			return strings.TrimSpace(cleaned[:len(cleaned)-len(suffix)])
+		}
+	}
+	return cleaned
 }
 
 // ClearInspectorHistory 清除閒聊歷史。前端關閉互動視窗時呼叫。
@@ -2415,7 +3619,7 @@ func (a *App) buildInspectorPrompt(persona settings.Persona, userText string) st
 	var sb strings.Builder
 
 	sb.WriteString(a.buildSharedPersonaPrompt(persona))
-	sb.WriteString("lane=top；只用top歷史；保留角色口吻/口癖；三句內。\n")
+	sb.WriteString("這是短互動回覆；只使用本區短歷史；直接回答，不輸出系統欄位、通道名稱或標記；三句內。\n")
 
 	// 上方歷史只取 inspectorHistory，不讀下方主聊天。
 	a.inspectorMu.Lock()
@@ -2513,6 +3717,14 @@ func (a *App) PreviewExternalLink(url string) interface{} {
 			Reason:   fmt.Sprintf("偵測到 Ollama 模型庫：%s。確定後會加入 %d 個本機模型。", strings.Join(modelIDs, "、"), len(modelIDs)),
 		})
 	}
+	if adapter_registry.IsOllamaExecutablePath(expandUserPath(url)) {
+		return frontendDTO(external_link.PreviewResult{
+			URL:      expandUserPath(url),
+			LinkType: external_link.LinkUnsupported,
+			Valid:    false,
+			Reason:   "Ollama 程式本體不能當 CLI adapter；請貼包含 blobs / manifests 的模型庫資料夾，例如 %%%USERPROFILE%%%\\.ollama\\models。",
+		})
+	}
 	if cli, err := adapter_registry.ResolveCustomCLI("", url); err == nil && cli.Found {
 		return frontendDTO(external_link.PreviewResult{
 			URL:      cli.Path,
@@ -2559,6 +3771,9 @@ func (a *App) RegisterExternalLink(url, label string) (interface{}, error) {
 			LinkType: external_link.LinkAdapterCandidate,
 			Label:    fmt.Sprintf("Ollama 模型庫（%d 個模型）", len(models)),
 		}), nil
+	}
+	if adapter_registry.IsOllamaExecutablePath(expandUserPath(url)) {
+		return nil, fmt.Errorf("ollama.exe 不能當 CLI adapter；請貼 Ollama 模型庫資料夾，例如 %%USERPROFILE%%\\.ollama\\models")
 	}
 	// 先檢查是否為 CLI adapter 路徑——如果是，只走 adapter_registry
 	if cli, err := a.adapterRegistry.RegisterCustomCLI("", url); err == nil && cli.Found {
@@ -2609,23 +3824,70 @@ func (a *App) ListReferenceFiles() ([]ReferenceFile, error) {
 			Path:   filepath.Join(referenceDir, name),
 			Source: "library",
 			Status: "ready",
-			Detail: "已從引用庫載入",
 		})
 	}
 	return files, nil
 }
 
+// maybeEmitConfigMissingOnStartup 在 startup 末尾呼叫；只在「有 reference 檔 + 未設定 + 未跳過」三條件全成立時 emit 一次。
+// 給 ensureReferenceVectorIndexes 一點時間先跑（等 1.5 秒），讓 disk → JSON → meta 流程穩定後再彈 modal。
+func (a *App) maybeEmitConfigMissingOnStartup() {
+	time.Sleep(1500 * time.Millisecond)
+	if a == nil || a.settingsService == nil || a.eventBus == nil {
+		return
+	}
+	cfg := a.settingsService.EmbeddingConfig()
+	if cfg.ProviderID != "" || cfg.PickerDismissed {
+		return
+	}
+	refDir := filepath.Join(appDataRoot(), "data", "references", "files")
+	entries, err := os.ReadDir(refDir)
+	if err != nil || len(entries) == 0 {
+		return
+	}
+	nonDot := 0
+	for _, e := range entries {
+		if e.IsDir() || len(e.Name()) == 0 || e.Name()[0] == '.' {
+			continue
+		}
+		nonDot++
+	}
+	if nonDot == 0 {
+		return
+	}
+	a.eventBus.Emit("embedding:config_missing", map[string]any{
+		"displayName": fmt.Sprintf("startup (%d 個歷史引用)", nonDot),
+	})
+}
+
 func (a *App) ImportReferenceFile(sourcePath string) (ReferenceFile, error) {
+	referenceDir := filepath.Join(appDataRoot(), "data", "references", "files")
+	ref, err := importReferenceFileToDir(sourcePath, referenceDir)
+	if err != nil {
+		return ReferenceFile{}, err
+	}
+	a.maybeEmitConfigMissing(ref.Name)
+	return ref, nil
+}
+
+func importReferenceFileToDir(sourcePath, referenceDir string) (ReferenceFile, error) {
 	if sourcePath == "" {
 		return ReferenceFile{}, fmt.Errorf("reference: source path is empty")
 	}
+	info, err := os.Stat(sourcePath)
+	if err != nil {
+		return ReferenceFile{}, err
+	}
+	if info.IsDir() {
+		return ReferenceFile{}, fmt.Errorf("reference: folders are not supported")
+	}
+
 	source, err := os.Open(sourcePath)
 	if err != nil {
 		return ReferenceFile{}, err
 	}
 	defer source.Close()
 
-	referenceDir := filepath.Join(appDataRoot(), "data", "references", "files")
 	if err := os.MkdirAll(referenceDir, 0o700); err != nil {
 		return ReferenceFile{}, err
 	}
@@ -2645,9 +3907,11 @@ func (a *App) ImportReferenceFile(sourcePath string) (ReferenceFile, error) {
 	}
 	defer target.Close()
 	if _, err := io.Copy(target, source); err != nil {
+		_ = target.Close()
+		_ = os.Remove(targetPath)
 		return ReferenceFile{}, err
 	}
-	return ReferenceFile{Name: baseName, Path: targetPath, Source: "library", Status: "ready", Detail: "已複製到引用庫"}, nil
+	return ReferenceFile{Name: baseName, Path: targetPath, Source: "library", Status: "ready"}, nil
 }
 
 // PreparePackageInstall quarantines a dropped package for review.
@@ -2780,18 +4044,7 @@ func (a *App) ListArchivedSkills() (interface{}, error) {
 // ResolveSkillForAction parses actionTarget (format: "動作ㄌ目標"), resolves it
 // against the archive, caches the result, and returns it.
 func (a *App) ResolveSkillForAction(actionTarget string, sessionID string) (*skill_step.ResolveResult, error) {
-	at, err := skill_step.ParseActionTarget(actionTarget)
-	if err != nil {
-		return nil, err
-	}
-	result, err := a.skillRouter.Resolve(at, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	a.cacheMu.Lock()
-	a.resolveCache[result.ResolveID] = result
-	a.cacheMu.Unlock()
-	return result, nil
+	return a.resolveSkillForActionTarget(actionTarget, sessionID)
 }
 
 // BuildSkillContext looks up a cached ResolveResult, builds the Injection,
@@ -3103,6 +4356,9 @@ func (a *App) ScanLocalModels() interface{} {
 
 // EnableLocalModel registers a detected local model into the adapter list.
 func (a *App) EnableLocalModel(adapterID, name, modelID, provider, endpoint string) error {
+	if strings.EqualFold(strings.TrimSpace(provider), "ollama") && !isOllamaGenerativeModelID(modelID) {
+		return fmt.Errorf("ollama: model %q is not a chat/generative model", modelID)
+	}
 	icon := "◉"
 	if provider == "lmstudio" {
 		icon = "◈"
@@ -3148,41 +4404,66 @@ func (a *App) WakeLocalAdapter(adapterID string) (interface{}, error) {
 	return nil, fmt.Errorf("unknown local adapter endpoint: %s", adapter.Endpoint)
 }
 
-func (a *App) wakeOllamaAdapter(adapter adapter_registry.Adapter) (map[string]string, error) {
-	baseURL := ollamaBaseURL(adapter.Endpoint)
-	if pingOllamaTags(baseURL, 800*time.Millisecond) {
-		a.setAdapterRuntimeStatus(adapter.ID, adapter_registry.StatusOnline)
-		return map[string]string{"status": "online", "message": "Ollama 已在線"}, nil
+// wakeOllamaDaemon 是「拉起本機 ollama serve」的純邏輯，不做 adapter status 更新。
+// caller：
+//   - wakeOllamaAdapter（registry path）：包這層、額外更新 adapter status
+//   - WakeOllamaDaemon Wails binding（modal path）：直接呼叫、無 status 概念
+//
+// 參數：
+//   - baseURL：要 ping 的 endpoint，例 "http://localhost:11434"；空字串 → 預設
+//   - modelDirHint：要塞 OLLAMA_MODELS 的目錄；空字串 → 不設 env
+//
+// 行為：
+//   - 第一輪 ping 過 → 立刻 nil
+//   - 沒過 → 找 binary、spawn `ollama serve`、再 ping 30×200ms = 6 秒
+//   - 仍 ping 不到 → error
+func wakeOllamaDaemon(baseURL, modelDirHint string) error {
+	if baseURL == "" {
+		baseURL = "http://localhost:11434"
 	}
-
+	if pingOllamaTags(baseURL, 800*time.Millisecond) {
+		return nil
+	}
 	ollamaPath := resolveOllamaExecutable()
 	if ollamaPath == "" {
-		a.setAdapterRuntimeStatus(adapter.ID, adapter_registry.StatusDegraded)
-		return nil, fmt.Errorf("找不到 Ollama CLI，請安裝 Ollama 或加入 /opt/homebrew/bin/ollama")
+		return fmt.Errorf("找不到 Ollama CLI，請安裝 Ollama 或加入 /opt/homebrew/bin/ollama")
 	}
-
-	cmd := exec.Command(ollamaPath, "serve")
+	cmd := executil.Command(ollamaPath, "serve")
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	cmd.Env = os.Environ()
-	if modelDir := resolveOllamaModelDir(adapter.Path); modelDir != "" {
-		cmd.Env = append(cmd.Env, "OLLAMA_MODELS="+modelDir)
+	if modelDirHint != "" {
+		cmd.Env = append(cmd.Env, "OLLAMA_MODELS="+modelDirHint)
 	}
 	if err := cmd.Start(); err != nil {
-		a.setAdapterRuntimeStatus(adapter.ID, adapter_registry.StatusDegraded)
-		return nil, err
+		return err
 	}
-	go func() { _ = cmd.Wait() }()
-
+	go func() { _ = cmd.Wait() }() // detach
 	for i := 0; i < 30; i++ {
 		if pingOllamaTags(baseURL, 300*time.Millisecond) {
-			a.setAdapterRuntimeStatus(adapter.ID, adapter_registry.StatusOnline)
-			return map[string]string{"status": "online", "message": "Ollama 已喚醒"}, nil
+			return nil
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	a.setAdapterRuntimeStatus(adapter.ID, adapter_registry.StatusDegraded)
-	return nil, fmt.Errorf("Ollama 已嘗試啟動，但 API 尚未回應")
+	return fmt.Errorf("Ollama 已嘗試啟動，但 API 尚未回應")
+}
+
+// wakeOllamaAdapter — registry path：包 wakeOllamaDaemon 並在前後更新 adapter 狀態。
+func (a *App) wakeOllamaAdapter(adapter adapter_registry.Adapter) (map[string]string, error) {
+	baseURL := ollamaBaseURL(adapter.Endpoint)
+	modelDir := resolveOllamaModelDir(adapter.Path)
+	// 先 ping 一次拿快速 path 的訊息差異（已上線 vs 剛喚醒）。
+	online := pingOllamaTags(baseURL, 800*time.Millisecond)
+	if online {
+		a.setAdapterRuntimeStatus(adapter.ID, adapter_registry.StatusOnline)
+		return map[string]string{"status": "online", "message": "Ollama 已在線"}, nil
+	}
+	if err := wakeOllamaDaemon(baseURL, modelDir); err != nil {
+		a.setAdapterRuntimeStatus(adapter.ID, adapter_registry.StatusDegraded)
+		return nil, err
+	}
+	a.setAdapterRuntimeStatus(adapter.ID, adapter_registry.StatusOnline)
+	return map[string]string{"status": "online", "message": "Ollama 已喚醒"}, nil
 }
 
 func resolveOllamaModelDir(adapterPath string) string {
@@ -3228,7 +4509,8 @@ func ollamaBaseURL(endpoint string) string {
 }
 
 func pingOllamaTags(baseURL string, timeout time.Duration) bool {
-	client := http.Client{Timeout: timeout}
+	// SEC-05 2a: 本機 model 偵測走 PolicyLocalLLM（允許 loopback、擋 LAN/metadata）。
+	client := urlsafe.NewSafeClient(urlsafe.PolicyLocalLLM, "model_ping", timeout)
 	resp, err := client.Get(strings.TrimRight(baseURL, "/") + "/api/tags")
 	if err != nil {
 		return false
@@ -3238,7 +4520,8 @@ func pingOllamaTags(baseURL string, timeout time.Duration) bool {
 }
 
 func pingOpenAIModelsEndpoint(endpoint string, timeout time.Duration) bool {
-	client := http.Client{Timeout: timeout}
+	// SEC-05 2a: 本機 model 偵測走 PolicyLocalLLM（允許 loopback、擋 LAN/metadata）。
+	client := urlsafe.NewSafeClient(urlsafe.PolicyLocalLLM, "model_ping", timeout)
 	base := strings.TrimRight(strings.TrimSpace(endpoint), "/")
 	if strings.HasSuffix(base, "/v1") {
 		base += "/models"
@@ -3280,6 +4563,9 @@ func (a *App) ReorderAdapters(orderJSON string) error {
 func (a *App) ListAvailableAdapters() interface{} {
 	items := make([]map[string]interface{}, 0)
 	for _, adapter := range a.adapterRegistry.ListAvailable() {
+		if !shouldExposeAdapter(adapter) {
+			continue
+		}
 		kind := strings.TrimSpace(adapter.Kind)
 		if kind == "" {
 			kind = "cli"
@@ -3308,6 +4594,101 @@ func (a *App) ListAvailableAdapters() interface{} {
 		})
 	}
 	return frontendDTO(items)
+}
+
+func shouldExposeAdapter(adapter adapter_registry.Adapter) bool {
+	kind := strings.TrimSpace(adapter.Kind)
+	if kind != "local" {
+		return true
+	}
+	identity := strings.ToLower(adapter.ID + " " + adapter.Name + " " + adapter.Endpoint)
+	if strings.Contains(identity, "ollama") && !isOllamaGenerativeModelID(adapter.Model) {
+		return false
+	}
+	return true
+}
+
+func (a *App) refreshAdapterRuntimeHealth() {
+	if a.adapterRegistry == nil {
+		return
+	}
+	a.adapterHealthMu.Lock()
+	defer a.adapterHealthMu.Unlock()
+	for _, adapter := range a.adapterRegistry.ListAvailable() {
+		kind := strings.TrimSpace(adapter.Kind)
+		if kind != "" && kind != "cli" {
+			continue
+		}
+		a.checkAdapterRuntimeHealth(adapter)
+	}
+}
+
+func (a *App) checkAdapterRuntimeHealth(adapter adapter_registry.Adapter) {
+	// 背景健康檢查只碰 CLI metadata，不呼叫模型，避免開機耗 token 或卡 UI。
+	cliPath, err := a.adapterRegistry.ResolveExecutable(adapter.ID)
+	if err != nil {
+		a.setAdapterRuntimeStatusWithMessage(adapter.ID, adapter_registry.StatusOffline, err.Error())
+		return
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if err := runCLIHealthProbe(checkCtx, cliPath); err != nil {
+		status := adapter_registry.StatusDegraded
+		message := err.Error()
+		if errors.Is(checkCtx.Err(), context.DeadlineExceeded) {
+			message = "CLI health check timed out after 3s"
+		}
+		a.setAdapterRuntimeStatusWithMessage(adapter.ID, status, message)
+		return
+	}
+	a.setAdapterRuntimeStatusWithMessage(adapter.ID, adapter_registry.StatusOnline, "")
+}
+
+func runCLIHealthProbe(ctx context.Context, cliPath string) error {
+	for _, args := range [][]string{{"--version"}, {"--help"}} {
+		cmd := executil.CommandContext(ctx, cliPath, args...)
+		out, err := cmd.CombinedOutput()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err == nil {
+			return nil
+		}
+		if len(out) > 0 && strings.Contains(strings.ToLower(string(out)), "usage:") {
+			return nil
+		}
+	}
+	return fmt.Errorf("CLI did not respond to --version/--help")
+}
+
+func (a *App) setAdapterRuntimeStatusWithMessage(adapterID string, status adapter_registry.Status, message string) {
+	if adapterID == "" || a.adapterRegistry == nil {
+		return
+	}
+	if err := a.adapterRegistry.SetStatus(adapterID, status); err != nil {
+		return
+	}
+	if a.eventBus != nil {
+		payload := map[string]string{
+			"adapter_id": adapterID,
+			"status":     string(status),
+		}
+		if strings.TrimSpace(message) != "" {
+			payload["message"] = strings.TrimSpace(message)
+		}
+		a.eventBus.Emit(eventbus.EventAdapterStatusChanged, payload)
+	}
+	if strings.TrimSpace(message) != "" {
+		debugtrace.Record("go.adapter.health", "", map[string]interface{}{
+			"adapter_id": adapterID,
+			"status":     string(status),
+			"message":    message,
+		})
+	}
 }
 
 // GetAdapterStatus returns the status of a specific adapter by ID.
@@ -4006,12 +5387,50 @@ func (a *App) StartLearningMode(activeWindowHash string) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	if a.nativeInput != nil {
+		if err := a.nativeInput.Start(func(event visual_learning.NativeClickEvent) {
+			trace := visual_learning.MouseEventTrace{
+				Timestamp:       event.Timestamp,
+				EventType:       visual_learning.MouseEventClick,
+				X:               event.X,
+				Y:               event.Y,
+				Button:          event.Button,
+				Source:          "native",
+				CoordinateSpace: "screen",
+				TargetRegionID:  fmt.Sprintf("native-click-%d-%d-%d", event.Timestamp.UnixNano(), event.X, event.Y),
+				TargetLabel:     strings.TrimSpace(event.WindowTitle),
+				TargetRole:      "native-window",
+				TargetTag:       filepath.Base(event.WindowProcess),
+				Viewport: &visual_learning.EventViewport{
+					Width:       event.ScreenWidth,
+					Height:      event.ScreenHeight,
+					DeviceScale: 1,
+				},
+				WindowTitle:   event.WindowTitle,
+				WindowProcess: event.WindowProcess,
+				WindowHandle:  event.WindowHandle,
+				WindowRect:    event.WindowRect,
+			}
+			trace.WindowsAnchor = a.recordedNativeWindowsAnchor(event, trace.Viewport)
+			if err := a.learningService.RecordEvent(trace); err != nil {
+				log.Printf("visual learning native click ignored: %v", err)
+			}
+		}); err != nil {
+			log.Printf("visual learning native recorder degraded: %v", err)
+			a.eventBus.Emit("visual_learning:native_recorder_degraded", map[string]string{"error": err.Error()})
+		}
+	}
 	a.eventBus.Emit("visual_learning:recording_started", map[string]string{"run_id": run.ID})
 	return frontendDTO(run), nil
 }
 
 // StopLearningMode 停止錄製模式。
 func (a *App) StopLearningMode() (interface{}, error) {
+	if a.nativeInput != nil {
+		if err := a.nativeInput.Stop(); err != nil {
+			log.Printf("visual learning native recorder stop: %v", err)
+		}
+	}
 	run, err := a.learningService.StopDemonstration()
 	if err != nil {
 		return nil, err
@@ -4030,6 +5449,540 @@ func (a *App) GetActiveLearningRun() interface{} {
 	return frontendDTO(a.learningService.ActiveRun())
 }
 
+// RecordLearningMouseEvent records one explicit user demonstration click.
+func (a *App) RecordLearningMouseEvent(payload string) error {
+	var event visual_learning.MouseEventTrace
+	if err := json.Unmarshal([]byte(payload), &event); err != nil {
+		return fmt.Errorf("visual learning event: invalid payload: %w", err)
+	}
+	if event.EventType == "" {
+		event.EventType = visual_learning.MouseEventClick
+	}
+	if event.Timestamp.IsZero() {
+		event.Timestamp = time.Now()
+	}
+	if event.Button == "" {
+		event.Button = "left"
+	}
+	if strings.TrimSpace(event.TargetRegionID) == "" {
+		event.TargetRegionID = fmt.Sprintf("dom-%d-%d", event.X, event.Y)
+	}
+	if event.WindowsAnchor == nil {
+		event.WindowsAnchor = visual_learning.RecordedClickWindowsAnchor(event.X, event.Y, event.TargetRect, event.Viewport)
+	}
+	if err := a.learningService.RecordEvent(event); err != nil {
+		return err
+	}
+	a.eventBus.Emit("visual_learning:event_recorded", map[string]interface{}{
+		"event_type": event.EventType,
+		"label":      event.TargetLabel,
+		"x":          event.X,
+		"y":          event.Y,
+	})
+	return nil
+}
+
+func (a *App) recordedNativeWindowsAnchor(event visual_learning.NativeClickEvent, fallbackViewport *visual_learning.EventViewport) *visual_learning.WindowsClickAnchorResult {
+	if a == nil || a.nativeInput == nil || event.WindowHandle == 0 {
+		return visual_learning.RecordedClickWindowsAnchor(event.X, event.Y, nil, fallbackViewport)
+	}
+	capture, err := a.nativeInput.CaptureWindow(event.WindowHandle)
+	if err != nil || capture.Width <= 0 || capture.Height <= 0 || len(capture.ImageData) == 0 {
+		return visual_learning.RecordedClickWindowsAnchor(event.X, event.Y, nil, fallbackViewport)
+	}
+	localX := event.X - capture.WindowRect.X
+	localY := event.Y - capture.WindowRect.Y
+	detection := a.yoloDetector.Detect(capture.ImageData, capture.Width, capture.Height)
+	shape := a.opencvPipeline.Propose(capture.ImageData, capture.Width, capture.Height)
+	anchor, err := visual_learning.ResolveWindowsClickAnchor(
+		capture.ImageData,
+		capture.Width,
+		capture.Height,
+		localX,
+		localY,
+		detection,
+		shape,
+		visual_learning.WindowsClickAnchorOptions{NearMissPx: 12, ShapeFallbackRadius: 48, ManualBoxSize: 28, CropPadding: 12},
+	)
+	if err != nil {
+		return visual_learning.RecordedClickWindowsAnchor(event.X, event.Y, nil, fallbackViewport)
+	}
+	return &anchor
+}
+
+// GetLastLearningReplayPlan returns a safe plan-only replay of the last stopped
+// demonstration. It does not execute clicks or keyboard input.
+func (a *App) GetLastLearningReplayPlan() (interface{}, error) {
+	plan, err := a.learningService.LastReplayPlan()
+	if err != nil {
+		return nil, err
+	}
+	return frontendDTO(plan), nil
+}
+
+// ListLearningReplayCatalog returns compact metadata for recent demos so an LLM
+// can choose the right tag before asking the app to replay it.
+func (a *App) ListLearningReplayCatalog(limit int) (interface{}, error) {
+	items, err := a.learningService.ListReplayCatalog(limit)
+	if err != nil {
+		return nil, err
+	}
+	return frontendDTO(items), nil
+}
+
+// SearchLearningOperations resolves natural-language operation keywords.
+func (a *App) SearchLearningOperations(query string, limit int) (interface{}, error) {
+	items, err := a.learningService.SearchOperations(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	return frontendDTO(items), nil
+}
+
+// GetLearningReplayPlan returns a safe plan-only replay by demo tag or run ID.
+func (a *App) GetLearningReplayPlan(tagOrRunID string) (interface{}, error) {
+	plan, err := a.learningService.ReplayPlanByTag(tagOrRunID)
+	if err != nil {
+		return nil, err
+	}
+	return frontendDTO(plan), nil
+}
+
+// UpdateLearningRunMetadata writes LLM-generated title/summary back to run.json.
+func (a *App) UpdateLearningRunMetadata(payload string) (interface{}, error) {
+	var update visual_learning.LearningRunMetadataUpdate
+	if err := json.Unmarshal([]byte(payload), &update); err != nil {
+		return nil, fmt.Errorf("learning metadata: invalid payload: %w", err)
+	}
+	run, err := a.learningService.UpdateRunMetadata(update)
+	if err != nil {
+		return nil, err
+	}
+	return frontendDTO(run), nil
+}
+
+// GenerateLearningRunMetadata asks the selected CLI to name a stopped demo and
+// writes the result back to run.json. This is an internal operation-index step,
+// not a normal user chat turn.
+func (a *App) GenerateLearningRunMetadata(adapterID string, sessionID string, runID string, traceID string) (interface{}, error) {
+	if a.learningService == nil {
+		return nil, fmt.Errorf("learning metadata: service is not available")
+	}
+	if a.cliAdapter == nil {
+		return nil, fmt.Errorf("learning metadata: CLI adapter is not available")
+	}
+	if strings.TrimSpace(adapterID) == "" {
+		return nil, fmt.Errorf("learning metadata: adapter is required")
+	}
+	cliPath := ""
+	if a.adapterRegistry != nil {
+		if resolved, err := a.adapterRegistry.ResolveExecutable(adapterID); err == nil {
+			cliPath = resolved
+		}
+	}
+	if strings.TrimSpace(cliPath) == "" {
+		return nil, fmt.Errorf("learning metadata: CLI executable is not available for %s", adapterID)
+	}
+	if err := a.ensureSidecarRunning(); err != nil {
+		return nil, err
+	}
+	plan, err := a.learningService.ReplayPlanByTag(runID)
+	if err != nil {
+		return nil, err
+	}
+	prompt := buildLearningMetadataPrompt(plan)
+	debugtrace.Record("go.learningMetadata.generate.enter", traceID, map[string]interface{}{
+		"adapter_id": adapterID,
+		"run_id":     runID,
+		"steps":      len(plan.Steps),
+	})
+	resp, err := a.cliAdapter.SendMessage(skill_step.CLIMessageOptions{
+		AdapterID:      adapterID,
+		CLIPath:        cliPath,
+		SessionID:      sessionID,
+		UserText:       prompt,
+		ContinuityKey:  conversationContinuityKey("learning-metadata", sessionID),
+		TraceID:        traceID,
+		SkipContinuity: true,
+	})
+	if err != nil {
+		debugtrace.Record("go.learningMetadata.generate.error", traceID, map[string]interface{}{"error": err.Error()})
+		return nil, err
+	}
+	if strings.TrimSpace(resp.Error) != "" {
+		debugtrace.Record("go.learningMetadata.generate.error", traceID, map[string]interface{}{"error": resp.Error})
+		return nil, fmt.Errorf("learning metadata: %s", resp.Error)
+	}
+	debugtrace.Record("go.learningMetadata.generate.raw", traceID, map[string]interface{}{
+		"text": resp.Text,
+	})
+	update, err := parseLearningMetadataResponse(resp.Text)
+	if err != nil {
+		debugtrace.Record("go.learningMetadata.generate.error", traceID, map[string]interface{}{"error": err.Error()})
+		return nil, err
+	}
+	update.RunID = plan.RunID
+	update.Tag = plan.Tag
+	update.MetadataSource = "llm"
+	run, err := a.learningService.UpdateRunMetadata(update)
+	if err != nil {
+		debugtrace.Record("go.learningMetadata.generate.error", traceID, map[string]interface{}{"error": err.Error()})
+		return nil, err
+	}
+	debugtrace.Record("go.learningMetadata.generate.updated", traceID, map[string]interface{}{
+		"run_id":        run.ID,
+		"tag":           run.Tag,
+		"operation_tag": run.OperationTag,
+		"title":         run.Title,
+		"keywords":      run.Keywords,
+	})
+	return frontendDTO(run), nil
+}
+
+// ExecuteNativeLearningReplayStep executes one native screen-coordinate replay
+// step after the frontend has shown the user a confirmation prompt.
+func (a *App) ExecuteNativeLearningReplayStep(payload string) (interface{}, error) {
+	if a.nativeInput == nil {
+		return nil, fmt.Errorf("native replay executor is not available")
+	}
+	var step visual_learning.LearningReplayStep
+	if err := json.Unmarshal([]byte(payload), &step); err != nil {
+		return nil, fmt.Errorf("native replay step: invalid payload: %w", err)
+	}
+	if relocated, ok := a.relocateNativeReplayStep(step); ok {
+		if relocated.NeedsConfirmation && canAutoConfirmBrowserReplay(step, relocated) {
+			relocated.NeedsConfirmation = false
+			relocated.OK = true
+			relocated.Reason = "browser page replay auto-confirmed for non-dangerous page click"
+		}
+		if relocated.NeedsConfirmation {
+			previewStep := step
+			previewStep.X = relocated.ExecutionPoint.X
+			previewStep.Y = relocated.ExecutionPoint.Y
+			preview := visual_learning.NativeReplayResult{OK: false}
+			previewError := relocated.Reason
+			if relocated.Method != "capture_guard" {
+				preview = a.nativeInput.MoveCursorOnly(previewStep)
+				if preview.Error != "" {
+					previewError = strings.TrimSpace(previewError + "; preview move failed: " + preview.Error)
+				}
+			}
+			return frontendDTO(visual_learning.NativeReplayResult{
+				OK:                   false,
+				Skipped:              true,
+				NeedsConfirmation:    true,
+				Method:               "visual_relocation",
+				Index:                step.Index,
+				Label:                step.Label,
+				X:                    relocated.ExecutionPoint.X,
+				Y:                    relocated.ExecutionPoint.Y,
+				OriginalX:            step.X,
+				OriginalY:            step.Y,
+				Error:                previewError,
+				WindowTitle:          step.WindowTitle,
+				WindowProcess:        step.WindowProcess,
+				ForegroundOK:         preview.OK,
+				RelocationMethod:     relocated.Method,
+				RelocationConfidence: relocated.Confidence,
+				RelocationReason:     relocated.Reason,
+				DebugImagePath:       relocated.DebugImagePath,
+				DebugInfoPath:        debugInfoPathForImage(relocated.DebugImagePath),
+			}), nil
+		}
+		step.X = relocated.ExecutionPoint.X
+		step.Y = relocated.ExecutionPoint.Y
+		result := a.nativeInput.Click(step)
+		result.OriginalX = relocated.OriginalPoint.X
+		result.OriginalY = relocated.OriginalPoint.Y
+		result.Relocated = true
+		result.RelocationMethod = relocated.Method
+		result.RelocationConfidence = relocated.Confidence
+		result.RelocationReason = relocated.Reason
+		result.DebugImagePath = relocated.DebugImagePath
+		result.DebugInfoPath = debugInfoPathForImage(relocated.DebugImagePath)
+		return frontendDTO(result), nil
+	}
+	result := a.nativeInput.Click(step)
+	return frontendDTO(result), nil
+}
+
+func (a *App) relocateNativeReplayStep(step visual_learning.LearningReplayStep) (visual_learning.AnchorRelocationResult, bool) {
+	if a == nil || a.nativeInput == nil || step.WindowsAnchor == nil || step.WindowHandle == 0 {
+		return visual_learning.AnchorRelocationResult{}, false
+	}
+	recordedWidth := step.WindowRect.W
+	recordedHeight := step.WindowRect.H
+	if recordedWidth <= 0 || recordedHeight <= 0 {
+		if step.Viewport != nil {
+			recordedWidth = step.Viewport.Width
+			recordedHeight = step.Viewport.Height
+		}
+	}
+	if recordedWidth <= 0 || recordedHeight <= 0 {
+		return visual_learning.AnchorRelocationResult{}, false
+	}
+	capture, err := a.nativeInput.CaptureWindow(step.WindowHandle)
+	if err != nil || capture.Width <= 0 || capture.Height <= 0 || len(capture.ImageData) == 0 {
+		return visual_learning.AnchorRelocationResult{}, false
+	}
+	if isSuspiciousReplayCapture(capture) {
+		relocated := visual_learning.AnchorRelocationResult{
+			NeedsConfirmation: true,
+			Method:            "capture_guard",
+			Reason:            fmt.Sprintf("captured target window is suspiciously small (%dx%d); replay stopped before native click because the stored window handle may point to a browser chrome/strip instead of page content", capture.Width, capture.Height),
+			OriginalPoint:     visual_learning.PixelPoint{X: step.X, Y: step.Y},
+			ExecutionPoint:    visual_learning.PixelPoint{X: step.X, Y: step.Y},
+		}
+		if debugPath := a.saveReplayRelocationDebugOverlay(step, capture, relocated); debugPath != "" {
+			relocated.DebugImagePath = debugPath
+		}
+		return relocated, true
+	}
+	detection := a.yoloDetector.Detect(capture.ImageData, capture.Width, capture.Height)
+	shape := a.opencvPipeline.Propose(capture.ImageData, capture.Width, capture.Height)
+	relocated := visual_learning.ResolveAnchorRelocation(
+		step.WindowsAnchor,
+		recordedWidth,
+		recordedHeight,
+		capture.Width,
+		capture.Height,
+		detection,
+		shape,
+		visual_learning.AnchorRelocationOptions{ConfidenceThreshold: 0.5, CurrentImageData: capture.ImageData},
+	)
+	if relocated.OK || relocated.NeedsConfirmation || relocated.Confidence > 0 {
+		if debugPath := a.saveReplayRelocationDebugOverlay(step, capture, relocated); debugPath != "" {
+			relocated.DebugImagePath = debugPath
+		}
+		windowPoint := relocated.ExecutionPoint
+		relocated.ExecutionPoint = visual_learning.PixelPoint{
+			X: capture.WindowRect.X + windowPoint.X,
+			Y: capture.WindowRect.Y + windowPoint.Y,
+		}
+	}
+	relocated.OriginalPoint = visual_learning.PixelPoint{X: step.X, Y: step.Y}
+	if relocated.OK || relocated.NeedsConfirmation {
+		return relocated, true
+	}
+	fallback, ok := fallbackScaledWindowAnchorRelocation(step, capture, recordedWidth, recordedHeight, relocated.Reason)
+	if ok {
+		fallback.Candidates = relocated.Candidates
+		if debugPath := a.saveReplayRelocationDebugOverlay(step, capture, fallback); debugPath != "" {
+			fallback.DebugImagePath = debugPath
+		}
+	}
+	return fallback, ok
+}
+
+func isSuspiciousReplayCapture(capture visual_learning.WindowCapture) bool {
+	return capture.Width < 240 || capture.Height < 160
+}
+
+func fallbackScaledWindowAnchorRelocation(step visual_learning.LearningReplayStep, capture visual_learning.WindowCapture, recordedWidth, recordedHeight int, baseReason string) (visual_learning.AnchorRelocationResult, bool) {
+	anchor := step.WindowsAnchor
+	if anchor == nil || !anchor.OK || recordedWidth <= 0 || recordedHeight <= 0 || capture.Width <= 0 || capture.Height <= 0 {
+		return visual_learning.AnchorRelocationResult{}, false
+	}
+	if strings.EqualFold(anchor.DetectorBackend, "recorded") {
+		return visual_learning.AnchorRelocationResult{}, false
+	}
+	recordedPoint := anchor.ExecutionPoint
+	if recordedPoint.X == 0 && recordedPoint.Y == 0 {
+		recordedPoint = anchor.Click
+	}
+	if recordedPoint.X < 0 || recordedPoint.Y < 0 || recordedPoint.X > recordedWidth || recordedPoint.Y > recordedHeight {
+		return visual_learning.AnchorRelocationResult{}, false
+	}
+	scaledX := int(math.Round(float64(recordedPoint.X) / float64(recordedWidth) * float64(capture.Width)))
+	scaledY := int(math.Round(float64(recordedPoint.Y) / float64(recordedHeight) * float64(capture.Height)))
+	windowPoint := clampReplayWindowPoint(visual_learning.PixelPoint{X: scaledX, Y: scaledY}, capture.Width, capture.Height)
+	scaledBox := scaleReplayAnchorBBox(anchor.AnchorBBox, recordedWidth, recordedHeight, capture.Width, capture.Height)
+	reason := strings.TrimSpace(baseReason)
+	if reason == "" {
+		reason = "YOLO/OpenCV did not produce a relocation candidate"
+	}
+	return visual_learning.AnchorRelocationResult{
+		OK:             true,
+		Method:         "scaled_anchor_relocation",
+		Reason:         reason + "; using recorded visual anchor ratio inside the current resized window",
+		Confidence:     0.45,
+		OriginalPoint:  visual_learning.PixelPoint{X: step.X, Y: step.Y},
+		ExecutionPoint: visual_learning.PixelPoint{X: capture.WindowRect.X + windowPoint.X, Y: capture.WindowRect.Y + windowPoint.Y},
+		AnchorBBox:     scaledBox,
+	}, true
+}
+
+func scaleReplayAnchorBBox(box visual_learning.PixelBBox, recordedWidth, recordedHeight, currentWidth, currentHeight int) visual_learning.PixelBBox {
+	if box.W <= 0 || box.H <= 0 || recordedWidth <= 0 || recordedHeight <= 0 || currentWidth <= 0 || currentHeight <= 0 {
+		return visual_learning.PixelBBox{}
+	}
+	x := int(math.Round(float64(box.X) / float64(recordedWidth) * float64(currentWidth)))
+	y := int(math.Round(float64(box.Y) / float64(recordedHeight) * float64(currentHeight)))
+	w := int(math.Round(float64(box.W) / float64(recordedWidth) * float64(currentWidth)))
+	h := int(math.Round(float64(box.H) / float64(recordedHeight) * float64(currentHeight)))
+	if w < 1 {
+		w = 1
+	}
+	if h < 1 {
+		h = 1
+	}
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 0
+	}
+	if x >= currentWidth {
+		x = currentWidth - 1
+	}
+	if y >= currentHeight {
+		y = currentHeight - 1
+	}
+	if x+w > currentWidth {
+		w = currentWidth - x
+	}
+	if y+h > currentHeight {
+		h = currentHeight - y
+	}
+	return visual_learning.PixelBBox{X: x, Y: y, W: w, H: h}
+}
+
+func clampReplayWindowPoint(point visual_learning.PixelPoint, width, height int) visual_learning.PixelPoint {
+	if width <= 0 || height <= 0 {
+		return visual_learning.PixelPoint{}
+	}
+	if point.X < 0 {
+		point.X = 0
+	}
+	if point.Y < 0 {
+		point.Y = 0
+	}
+	if point.X >= width {
+		point.X = width - 1
+	}
+	if point.Y >= height {
+		point.Y = height - 1
+	}
+	return point
+}
+
+func (a *App) saveReplayRelocationDebugOverlay(step visual_learning.LearningReplayStep, capture visual_learning.WindowCapture, relocated visual_learning.AnchorRelocationResult) string {
+	debugDir := filepath.Join(storage.ProjectRoot(appDataRoot(), "default"), "data", "visual_learning", "replay_debug")
+	name := fmt.Sprintf("%s-step-%02d.png", time.Now().Format("20060102-150405.000"), step.Index)
+	path := filepath.Join(debugDir, name)
+	overlayResult := relocationResultForWindowOverlay(relocated, capture)
+	if err := visual_learning.SaveAnchorRelocationDebugOverlay(path, capture.ImageData, capture.Width, capture.Height, overlayResult); err != nil {
+		log.Printf("visual relocation debug overlay failed: %v", err)
+		return ""
+	}
+	if err := saveReplayRelocationDebugInfo(debugInfoPathForImage(path), step, capture, relocated); err != nil {
+		log.Printf("visual relocation debug info failed: %v", err)
+	}
+	log.Printf("visual relocation debug overlay: %s", path)
+	return path
+}
+
+func relocationResultForWindowOverlay(result visual_learning.AnchorRelocationResult, capture visual_learning.WindowCapture) visual_learning.AnchorRelocationResult {
+	if capture.Width <= 0 || capture.Height <= 0 {
+		return result
+	}
+	if result.ExecutionPoint.X >= capture.WindowRect.X && result.ExecutionPoint.X < capture.WindowRect.X+capture.Width &&
+		result.ExecutionPoint.Y >= capture.WindowRect.Y && result.ExecutionPoint.Y < capture.WindowRect.Y+capture.Height {
+		result.ExecutionPoint = visual_learning.PixelPoint{
+			X: result.ExecutionPoint.X - capture.WindowRect.X,
+			Y: result.ExecutionPoint.Y - capture.WindowRect.Y,
+		}
+	}
+	return result
+}
+
+func debugInfoPathForImage(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	ext := filepath.Ext(path)
+	if ext == "" {
+		return path + ".json"
+	}
+	return strings.TrimSuffix(path, ext) + ".json"
+}
+
+func saveReplayRelocationDebugInfo(path string, step visual_learning.LearningReplayStep, capture visual_learning.WindowCapture, relocated visual_learning.AnchorRelocationResult) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	payload := map[string]interface{}{
+		"step_index":         step.Index,
+		"method":             relocated.Method,
+		"reason":             relocated.Reason,
+		"confidence":         relocated.Confidence,
+		"needs_confirmation": relocated.NeedsConfirmation,
+		"ok":                 relocated.OK,
+		"original_point":     relocated.OriginalPoint,
+		"execution_point":    relocated.ExecutionPoint,
+		"anchor_bbox":        relocated.AnchorBBox,
+		"candidate_count":    len(relocated.Candidates),
+		"candidates":         relocated.Candidates,
+		"capture": map[string]interface{}{
+			"width":          capture.Width,
+			"height":         capture.Height,
+			"window_rect":    capture.WindowRect,
+			"window_title":   capture.WindowTitle,
+			"window_process": capture.WindowProcess,
+			"suspicious":     isSuspiciousReplayCapture(capture),
+		},
+		"recorded": map[string]interface{}{
+			"x":              step.X,
+			"y":              step.Y,
+			"window_title":   step.WindowTitle,
+			"window_process": step.WindowProcess,
+			"window_handle":  step.WindowHandle,
+			"window_rect":    step.WindowRect,
+			"viewport":       step.Viewport,
+			"anchor":         step.WindowsAnchor,
+		},
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
+func canAutoConfirmBrowserReplay(step visual_learning.LearningReplayStep, relocated visual_learning.AnchorRelocationResult) bool {
+	if relocated.Confidence < 0.5 {
+		return false
+	}
+	processPath := strings.ReplaceAll(strings.TrimSpace(step.WindowProcess), "\\", "/")
+	process := strings.ToLower(filepath.Base(processPath))
+	switch process {
+	case "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe":
+	default:
+		return false
+	}
+	text := strings.ToLower(strings.Join([]string{
+		step.WindowTitle,
+		step.Label,
+		step.Role,
+		step.Tag,
+		step.Summary,
+		relocated.Reason,
+	}, " "))
+	for _, word := range []string{
+		"download", "downloads", "save as", "settings", "system settings", "chrome settings",
+		"delete", "remove", "submit", "pay", "payment", "purchase", "checkout", "transfer",
+		"下載", "另存", "設定", "系統設定", "刪除", "移除", "送出", "提交", "付款", "購買", "結帳", "轉帳",
+	} {
+		if strings.Contains(text, word) {
+			return false
+		}
+	}
+	return true
+}
+
 // --- OpenCV + YOLO 推論狀態 ---
 
 // GetOpenCVStatus 回傳 OpenCV pipeline 可用狀態。
@@ -4042,6 +5995,11 @@ func (a *App) GetYOLOStatus() bool {
 	return a.yoloDetector.IsAvailable()
 }
 
+// GetYOLODetailedStatus 回傳 YOLO detector 的詳細診斷狀態。
+func (a *App) GetYOLODetailedStatus() visual_learning.InferenceStatus {
+	return a.yoloDetector.Status()
+}
+
 // ProposeRegions 執行 OpenCV 區域提案（degraded 模式回傳空列表）。
 func (a *App) ProposeRegions(imageData []byte, width, height int) interface{} {
 	return frontendDTO(a.opencvPipeline.Propose(imageData, width, height))
@@ -4050,6 +6008,36 @@ func (a *App) ProposeRegions(imageData []byte, width, height int) interface{} {
 // DetectRegions 執行 YOLO 區域偵測（degraded 模式回傳空列表）。
 func (a *App) DetectRegions(imageData []byte, width, height int) visual_learning.DetectorResult {
 	return a.yoloDetector.Detect(imageData, width, height)
+}
+
+// ResolveWindowsClickAnchor creates a compact Windows visual anchor for one
+// recorded click. It runs YOLOX/OpenCV locally, chooses a bbox by Windows
+// learning-mode rules, and returns only the small crop/structure needed for
+// later CLI candidate matching. OCR is deliberately optional and not invoked
+// here, so replay does not depend on text recognition.
+func (a *App) ResolveWindowsClickAnchor(imageData []byte, width, height, clickX, clickY int, optionsJSON string) (visual_learning.WindowsClickAnchorResult, error) {
+	var opts visual_learning.WindowsClickAnchorOptions
+	if strings.TrimSpace(optionsJSON) != "" {
+		if err := json.Unmarshal([]byte(optionsJSON), &opts); err != nil {
+			return visual_learning.WindowsClickAnchorResult{}, fmt.Errorf("windows click anchor: invalid options JSON: %w", err)
+		}
+	}
+	detection := a.yoloDetector.Detect(imageData, width, height)
+	shape := a.opencvPipeline.Propose(imageData, width, height)
+	return visual_learning.ResolveWindowsClickAnchor(imageData, width, height, clickX, clickY, detection, shape, opts)
+}
+
+// GetNativeOCRStatus reports the platform OCR capability used only as an
+// optional visual-anchor hint. macOS uses Apple Vision; Windows is disabled
+// until a package-identity/MSIX path is introduced for Windows.Media.Ocr.
+func (a *App) GetNativeOCRStatus() visual_learning.OCRStatus {
+	return visual_learning.NewNativeOCRProvider().Status()
+}
+
+// RecognizeNativeOCR runs platform-native OCR on a small cropped UI image.
+// The returned text must not be used as the sole authority for click replay.
+func (a *App) RecognizeNativeOCR(imageData []byte) ([]visual_learning.OCRResult, error) {
+	return visual_learning.NewNativeOCRProvider().Recognize(imageData)
 }
 
 // --- Canonical Label 標籤對映 ---

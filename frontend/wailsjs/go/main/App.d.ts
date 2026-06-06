@@ -4,8 +4,8 @@ import {statusrail} from '../models';
 import {tools} from '../models';
 import {main} from '../models';
 import {dag} from '../models';
-import {llm_context} from '../models';
 import {skill_step} from '../models';
+import {llm_context} from '../models';
 import {source_trust} from '../models';
 import {voice} from '../models';
 import {onboarding} from '../models';
@@ -19,10 +19,10 @@ import {remote_bridge} from '../models';
 import {subexport} from '../models';
 import {health} from '../models';
 import {persona_avatar} from '../models';
+import {settings} from '../models';
 import {memory} from '../models';
 import {debugtrace} from '../models';
 import {browser_pref} from '../models';
-import {settings} from '../models';
 import {taborder} from '../models';
 
 export function AcknowledgePendingItem(arg1:string,arg2:string):Promise<void>;
@@ -63,9 +63,13 @@ export function ApproveTaskStep(arg1:string):Promise<dag.DAGRun>;
 
 export function AutoDetectCLI():Promise<any>;
 
+export function BuildAndSaveSkillDraft(arg1:string,arg2:string,arg3:Array<string>,arg4:Array<string>,arg5:skill_step.ExpectedChain):Promise<main.SkillDraftSaveResult>;
+
 export function BuildLLMContext(arg1:string,arg2:string,arg3:boolean):Promise<llm_context.ContextPayload>;
 
 export function BuildSkillContext(arg1:string,arg2:string):Promise<skill_step.Injection>;
+
+export function BuildSkillDraft(arg1:string,arg2:string,arg3:Array<string>,arg4:Array<string>,arg5:skill_step.ExpectedChain):Promise<skill_step.SkillManifest|Array<string>>;
 
 export function CancelActiveTaskProgress(arg1:string):Promise<dag.DAGRun>;
 
@@ -79,6 +83,8 @@ export function ClassifySource(arg1:string,arg2:string,arg3:Array<string>):Promi
 
 export function CleanOrphanQuarantine(arg1:string):Promise<void>;
 
+export function CleanupEphemeralProfiles():Promise<void>;
+
 export function ClearInspectorHistory():Promise<void>;
 
 export function ClearMainTalk():Promise<void>;
@@ -87,11 +93,15 @@ export function ClearSkillContext(arg1:string,arg2:string):Promise<void>;
 
 export function ClearVoiceDebug():Promise<voice.State>;
 
+export function ClearWebSearchConfig():Promise<any>;
+
 export function CommitPreview():Promise<any>;
 
 export function CompleteOnboardingStep(arg1:string):Promise<onboarding.State>;
 
 export function ComputeDryRunConfidence(arg1:number,arg2:number,arg3:number):Promise<number>;
+
+export function ConfirmAndExecuteSkillExecution(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string):Promise<main.SkillExecutionDecision>;
 
 export function ConfirmClose(arg1:boolean,arg2:string):Promise<void>;
 
@@ -102,6 +112,8 @@ export function ConfirmPackageInstall(arg1:string):Promise<void>;
 export function ConfirmRegisterLLMAPIAdapter(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<any>;
 
 export function ConfirmSkillArchive(arg1:string):Promise<any>;
+
+export function ConfirmSkillExecution(arg1:string,arg2:string,arg3:string):Promise<main.SkillExecutionDecision>;
 
 export function ConfirmTelegramChatID(arg1:string,arg2:string):Promise<void>;
 
@@ -125,6 +137,8 @@ export function DeleteStaticAvatar(arg1:string):Promise<void>;
 
 export function DetectModelPollution(arg1:string):Promise<w3a_media.PollutionReport>;
 
+export function DetectOllamaState():Promise<main.OllamaState>;
+
 export function DetectRegions(arg1:Array<number>,arg2:number,arg3:number):Promise<visual_learning.DetectorResult>;
 
 export function DetectRemoteBridgeChannel(arg1:string):Promise<remote_bridge.DetectResult>;
@@ -132,6 +146,8 @@ export function DetectRemoteBridgeChannel(arg1:string):Promise<remote_bridge.Det
 export function DisableContextualRiskOverride(arg1:string):Promise<void>;
 
 export function DisableCredentialMigration():Promise<credential.MigrationStatus>;
+
+export function DismissEmbeddingPicker():Promise<void>;
 
 export function DismissFloatingCandidates():Promise<void>;
 
@@ -155,6 +171,12 @@ export function EnterDegradedMode(arg1:string):Promise<any>;
 
 export function EscapeExternalTokens(arg1:string):Promise<string>;
 
+export function ExecuteNativeLearningReplayStep(arg1:string):Promise<any>;
+
+export function ExecuteResolvedSkill(arg1:string,arg2:string):Promise<main.SkillExecutionDecision>;
+
+export function ExecuteSkillMessage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<main.SkillExecutionDecision>;
+
 export function ExitDegradedMode():Promise<any>;
 
 export function ExportDocumentToPath(arg1:string):Promise<string>;
@@ -167,6 +189,8 @@ export function ExportSubHandler(arg1:string,arg2:string,arg3:string,arg4:string
 
 export function ExportVisualLearning(arg1:string):Promise<any>;
 
+export function FetchURLContent(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean):Promise<any>;
+
 export function FinalizeNativePersonaExport(arg1:string,arg2:string,arg3:string,arg4:string):Promise<any>;
 
 export function FinalizeNativeReferenceFileExport(arg1:string,arg2:string,arg3:string):Promise<void>;
@@ -175,7 +199,11 @@ export function FinalizeNativeSubExport(arg1:string,arg2:string,arg3:string,arg4
 
 export function FinishOnboarding():Promise<void>;
 
+export function GenerateLearningRunMetadata(arg1:string,arg2:string,arg3:string,arg4:string):Promise<any>;
+
 export function GetActiveLearningRun():Promise<any>;
+
+export function GetAdapterModelChoices():Promise<Record<string, string>>;
 
 export function GetAdapterStatus(arg1:string):Promise<any>;
 
@@ -203,11 +231,17 @@ export function GetDegradedState():Promise<any>;
 
 export function GetDeviceTrustProfile(arg1:string):Promise<any>;
 
+export function GetEmbeddingConfig():Promise<settings.EmbeddingConfig>;
+
 export function GetHighImpactDomains():Promise<Array<string>>;
 
 export function GetHookSummary(arg1:string):Promise<any>;
 
 export function GetJobExecutionHistory(arg1:string,arg2:number):Promise<Array<scheduler.JobExecution>>;
+
+export function GetLastLearningReplayPlan():Promise<any>;
+
+export function GetLearningReplayPlan(arg1:string):Promise<any>;
 
 export function GetMediaW3AInfo(arg1:string):Promise<any>;
 
@@ -216,6 +250,8 @@ export function GetMemoryHealth():Promise<health.MemoryHealth>;
 export function GetMemoryPipelineState():Promise<memory.PipelineState>;
 
 export function GetMonitorLinks():Promise<debugtrace.LinkSnapshot>;
+
+export function GetNativeOCRStatus():Promise<visual_learning.OCRStatus>;
 
 export function GetNewSubagentCandidates():Promise<any>;
 
@@ -253,6 +289,8 @@ export function GetSidecarState():Promise<string>;
 
 export function GetStopRecoveryCard(arg1:string):Promise<stop_recovery.StopRecoveryCard>;
 
+export function GetSubExportCapabilities():Promise<main.SubExportCapabilities>;
+
 export function GetSubExportDesktopDirectory():Promise<string>;
 
 export function GetSubExportFallbackDirectory():Promise<string>;
@@ -269,9 +307,15 @@ export function GetToolVisibility():Promise<any>;
 
 export function GetUISettings():Promise<any>;
 
+export function GetURLProvenance(arg1:string):Promise<any>;
+
 export function GetVoiceSettings():Promise<voice.State>;
 
 export function GetW3ATransferGuidance():Promise<w3a_media.TransferGuidance>;
+
+export function GetWebSearchConfig():Promise<any>;
+
+export function GetYOLODetailedStatus():Promise<visual_learning.InferenceStatus>;
 
 export function GetYOLOStatus():Promise<boolean>;
 
@@ -307,6 +351,8 @@ export function IsLivePreviewActive():Promise<boolean>;
 
 export function IsReadOnlyMode():Promise<boolean>;
 
+export function ListAdapterModelOptions(arg1:string):Promise<Array<string>>;
+
 export function ListArchivedSkills():Promise<any>;
 
 export function ListAvailableAdapters():Promise<any>;
@@ -323,7 +369,11 @@ export function ListExternalLinksByType(arg1:string):Promise<any>;
 
 export function ListFormalActions():Promise<any>;
 
+export function ListInstalledEmbedModels():Promise<Array<main.EmbedModelInfo>>;
+
 export function ListLLMProviderWhitelist():Promise<any>;
+
+export function ListLearningReplayCatalog(arg1:number):Promise<any>;
 
 export function ListOpenLightweightCards():Promise<Array<review.LightweightCard>>;
 
@@ -381,6 +431,8 @@ export function NextGreeting(arg1:string):Promise<string>;
 
 export function NotifyStatusRail(arg1:string,arg2:string,arg3:string,arg4:string):Promise<statusrail.View>;
 
+export function OpenExternalURL(arg1:string):Promise<void>;
+
 export function PauseScheduledJob(arg1:string):Promise<void>;
 
 export function PollStatusRail():Promise<statusrail.View>;
@@ -401,11 +453,17 @@ export function PromoteDraftToPending(arg1:string,arg2:string):Promise<string>;
 
 export function ProposeRegions(arg1:Array<number>,arg2:number,arg3:number):Promise<any>;
 
+export function PullEmbedModel(arg1:string):Promise<main.EmbedPullJob>;
+
 export function PurgeBoundaryDir(arg1:string):Promise<void>;
 
 export function PurgeProject(arg1:string,arg2:string):Promise<any>;
 
 export function ReadDocumentContent(arg1:string):Promise<string>;
+
+export function RecognizeNativeOCR(arg1:Array<number>):Promise<Array<visual_learning.OCRResult>>;
+
+export function RecordLearningMouseEvent(arg1:string):Promise<void>;
 
 export function RecordMainInteraction(arg1:string,arg2:string):Promise<statusrail.View>;
 
@@ -424,6 +482,8 @@ export function RegisterRemoteBridgeChannel(arg1:string):Promise<any>;
 export function RegisterRemoteBridgeChannelWithMode(arg1:string,arg2:string,arg3:string,arg4:string):Promise<any>;
 
 export function RegisterSchedulerCallback(arg1:string):Promise<void>;
+
+export function RegisterURLOccurrence(arg1:string,arg2:string,arg3:string,arg4:string):Promise<any>;
 
 export function RejectPackageInstall(arg1:string,arg2:string):Promise<void>;
 
@@ -469,6 +529,8 @@ export function ResolveStopRecoveryCard(arg1:string,arg2:string):Promise<void>;
 
 export function ResolveVLReviewCard(arg1:string):Promise<void>;
 
+export function ResolveWindowsClickAnchor(arg1:Array<number>,arg2:number,arg3:number,arg4:number,arg5:number,arg6:string):Promise<visual_learning.WindowsClickAnchorResult>;
+
 export function RestartSidecar():Promise<void>;
 
 export function RestoreUIDefaults():Promise<any>;
@@ -501,6 +563,8 @@ export function SaveSummaryModelSettings(arg1:settings.SummaryModelSettings):Pro
 
 export function SaveVoiceSettings(arg1:voice.Settings):Promise<voice.State>;
 
+export function SaveWebSearchConfig(arg1:string,arg2:string,arg3:string):Promise<any>;
+
 export function ScanLocalModels():Promise<any>;
 
 export function ScanLocalSummaryModels():Promise<main.SummaryModelScanResult>;
@@ -508,6 +572,10 @@ export function ScanLocalSummaryModels():Promise<main.SummaryModelScanResult>;
 export function ScanOrphanQuarantine():Promise<any>;
 
 export function ScanSkillFolder(arg1:string):Promise<any>;
+
+export function SearchLearningOperations(arg1:string,arg2:number):Promise<any>;
+
+export function SearchWeb(arg1:string,arg2:number):Promise<any>;
 
 export function SelectFloatingCandidate(arg1:string):Promise<main.ReadinessGateState>;
 
@@ -519,15 +587,23 @@ export function SendAPIMessage(arg1:string,arg2:string,arg3:string,arg4:string):
 
 export function SendCLIMessage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<skill_step.CLIResponse>;
 
+export function SendInspectorAPIMessage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<skill_step.CLIResponse>;
+
 export function SendInspectorMessage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<skill_step.CLIResponse>;
 
+export function SendTopInteractionMessage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<skill_step.CLIResponse>;
+
 export function SetActiveConversationAgent(arg1:string):Promise<void>;
+
+export function SetAdapterModelChoice(arg1:string,arg2:string):Promise<void>;
 
 export function SetAdapterStatus(arg1:string,arg2:string):Promise<void>;
 
 export function SetAvatarProvider(arg1:string,arg2:string):Promise<void>;
 
 export function SetBrowserPreference(arg1:string,arg2:string):Promise<browser_pref.RuntimeNoticeResult>;
+
+export function SetEmbeddingConfig(arg1:string,arg2:string):Promise<void>;
 
 export function SetPersonaPixelAvatarPack(arg1:string,arg2:string):Promise<void>;
 
@@ -551,11 +627,15 @@ export function StartTaskProgress(arg1:string,arg2:string,arg3:string,arg4:strin
 
 export function StartTelegramOnboarding(arg1:string):Promise<any>;
 
+export function StartURLVisualLearning(arg1:string,arg2:string,arg3:string):Promise<any>;
+
 export function StopDraftSandbox(arg1:string,arg2:string):Promise<void>;
 
 export function StopLearningMode():Promise<any>;
 
 export function StopSidecar():Promise<void>;
+
+export function StopURLVisualLearning():Promise<any>;
 
 export function StoreAvatarCredential(arg1:string,arg2:string):Promise<void>;
 
@@ -569,8 +649,12 @@ export function UnregisterAdapter(arg1:string):Promise<void>;
 
 export function UpdateDAGNodeStatus(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function UpdateLearningRunMetadata(arg1:string):Promise<any>;
+
 export function ValidateMemoryItem(arg1:string):Promise<memory.ValidationResult>;
 
 export function VerifyMediaFile(arg1:string):Promise<any>;
 
 export function WakeLocalAdapter(arg1:string):Promise<any>;
+
+export function WakeOllamaDaemon():Promise<void>;

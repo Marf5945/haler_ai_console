@@ -88,15 +88,15 @@ var destructiveKeywords = []string{
 // HighNonDestructiveConditions 描述一個操作在判定為 high_non_destructive 時
 // 必須全部滿足的九項條件。呼叫端負責填入實際狀態。
 type HighNonDestructiveConditions struct {
-	NoDelete                        bool // 不涉及刪除
-	NoOverwriteWithoutLocalUndo     bool // 不涉及無法本地復原的覆寫
-	NoExternalShare                 bool // 不涉及外部分享
-	NoPermissionChange              bool // 不涉及權限變更
-	NoAuthChange                    bool // 不涉及認證變更
-	NoPayment                       bool // 不涉及付款
-	NoAccountChange                 bool // 不涉及帳號變更
-	ReversibleWithLocalUndo         bool // 可以透過本地操作復原
-	TargetSetFullyKnownBeforeExec   bool // 目標集合在執行前完全已知
+	NoDelete                      bool // 不涉及刪除
+	NoOverwriteWithoutLocalUndo   bool // 不涉及無法本地復原的覆寫
+	NoExternalShare               bool // 不涉及外部分享
+	NoPermissionChange            bool // 不涉及權限變更
+	NoAuthChange                  bool // 不涉及認證變更
+	NoPayment                     bool // 不涉及付款
+	NoAccountChange               bool // 不涉及帳號變更
+	ReversibleWithLocalUndo       bool // 可以透過本地操作復原
+	TargetSetFullyKnownBeforeExec bool // 目標集合在執行前完全已知
 }
 
 // AllSatisfied 判斷九項條件是否全部滿足。

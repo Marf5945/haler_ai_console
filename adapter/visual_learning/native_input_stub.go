@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 package visual_learning
 
@@ -13,7 +13,7 @@ func NewNativeInput() *NativeInput {
 }
 
 func (n *NativeInput) Start(onClick func(NativeClickEvent)) error {
-	return nil
+	return fmt.Errorf("native input recorder is not implemented on this platform")
 }
 
 func (n *NativeInput) Stop() error {

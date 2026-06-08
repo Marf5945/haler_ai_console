@@ -1,6 +1,6 @@
 // ============================================================
 // i18n 核心模組 — 基於 Zustand，零額外依賴
-// 支援語系：zh-TW（預設）、en、ja（尚未建立時自動 fallback）
+// 支援語系：zh-TW（預設）、en、ja、pt-PT、es、th（尚未建立時自動 fallback）
 // ============================================================
 
 import { create } from 'zustand';
@@ -10,9 +10,10 @@ import { create } from 'zustand';
 // ----------------------------------------------------------
 import zhTW from './zh-TW.json';
 import en from './en.json';
-
-// ja.json 佔位：檔案建立後改為 import ja from './ja.json'
-const ja = {};
+import ja from './ja.json';
+import ptPT from './pt-PT.json';
+import es from './es.json';
+import th from './th.json';
 
 // ----------------------------------------------------------
 // 語系對照表
@@ -21,6 +22,9 @@ const TRANSLATION_MAP = {
   'zh-TW': zhTW,
   en,
   ja,
+  'pt-PT': ptPT,
+  es,
+  th,
 };
 
 // ----------------------------------------------------------

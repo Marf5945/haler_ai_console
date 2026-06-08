@@ -33,10 +33,10 @@ const (
 
 // BrowserPreference stores the user's browser selection and profile path.
 type BrowserPreference struct {
-	Browser         BrowserKind `json:"browser"`
-	ProfilePath     string      `json:"profile_path"`      // empty = auto-detect
-	SafariNoticeSeen bool       `json:"safari_notice_seen"` // one-time notice flag
-	UpdatedAt       time.Time  `json:"updated_at"`
+	Browser          BrowserKind `json:"browser"`
+	ProfilePath      string      `json:"profile_path"`       // empty = auto-detect
+	SafariNoticeSeen bool        `json:"safari_notice_seen"` // one-time notice flag
+	UpdatedAt        time.Time   `json:"updated_at"`
 }
 
 // RuntimeNoticeResult communicates whether a Safari runtime notice is needed.

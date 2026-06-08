@@ -26,9 +26,9 @@ import (
 )
 
 const (
-	defaultOllamaEndpoint        = "http://localhost:11434"
-	ollamaEmbedHTTPTimeout       = 30 * time.Second
-	ollamaEmbedMaxResponseBytes  = 4 * 1024 * 1024 // 4 MiB
+	defaultOllamaEndpoint       = "http://localhost:11434"
+	ollamaEmbedHTTPTimeout      = 30 * time.Second
+	ollamaEmbedMaxResponseBytes = 4 * 1024 * 1024 // 4 MiB
 )
 
 // ErrOllamaUnavailable 表示 Ollama server 連不上 / 模型沒裝 / 5xx。
@@ -42,8 +42,9 @@ var ErrOllamaBadResponse = errors.New("ollama: invalid embedding response")
 // OllamaEmbedVectorizer 用 Ollama HTTP API 產生 dense 向量。
 //
 // 使用方式：
-//   v := NewOllamaEmbedVectorizer("", "nomic-embed-text")
-//   vec, err := v.Vectorize("hello")
+//
+//	v := NewOllamaEmbedVectorizer("", "nomic-embed-text")
+//	vec, err := v.Vectorize("hello")
 type OllamaEmbedVectorizer struct {
 	Endpoint string // 例 "http://localhost:11434"；空字串自動填預設
 	ModelID  string // 例 "nomic-embed-text"；不可空
@@ -63,7 +64,7 @@ func NewOllamaEmbedVectorizer(endpoint, modelID string) *OllamaEmbedVectorizer {
 		Endpoint: endpoint,
 		ModelID:  modelID,
 		// SEC-05 2a: 本機 embedding 走 PolicyLocalLLM。
-		client:   urlsafe.NewSafeClient(urlsafe.PolicyLocalLLM, "ollama_embed", ollamaEmbedHTTPTimeout),
+		client: urlsafe.NewSafeClient(urlsafe.PolicyLocalLLM, "ollama_embed", ollamaEmbedHTTPTimeout),
 	}
 }
 

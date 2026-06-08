@@ -55,12 +55,12 @@ var packageLayer = map[string]Layer{
 	"domain/execution_hook":   LayerDomain,
 
 	// Orchestration layer — coordination & scheduling
-	"orchestration/skill_step":        LayerOrchestration,
-	"orchestration/cli_manager":       LayerOrchestration,
-	"orchestration/dag":               LayerOrchestration,
-	"orchestration/step_outline":      LayerOrchestration,
-	"orchestration/stop_recovery":     LayerOrchestration,
-	"orchestration/delegation":        LayerOrchestration,
+	"orchestration/skill_step":         LayerOrchestration,
+	"orchestration/cli_manager":        LayerOrchestration,
+	"orchestration/dag":                LayerOrchestration,
+	"orchestration/step_outline":       LayerOrchestration,
+	"orchestration/stop_recovery":      LayerOrchestration,
+	"orchestration/delegation":         LayerOrchestration,
 	"orchestration/spec_patch_checker": LayerOrchestration,
 
 	// Data layer — persistence & messaging infrastructure
@@ -90,6 +90,7 @@ var packageLayer = map[string]Layer{
 	"shared/health":         LayerFuzzy,
 	"shared/taborder":       LayerFuzzy,
 	"shared/onboarding":     LayerFuzzy,
+	"shared/hookgene":       LayerFuzzy,
 }
 
 // ---------------------------------------------------------------------------
@@ -153,8 +154,8 @@ var whitelist = map[string]map[string]string{
 		modulePath + "/orchestration/skill_step": "orchestration internal dependency (same layer)",
 	},
 	"orchestration/spec_patch_checker": {
-		modulePath + "/domain/source_trust":     "orchestration depends on domain (legal: 3→2)",
-		modulePath + "/adapter/persona_avatar":  "orchestration depends on adapter (legal: 3→5) — checker needs avatar validation",
+		modulePath + "/domain/source_trust":    "orchestration depends on domain (legal: 3→2)",
+		modulePath + "/adapter/persona_avatar": "orchestration depends on adapter (legal: 3→5) — checker needs avatar validation",
 	},
 }
 
@@ -363,7 +364,7 @@ func TestFuzzyLayerAudit(t *testing.T) {
 	fuzzyPackages := []string{
 		"shared/eventbus", "shared/settings", "shared/preference", "shared/browser_pref",
 		"shared/statusrail", "shared/tools", "shared/package_import", "shared/health",
-		"shared/taborder", "shared/onboarding",
+		"shared/taborder", "shared/onboarding", "shared/hookgene",
 	}
 
 	t.Log("=== FUZZY LAYER AUDIT (whitelist-managed) ===")
@@ -454,6 +455,9 @@ func scanLocalImports(t *testing.T, root string) map[string][]string {
 		if err != nil {
 			return
 		}
+		if len(pkgs) == 0 {
+			return
+		}
 
 		var imports []string
 		seen := make(map[string]bool)
@@ -473,9 +477,7 @@ func scanLocalImports(t *testing.T, root string) map[string][]string {
 			}
 		}
 
-		if len(imports) > 0 {
-			result[relPath] = imports
-		}
+		result[relPath] = imports
 	}
 
 	// Scan layer directories (domain/risk, orchestration/dag, etc.)

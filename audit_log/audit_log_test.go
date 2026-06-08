@@ -405,7 +405,7 @@ func TestSplitLines(t *testing.T) {
 		{"line1\n", 1},
 		{"line1\nline2\n", 2},
 		{"line1\nline2", 2}, // no trailing newline
-		{"\n\nline\n", 3},  // empty lines counted
+		{"\n\nline\n", 3},   // empty lines counted
 	}
 	for _, tc := range tests {
 		lines := SplitLines([]byte(tc.input))

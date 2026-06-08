@@ -5,10 +5,10 @@ import (
 
 	"ui_console/adapter/adapter_registry"
 	"ui_console/domain/degraded"
+	"ui_console/domain/review"
 	"ui_console/shared/eventbus"
 	"ui_console/shared/health"
 	"ui_console/shared/onboarding"
-	"ui_console/domain/review"
 )
 
 // =============================================================================

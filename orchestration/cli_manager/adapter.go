@@ -73,6 +73,7 @@ type SidecarCLIAdapter struct {
 	summaryCooldownChars int  // cooldown 結束時的字數門檻
 	summaryTriggered     bool // 是否已觸發過（避免重複）
 	summaryDismissedAt   int  // 使用者點「稍後」時的字數
+	summaryContinuityKey string
 
 	// modelProvider：由 app 注入；給定 adapter_id 回傳使用者選的 model。
 	// 為 nil 或回傳空字串時走 CLI 自己的預設。
@@ -125,8 +126,12 @@ func (a *SidecarCLIAdapter) SetControlSealSettings(settings controlseal.Settings
 
 // AddSummary 加入一段摘要
 func (a *SidecarCLIAdapter) AddSummary(s conversation.Summary) {
+	a.addSummaryToContinuity("default", s)
+}
+
+func (a *SidecarCLIAdapter) addSummaryToContinuity(key string, s conversation.Summary) {
 	a.summaries = append(a.summaries, s)
-	a.getContinuity("default").summaries = append(a.getContinuity("default").summaries, s)
+	a.getContinuity(key).summaries = append(a.getContinuity(key).summaries, s)
 }
 
 // GetSentenceStore 取得句子管理器（供外部存取）
@@ -141,7 +146,7 @@ func (a *SidecarCLIAdapter) GetCharCounter() *conversation.CharCounter {
 
 // NeedsSummarization 檢查是否需要觸發摘要整理
 func (a *SidecarCLIAdapter) NeedsSummarization() bool {
-	return a.counter.NeedsSummarization()
+	return a.getContinuity("default").counter.NeedsSummarization()
 }
 
 // SetEventBus 注入 eventbus（供摘要觸發事件使用）。
@@ -151,18 +156,22 @@ func (a *SidecarCLIAdapter) SetEventBus(bus *eventbus.Bus) {
 
 // DismissSummarization 使用者點「稍後」— 啟動 5000 字 cooldown。
 func (a *SidecarCLIAdapter) DismissSummarization() {
-	a.summaryDismissedAt = a.counter.Count()
+	a.summaryDismissedAt = a.getContinuity("default").counter.Count()
 	a.summaryCooldownChars = a.summaryDismissedAt + 5000
 	a.summaryTriggered = false
 }
 
 // checkAndEmitSummarizationNeeded 檢查摘要觸發條件，emit 事件。
 // 規則：≥10000 字 + 尚未觸發 + 不在 cooldown 中。
-func (a *SidecarCLIAdapter) checkAndEmitSummarizationNeeded() {
+func (a *SidecarCLIAdapter) checkAndEmitSummarizationNeeded(continuityKey string, state *continuityState) {
 	if a.eventBus == nil {
 		return
 	}
-	count := a.counter.Count()
+	if state == nil || state.counter == nil {
+		return
+	}
+	// 對話字數累積在 session continuity；不能看全域 default counter。
+	count := state.counter.Count()
 
 	// 門檻未達
 	if count < conversation.SummarizationThreshold {
@@ -181,10 +190,120 @@ func (a *SidecarCLIAdapter) checkAndEmitSummarizationNeeded() {
 
 	// 觸發
 	a.summaryTriggered = true
+	if strings.TrimSpace(continuityKey) == "" {
+		continuityKey = "default"
+	}
+	a.summaryContinuityKey = continuityKey
 	a.eventBus.Emit("summarization:needed", map[string]interface{}{
-		"total_chars": count,
-		"threshold":   conversation.SummarizationThreshold,
+		"total_chars":    count,
+		"threshold":      conversation.SummarizationThreshold,
+		"continuity_key": continuityKey,
 	})
+}
+
+// callModelOnce 送一次 prompt 給模型，不走對話歷史合成、不做 action-chain 重試。
+// 專供內部用途（摘要）使用，不污染 SentenceStore / 連續性。
+func (a *SidecarCLIAdapter) callModelOnce(adapterID, cliPath, model, systemPrompt, userText, traceID string) (string, error) {
+	if a.manager.State() != StateRunning {
+		return "", fmt.Errorf("cli_manager: sidecar not running")
+	}
+	workspaceDir, err := a.ensureWorkspaceDir(adapterID, "summarize")
+	if err != nil {
+		return "", err
+	}
+	chosenModel := strings.TrimSpace(model)
+	if chosenModel == "" && a.modelProvider != nil {
+		chosenModel = strings.TrimSpace(a.modelProvider(adapterID))
+	}
+	prompt := userText
+	if strings.TrimSpace(systemPrompt) != "" {
+		prompt = systemPrompt + "\n\n" + userText
+	}
+	params := sendMessageParams{
+		AdapterID:    adapterID,
+		CLIPath:      cliPath,
+		WorkspaceDir: workspaceDir,
+		SessionID:    "summarize",
+		UserText:     prompt,
+		Model:        chosenModel,
+		TraceID:      traceID,
+	}
+	resp, err := a.manager.Call("sendMessage", params, rpcTimeout)
+	if err != nil {
+		return "", err
+	}
+	if resp.Error != "" {
+		return "", fmt.Errorf("cli rpc error: %s", resp.Error)
+	}
+	var result struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return strings.TrimSpace(string(resp.Result)), nil
+	}
+	return strings.TrimSpace(result.Text), nil
+}
+
+// summarizeLLM 實作 conversation.SummarizationLLM：透過 callModelOnce 呼叫模型壓縮對話。
+type summarizeLLM struct {
+	adapter   *SidecarCLIAdapter
+	adapterID string
+	cliPath   string
+	model     string
+}
+
+func (l summarizeLLM) Summarize(content string, maxOutputChars int) (string, error) {
+	sys := "你是對話摘要器。只輸出摘要文字，不要任何前綴、解釋或動作格式。"
+	prompt := fmt.Sprintf("請把以下對話壓縮成不超過 %d 字的重點摘要：\n\n%s", maxOutputChars, content)
+	traceID := fmt.Sprintf("summarize-%d", time.Now().UnixNano())
+	return l.adapter.callModelOnce(l.adapterID, l.cliPath, l.model, sys, prompt, traceID)
+}
+
+// RunSummarizationNow 立即執行一次摘要（針對 default 連續性——即觸發門檻所看的那桶）：
+// 取未摘要句子 → 模型壓縮 → AddSummary（之後這些句子會被當已摘要過濾）→ 扣字數 → 解除已觸發旗標。
+// 摘要失敗回 error，呼叫端據此「不靜默送舊 context」（Rule 11）。寫 summaries.md 由 App 層執行。
+func (a *SidecarCLIAdapter) RunSummarizationNow(adapterID, cliPath, model string) (conversation.Summary, error) {
+	continuityKey := a.summaryContinuityKey
+	if strings.TrimSpace(continuityKey) == "" {
+		continuityKey = "default"
+	}
+	state := a.getContinuity(continuityKey)
+	_, rawSentences := a.promptHistorySnapshot(state)
+	if len(rawSentences) == 0 {
+		return conversation.Summary{}, fmt.Errorf("沒有可摘要的句子")
+	}
+	var content strings.Builder
+	ids := make([]string, 0, len(rawSentences))
+	for _, sent := range rawSentences {
+		content.WriteString(fmt.Sprintf("[%s] %s: %s\n", sent.ID, sent.Role, sent.Content))
+		ids = append(ids, sent.ID)
+	}
+	origChars := len([]rune(content.String()))
+	target := origChars * 6 / 10 // 壓縮目標 ~60%
+	if target < 200 {
+		target = 200
+	}
+	llm := summarizeLLM{adapter: a, adapterID: adapterID, cliPath: cliPath, model: model}
+	summaryText, err := llm.Summarize(content.String(), target)
+	if err != nil {
+		return conversation.Summary{}, fmt.Errorf("摘要失敗: %w", err)
+	}
+	summaryText = strings.TrimSpace(summaryText)
+	if summaryText == "" {
+		return conversation.Summary{}, fmt.Errorf("摘要結果為空")
+	}
+	now := time.Now()
+	sum := conversation.Summary{
+		Tag:         fmt.Sprintf("S-%d", now.Unix()%100000),
+		Content:     summaryText,
+		SentenceIDs: ids,
+		Timestamp:   now,
+		Valid:       true,
+	}
+	a.addSummaryToContinuity(continuityKey, sum)
+	state.counter.Subtract(origChars)
+	a.summaryTriggered = false
+	return sum, nil
 }
 
 func (a *SidecarCLIAdapter) getContinuity(key string) *continuityState {
@@ -433,7 +552,7 @@ func (a *SidecarCLIAdapter) SendMessage(opts skill_step.CLIMessageOptions) (skil
 				state.sentences.AddInput(opts.UserText)
 				state.sentences.AddOutput(result.Text)
 				state.counter.Add(len([]rune(opts.UserText)) + len([]rune(result.Text)))
-				a.checkAndEmitSummarizationNeeded()
+				a.checkAndEmitSummarizationNeeded(continuityKey, state)
 			}
 			return skill_step.CLIResponse{Text: result.Text}, nil
 		}
@@ -495,7 +614,7 @@ func (a *SidecarCLIAdapter) SendMessage(opts skill_step.CLIMessageOptions) (skil
 	state.counter.Add(len([]rune(displayText)))
 
 	// §29.3: 檢查摘要觸發條件
-	a.checkAndEmitSummarizationNeeded()
+	a.checkAndEmitSummarizationNeeded(continuityKey, state)
 
 	// ── v4.0: 意圖分類（事後標記）──
 	if len(a.actionTags) > 0 {

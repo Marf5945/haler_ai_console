@@ -20,21 +20,21 @@ const (
 	RotationThresholdBytes = 500 * 1024
 
 	// 核心檔案名
-	FileTalkFull       = "talk_full.md"
-	FileTalkIndex      = "talk_index.json"
-	FileMainMemory     = "main_memory.md"
-	FileDeepMemory     = "deep_memory.md"
-	FileDeepThreat     = "deep_memory_THREAT.md"
-	FileManifest       = "memory_manifest.json"
+	FileTalkFull   = "talk_full.md"
+	FileTalkIndex  = "talk_index.json"
+	FileMainMemory = "main_memory.md"
+	FileDeepMemory = "deep_memory.md"
+	FileDeepThreat = "deep_memory_THREAT.md"
+	FileManifest   = "memory_manifest.json"
 )
 
 // RotationAction 輪轉動作建議。
 type RotationAction string
 
 const (
-	RotationNone     RotationAction = "none"      // 無需輪轉
-	RotationWarning  RotationAction = "warning"   // 接近閾值（80%）
-	RotationRequired RotationAction = "required"  // 已達閾值，需立即輪轉
+	RotationNone     RotationAction = "none"     // 無需輪轉
+	RotationWarning  RotationAction = "warning"  // 接近閾值（80%）
+	RotationRequired RotationAction = "required" // 已達閾值，需立即輪轉
 )
 
 // ──────────────────────────────────────────────
@@ -49,13 +49,13 @@ type Pipeline struct {
 
 // PipelineState 記憶管線的即時狀態。
 type PipelineState struct {
-	TalkFullSize     int64          `json:"talk_full_size"`
-	RotationAction   RotationAction `json:"rotation_action"`
-	MainMemorySize   int64          `json:"main_memory_size"`
-	DeepMemorySize   int64          `json:"deep_memory_size"`
-	ThreatEntries    int            `json:"threat_entries"`
-	ManifestHash     string         `json:"manifest_hash"`
-	LastRotation     string         `json:"last_rotation"`
+	TalkFullSize   int64          `json:"talk_full_size"`
+	RotationAction RotationAction `json:"rotation_action"`
+	MainMemorySize int64          `json:"main_memory_size"`
+	DeepMemorySize int64          `json:"deep_memory_size"`
+	ThreatEntries  int            `json:"threat_entries"`
+	ManifestHash   string         `json:"manifest_hash"`
+	LastRotation   string         `json:"last_rotation"`
 }
 
 // NewPipeline 建立記憶管線管理器。
@@ -173,6 +173,39 @@ func (p *Pipeline) AppendTalkEntry(role, text string) ([]RedactionRecord, error)
 	p.updateManifestAfterWrite(entry)
 
 	return records, nil
+}
+
+// RewriteTalkFullForDelete 以授權的 delete_sentences 操作整檔重寫 talk_full.md。
+// 用於使用者刪除對話：走正常 pipeline（hash_before/after + memory_ops + manifest），
+// 因此完整性驗證視為「合法變更」而非繞過竄改；舊對話資料真正從檔案移除。
+// newContent 必須是已移除目標條目、其餘原樣保留的完整檔案內容。
+func (p *Pipeline) RewriteTalkFullForDelete(newContent string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	talkPath := filepath.Join(p.rootDir, FileTalkFull)
+
+	// Step 1: 寫入前 SHA-256
+	hashBefore, err := computeFileSHA256(talkPath)
+	if err != nil {
+		return fmt.Errorf("計算 talk_full hash_before 失敗: %w", err)
+	}
+	// Step 2: 整檔重寫（0600 — 本機隱私資料）
+	if err := os.WriteFile(talkPath, []byte(newContent), 0o600); err != nil {
+		return fmt.Errorf("重寫 talk_full 失敗: %w", err)
+	}
+	// Step 3: 寫入後 SHA-256
+	hashAfter, err := computeFileSHA256(talkPath)
+	if err != nil {
+		return fmt.Errorf("計算 talk_full hash_after 失敗: %w", err)
+	}
+	// Step 4: memory_ops 記一筆 delete_sentences（fail closed）
+	if err := appendMemoryOp(p.rootDir, "delete_sentences", hashBefore, hashAfter); err != nil {
+		return fmt.Errorf("memory_ops 寫入失敗 (fail closed): %w", err)
+	}
+	// Step 5: 推進 manifest hash chain（以 delete 標記 + 新 hash 當作 entry）
+	p.updateManifestAfterWrite("delete_sentences\n" + hashAfter)
+	return nil
 }
 
 // ──────────────────────────────────────────────

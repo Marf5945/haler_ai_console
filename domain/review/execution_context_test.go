@@ -40,12 +40,12 @@ func TestTargetHashSet_ContentChange(t *testing.T) {
 func TestResolve_CooldownEnforced(t *testing.T) {
 	svc := NewService()
 	card := svc.AddCard(CardParams{
-		RiskClass:   "security_boundary_rewrite",
-		Operation:   "test_op",
-		Target:      "test_target",
-		Reason:      "test",
-		AcceptLabel: "OK",
-		RejectLabel: "Cancel",
+		RiskClass:    "security_boundary_rewrite",
+		Operation:    "test_op",
+		Target:       "test_target",
+		Reason:       "test",
+		AcceptLabel:  "OK",
+		RejectLabel:  "Cancel",
 		AcceptEffect: "effect",
 		RejectEffect: "none",
 	})

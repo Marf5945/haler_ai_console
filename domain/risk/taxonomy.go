@@ -10,13 +10,13 @@ package risk
 type RiskClass string
 
 const (
-	Low                      RiskClass = "low"
-	Medium                   RiskClass = "medium"
-	HighNonDestructive       RiskClass = "high_non_destructive"
+	Low                       RiskClass = "low"
+	Medium                    RiskClass = "medium"
+	HighNonDestructive        RiskClass = "high_non_destructive"
 	UserOwnedAssetDestructive RiskClass = "user_owned_asset_destructive"
-	SubagentLifecycleRemoval RiskClass = "subagent_lifecycle_removal"
-	SecurityBoundaryRewrite  RiskClass = "security_boundary_rewrite"
-	CriticalRuntimeAction    RiskClass = "critical_runtime_action"
+	SubagentLifecycleRemoval  RiskClass = "subagent_lifecycle_removal"
+	SecurityBoundaryRewrite   RiskClass = "security_boundary_rewrite"
+	CriticalRuntimeAction     RiskClass = "critical_runtime_action"
 )
 
 // allClasses 用於排序比較，索引越大風險越高。
@@ -61,13 +61,13 @@ func Max(a, b RiskClass) RiskClass {
 type ConfirmationType string
 
 const (
-	ConfirmSilent            ConfirmationType = "silent"             // low：靜默或一般 UI
-	ConfirmNormal            ConfirmationType = "normal"             // medium：一般 UI 或群組 review
-	ConfirmReviewButton      ConfirmationType = "review_button"      // high_non_destructive：Review Card + 按鈕/長按
-	ConfirmConsequenceMenu   ConfirmationType = "consequence_menu"   // user_owned_asset_destructive：明確後果選單
-	ConfirmExportFirst       ConfirmationType = "export_first"       // subagent_lifecycle_removal：匯出優先
-	ConfirmDualStep          ConfirmationType = "dual_step"          // security_boundary_rewrite：雙步驟按鈕
-	ConfirmStopRecovery      ConfirmationType = "stop_recovery"      // critical_runtime_action：完全停下 + 彈窗
+	ConfirmSilent          ConfirmationType = "silent"           // low：靜默或一般 UI
+	ConfirmNormal          ConfirmationType = "normal"           // medium：一般 UI 或群組 review
+	ConfirmReviewButton    ConfirmationType = "review_button"    // high_non_destructive：Review Card + 按鈕/長按
+	ConfirmConsequenceMenu ConfirmationType = "consequence_menu" // user_owned_asset_destructive：明確後果選單
+	ConfirmExportFirst     ConfirmationType = "export_first"     // subagent_lifecycle_removal：匯出優先
+	ConfirmDualStep        ConfirmationType = "dual_step"        // security_boundary_rewrite：雙步驟按鈕
+	ConfirmStopRecovery    ConfirmationType = "stop_recovery"    // critical_runtime_action：完全停下 + 彈窗
 )
 
 // ConfirmationFor 回傳指定風險等級所需的確認方式。

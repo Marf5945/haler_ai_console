@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"ui_console/adapter/visual_learning"
@@ -104,5 +105,82 @@ func TestNormalizeToolRoutingDecisionKeepsExplicitLocalSearchLocal(t *testing.T)
 	normalized := normalizeToolRoutingDecision(decision, "\u5e6b\u6211\u672c\u6a5f\u641c\u5c0b API key", lookup)
 	if normalized.Action != "\u641c\u5c0b" {
 		t.Fatalf("explicit local search should remain local, got %#v", normalized)
+	}
+}
+
+func TestProgramSkillRequestRepairsInsteadOfForcedNormalize(t *testing.T) {
+	userText := "幫我做一個穿衣建議skill，依照天氣 JSON 和衣服表格輸出建議"
+	chat := parseToolRoutingDecision("閒聊ㄌ我無法直接寫入檔案，但可以提供 Python 程式碼")
+	normalized := normalizeToolRoutingDecision(chat, userText, toolRoutingLookupContext{Query: "穿衣建議"})
+	if normalized.Kind != toolRoutingDecisionChat {
+		t.Fatalf("normalize should not force tool route, got %#v", normalized)
+	}
+	if !shouldRepairToolRoutingDecision(userText, normalized) {
+		t.Fatalf("program skill request should ask LLM to repair routing output")
+	}
+	prompt := buildToolRoutingRepairPrompt("BASE", "閒聊ㄌ我不能寫檔", userText)
+	for _, want := range []string{"程式ㄌ穿衣建議ㄌ輸出", "不要產 Python", "不要嘗試 activate_skill/write_file/invoke_agent"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("repair prompt missing %q: %s", want, prompt)
+		}
+	}
+}
+
+func TestProgramSkillTableRequestRepairsGenericSkillOutput(t *testing.T) {
+	userText := "產生 skill 輸入 電料料表"
+	name, ok := inferGoProgramAuthoringRequest(userText)
+	if !ok {
+		t.Fatalf("table-like skill request should be recognized")
+	}
+	if name != "電料料表" {
+		t.Fatalf("program name = %q, want 電料料表", name)
+	}
+	chat := parseToolRoutingDecision("閒聊ㄌ一般來說 Gemini CLI 的 Skill 會包含 skill.yaml")
+	if !shouldRepairToolRoutingDecision(userText, chat) {
+		t.Fatalf("generic skill.yaml answer should be repaired into app go program routing")
+	}
+	prompt := buildToolRoutingRepairPrompt("BASE", chat.Raw, userText)
+	for _, want := range []string{"程式ㄌ電料料表ㄌ輸出", "不使用 Gemini CLI skill.yaml", "activate_skill"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("repair prompt missing %q: %s", want, prompt)
+		}
+	}
+}
+
+func TestGoProgramAuthoringClarifiesMissingFormat(t *testing.T) {
+	question, need := goProgramAuthoringClarification("產生 skill 輸入 電料料表")
+	if !need {
+		t.Fatalf("missing input/output format should ask for clarification")
+	}
+	for _, want := range []string{"輸入格式", "資料範例", "輸出的欄位"} {
+		if !strings.Contains(question, want) {
+			t.Fatalf("clarification missing %q: %s", want, question)
+		}
+	}
+	_, need = goProgramAuthoringClarification("幫我做一個穿衣建議程式，依照天氣 JSON 和衣服表格輸出建議")
+	if need {
+		t.Fatalf("explicit weather JSON plus clothing table request should enter authoring loop")
+	}
+}
+
+func TestGoProgramContractReviewPromptCatchesClothingTableSimplification(t *testing.T) {
+	manifest := seedGoProgramManifest("program-test", "穿衣建議", t.TempDir())
+	prompt := buildGoProgramContractReviewPrompt(
+		"幫我做一個穿衣建議skill，依照天氣 JSON 和衣服表格輸出建議",
+		manifest,
+		"func main(){ /* only reads temperature */ }",
+		[]byte(`{"result":"天氣溫和，建議穿薄外套"}`),
+	)
+	for _, want := range []string{"天氣 JSON + 衣服表格", "只用 temperature", "ok=false"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("contract review prompt missing %q: %s", want, prompt)
+		}
+	}
+	review, err := parseGoProgramContractReview(`{"ok":false,"reason":"缺衣服表格","feedback":"請使用 clothing_items","missing_user_data":true,"required_data":["衣服表格"]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !requiresClothingTable(review) {
+		t.Fatalf("expected clothing-table review to request clothing CSV template")
 	}
 }

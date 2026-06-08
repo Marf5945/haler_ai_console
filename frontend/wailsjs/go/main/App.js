@@ -222,6 +222,10 @@ export function DeleteStaticAvatar(arg1) {
   return window['go']['main']['App']['DeleteStaticAvatar'](arg1);
 }
 
+export function DeleteTalkMessageForAgent(arg1, arg2) {
+  return window['go']['main']['App']['DeleteTalkMessageForAgent'](arg1, arg2);
+}
+
 export function DetectModelPollution(arg1) {
   return window['go']['main']['App']['DetectModelPollution'](arg1);
 }
@@ -334,6 +338,10 @@ export function FetchURLContent(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['FetchURLContent'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function FinalizeNativeGoProgramAuthoringExport(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['FinalizeNativeGoProgramAuthoringExport'](arg1, arg2, arg3, arg4);
+}
+
 export function FinalizeNativePersonaExport(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['FinalizeNativePersonaExport'](arg1, arg2, arg3, arg4);
 }
@@ -418,8 +426,16 @@ export function GetEmbeddingConfig() {
   return window['go']['main']['App']['GetEmbeddingConfig']();
 }
 
+export function GetGoProgramAuthoringDetail(arg1) {
+  return window['go']['main']['App']['GetGoProgramAuthoringDetail'](arg1);
+}
+
 export function GetHighImpactDomains() {
   return window['go']['main']['App']['GetHighImpactDomains']();
+}
+
+export function GetHookGeneReviewSummary(arg1) {
+  return window['go']['main']['App']['GetHookGeneReviewSummary'](arg1);
 }
 
 export function GetHookSummary(arg1) {
@@ -626,6 +642,10 @@ export function ImportSubHandler(arg1) {
   return window['go']['main']['App']['ImportSubHandler'](arg1);
 }
 
+export function ImportVideoFile(arg1) {
+  return window['go']['main']['App']['ImportVideoFile'](arg1);
+}
+
 export function InstallVoiceBaseModel() {
   return window['go']['main']['App']['InstallVoiceBaseModel']();
 }
@@ -688,6 +708,10 @@ export function ListExternalLinksByType(arg1) {
 
 export function ListFormalActions() {
   return window['go']['main']['App']['ListFormalActions']();
+}
+
+export function ListGoProgramAuthoringCatalog(arg1) {
+  return window['go']['main']['App']['ListGoProgramAuthoringCatalog'](arg1);
 }
 
 export function ListInstalledEmbedModels() {
@@ -774,6 +798,10 @@ export function ListTools() {
   return window['go']['main']['App']['ListTools']();
 }
 
+export function ListVideoFiles() {
+  return window['go']['main']['App']['ListVideoFiles']();
+}
+
 export function ListW3ATrustedDevelopers() {
   return window['go']['main']['App']['ListW3ATrustedDevelopers']();
 }
@@ -792,6 +820,10 @@ export function MarkToolAvailable(arg1) {
 
 export function MarkToolUnavailable(arg1, arg2) {
   return window['go']['main']['App']['MarkToolUnavailable'](arg1, arg2);
+}
+
+export function NativeDragExportGoProgramAuthoring(arg1) {
+  return window['go']['main']['App']['NativeDragExportGoProgramAuthoring'](arg1);
 }
 
 export function NativeDragExportPersonaHandler(arg1, arg2) {
@@ -1042,8 +1074,16 @@ export function RouteVoiceCommand(arg1) {
   return window['go']['main']['App']['RouteVoiceCommand'](arg1);
 }
 
+export function RunGoProgramAuthoringLoop(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['RunGoProgramAuthoringLoop'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function RunPackageSecurityCheck(arg1) {
   return window['go']['main']['App']['RunPackageSecurityCheck'](arg1);
+}
+
+export function RunSummarizationNow(arg1) {
+  return window['go']['main']['App']['RunSummarizationNow'](arg1);
 }
 
 export function SaveDocumentFromAgent(arg1, arg2, arg3) {
@@ -1184,6 +1224,10 @@ export function SetTrustDomAndClick(arg1) {
 
 export function StartDraftSandbox(arg1) {
   return window['go']['main']['App']['StartDraftSandbox'](arg1);
+}
+
+export function StartGoProgramAuthoring(arg1, arg2, arg3) {
+  return window['go']['main']['App']['StartGoProgramAuthoring'](arg1, arg2, arg3);
 }
 
 export function StartHookRun(arg1, arg2) {

@@ -99,10 +99,10 @@ type SkillManifest struct {
 	Resources      SkillResources   `json:"resources"`
 	Routing        SkillRouting     `json:"routing"`
 	// TASK 31：以下兩欄皆 optional，舊 v1 manifest 缺欄位 = 零值，向後相容。
-	Lifecycle      *Lifecycle       `json:"lifecycle,omitempty"`      // 可見性/可執行性，nil 時由 EnsureLifecycle 補預設
-	ExpectedChain  *ExpectedChain   `json:"expected_chain,omitempty"` // drift 比對基準，nil 時只跑低階 drift
-	Hash           string           `json:"hash"` // 全欄位 canonical SHA-256（見 canonicalHash）
-	HashMismatch   bool             `json:"-"` // runtime-only：load 時 hash 不符（不持久化）
+	Lifecycle     *Lifecycle     `json:"lifecycle,omitempty"`      // 可見性/可執行性，nil 時由 EnsureLifecycle 補預設
+	ExpectedChain *ExpectedChain `json:"expected_chain,omitempty"` // drift 比對基準，nil 時只跑低階 drift
+	Hash          string         `json:"hash"`                     // 全欄位 canonical SHA-256（見 canonicalHash）
+	HashMismatch  bool           `json:"-"`                        // runtime-only：load 時 hash 不符（不持久化）
 }
 
 // LoadManifest 從指定路徑讀取並解析 skill_manifest.json。
@@ -154,7 +154,7 @@ func SaveManifest(dir string, m *SkillManifest) error {
 // 杜絕「改了 drift 基準卻不改 hash」的信任漏洞（TASK 31 / Phase 1.2）。
 func canonicalHash(m *SkillManifest) string {
 	c := *m
-	c.Hash = "" // 先清空，避免把舊 hash 算進新 hash
+	c.Hash = ""                 // 先清空，避免把舊 hash 算進新 hash
 	data, _ := json.Marshal(&c) // struct 欄位順序固定 → 結果具確定性
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])

@@ -8,13 +8,15 @@
 //   - execution_hook/hash_chain.go
 //
 // This package extracts the common pattern into a single reusable type:
-//   AppendLog[T] with Option-based configuration for per-consumer differences.
+//
+//	AppendLog[T] with Option-based configuration for per-consumer differences.
 //
 // Differences handled by Options:
 //   - File/dir permissions (0600/0700 vs 0644/0755)
 //   - Hash chain linking (trust_log, execution_hook)
 //   - Before-append validation (trust_log invariant checks)
 //   - Corrupt line skip on read (remote_bridge/audit)
+//
 // [TASK 8 完成區塊]
 // 此 package 為 TASK 8 (TASKS_1_6_3) 新增的共用 JSONL append-only 日誌抽象。
 // 取代 5 個消費者的重複邏輯：trust_log / audit / review / memory_ops / hash_chain。

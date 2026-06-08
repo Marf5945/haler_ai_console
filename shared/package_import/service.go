@@ -53,24 +53,24 @@ type PackageManifest struct {
 	PackageID       string   `json:"package_id"`
 	Name            string   `json:"name"`
 	Version         string   `json:"version"`
-	PackageType     string   `json:"package_type"`      // skill / mcp / adapter / persona
+	PackageType     string   `json:"package_type"` // skill / mcp / adapter / persona
 	DeclaredPerms   []string `json:"declared_permissions"`
 	DeclaredEntries []string `json:"declared_entry_points"`
 	WriteTargets    []string `json:"write_targets"`
-	RiskTag         string   `json:"risk_tag"`           // low / medium / high / unknown
-	SourceMetadata  string   `json:"source_metadata"`    // 來源路徑或 URL
+	RiskTag         string   `json:"risk_tag"`        // low / medium / high / unknown
+	SourceMetadata  string   `json:"source_metadata"` // 來源路徑或 URL
 
 	// ── hash 紀錄（安全檢查時填入）──
-	ManifestHash    string `json:"manifest_hash"`
-	PackageHash     string `json:"package_hash"`
+	ManifestHash     string `json:"manifest_hash"`
+	PackageHash      string `json:"package_hash"`
 	RegistryDiffHash string `json:"registry_diff_hash,omitempty"`
 
 	// ── Review Card 分層顯示用（#42 補強）──
-	AddsTools       bool `json:"adds_tools"`        // 是否新增工具
-	AddsSkills      bool `json:"adds_skills"`       // 是否新增 skill
-	AddsMCPServer   bool `json:"adds_mcp_server"`   // 是否新增 MCP server
-	AddsAdapter     bool `json:"adds_adapter"`      // 是否新增 adapter
-	AffectsRouting  bool `json:"affects_routing"`   // 是否影響 routing / tool visibility
+	AddsTools      bool `json:"adds_tools"`      // 是否新增工具
+	AddsSkills     bool `json:"adds_skills"`     // 是否新增 skill
+	AddsMCPServer  bool `json:"adds_mcp_server"` // 是否新增 MCP server
+	AddsAdapter    bool `json:"adds_adapter"`    // 是否新增 adapter
+	AffectsRouting bool `json:"affects_routing"` // 是否影響 routing / tool visibility
 
 	// ── 向下相容 ──
 	SourcePath    string   `json:"source_path"`
@@ -160,8 +160,8 @@ type OrphanScanResult struct {
 	SecurityCheck  SecurityCheckResult `json:"security_check"`
 	// 安全檢查通過 → 產生 PendingImport 供 Review Card 使用
 	// 安全檢查失敗 → FailureReason 非空，前端彈窗提醒後清除
-	PendingImport  *PendingImport `json:"pending_import,omitempty"`
-	FailureReason  string         `json:"failure_reason,omitempty"`
+	PendingImport *PendingImport `json:"pending_import,omitempty"`
+	FailureReason string         `json:"failure_reason,omitempty"`
 }
 
 // PendingImport is one quarantined package awaiting user confirmation.

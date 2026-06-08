@@ -12,11 +12,11 @@ import (
 type ExecDecision string
 
 const (
-	ExecAuto        ExecDecision = "auto_execute"  // 直接 build injection → execute
-	ExecNeedConfirm ExecDecision = "need_confirm"  // 第一次執行確認（允許一次/總是允許/取消）
-	ExecCandidate   ExecDecision = "candidate"     // 多候選，顯示候選卡讓使用者選
-	ExecReview      ExecDecision = "review"        // 高風險/分數不足，顯示 review card
-	ExecNoSkill     ExecDecision = "no_skill"      // 無對應 skill：走一般流程，事後問是否存成 skill
+	ExecAuto        ExecDecision = "auto_execute" // 直接 build injection → execute
+	ExecNeedConfirm ExecDecision = "need_confirm" // 第一次執行確認（允許一次/總是允許/取消）
+	ExecCandidate   ExecDecision = "candidate"    // 多候選，顯示候選卡讓使用者選
+	ExecReview      ExecDecision = "review"       // 高風險/分數不足，顯示 review card
+	ExecNoSkill     ExecDecision = "no_skill"     // 無對應 skill：走一般流程，事後問是否存成 skill
 )
 
 // DecideExecution 把路由結果與 lifecycle 收斂成單一執行決策。

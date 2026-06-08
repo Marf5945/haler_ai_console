@@ -31,8 +31,8 @@ type ThreatRecord struct {
 	ID          string     `json:"id"`
 	Type        ThreatType `json:"type"`
 	Description string     `json:"description"`
-	Source      string     `json:"source"`     // 偵測來源（entry_filter, redaction, validation）
-	Severity    string     `json:"severity"`   // low, medium, high
+	Source      string     `json:"source"`   // 偵測來源（entry_filter, redaction, validation）
+	Severity    string     `json:"severity"` // low, medium, high
 	Timestamp   string     `json:"timestamp"`
 	ContentHash string     `json:"content_hash"` // 觸發內容的 hash（不保存原文）
 	Notified    bool       `json:"notified"`     // 是否已通知使用者
@@ -40,7 +40,7 @@ type ThreatRecord struct {
 
 // ThreatDetectionResult 威脅偵測結果。
 type ThreatDetectionResult struct {
-	Detected bool          `json:"detected"`
+	Detected bool           `json:"detected"`
 	Records  []ThreatRecord `json:"records"`
 }
 

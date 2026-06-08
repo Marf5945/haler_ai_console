@@ -18,8 +18,8 @@ import (
 // TabOrder tab 排序狀態。
 type TabOrder struct {
 	MainHandler string   `json:"main_handler"` // 永遠為 "main"
-	SubOrder    []string `json:"sub_order"`     // sub 系統碼的顯示順序（左→右）
-	UpdatedAt   string   `json:"updated_at"`    // RFC3339 最後更新時間
+	SubOrder    []string `json:"sub_order"`    // sub 系統碼的顯示順序（左→右）
+	UpdatedAt   string   `json:"updated_at"`   // RFC3339 最後更新時間
 }
 
 // Manager tab 排序管理器。

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -167,16 +168,72 @@ func (s *Service) Search(ctx context.Context, req SearchRequest, cfg ProviderCon
 	}
 	limit := normalizedLimit(req.Limit)
 	cfg.ProviderID = NormalizeProviderID(cfg.ProviderID)
+	var outcome SearchOutcome
+	var err error
 	switch cfg.ProviderID {
 	case ProviderTavily:
-		return s.searchTavily(ctx, req.Query, limit, cfg)
+		outcome, err = s.searchTavily(ctx, req.Query, limit, cfg)
 	case ProviderGoogleCSE:
-		return s.searchGoogleCSE(ctx, req.Query, limit, cfg)
+		outcome, err = s.searchGoogleCSE(ctx, req.Query, limit, cfg)
 	case ProviderBrave:
-		return s.searchBrave(ctx, req.Query, limit, cfg)
+		outcome, err = s.searchBrave(ctx, req.Query, limit, cfg)
 	default:
 		return SearchOutcome{}, ErrProviderMissing
 	}
+	if err == nil {
+		// 依查詢語言加權：繁中→台灣(.tw/gov.tw)，英文→美/英(gov/edu/ac.uk)；清單外仍保留在後當備援。
+		rankByAuthority(req.Query, outcome.Results)
+	}
+	return outcome, err
+}
+
+// queryLanguage 粗判查詢語言：含中日韓表意字 → zh，其餘視為 en。
+func queryLanguage(q string) string {
+	for _, r := range q {
+		if r >= 0x4E00 && r <= 0x9FFF {
+			return "zh"
+		}
+	}
+	return "en"
+}
+
+// authorityTierFor 依語言回傳權威層級（越小越優先）。
+// 繁中查詢以台灣為主；英文查詢以美國/英國官方為主。
+func authorityTierFor(lang, rawURL string) int {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return 3
+	}
+	host := strings.ToLower(u.Hostname())
+	if lang == "zh" {
+		switch {
+		case strings.HasSuffix(host, ".gov.tw") || strings.HasSuffix(host, ".edu.tw"):
+			return 0
+		case strings.HasSuffix(host, ".tw") || strings.Contains(host, ".tw."):
+			return 1
+		default:
+			return 2
+		}
+	}
+	// 英文：美/英官方、學術。
+	switch {
+	case strings.HasSuffix(host, ".gov") || strings.HasSuffix(host, ".mil") ||
+		strings.HasSuffix(host, ".edu") || strings.HasSuffix(host, ".gov.uk") ||
+		strings.HasSuffix(host, ".ac.uk"):
+		return 0
+	case strings.HasSuffix(host, ".us") || strings.HasSuffix(host, ".uk"):
+		return 1
+	default:
+		return 2
+	}
+}
+
+// rankByAuthority 穩定排序：依查詢語言把對應地區的權威來源排到最前，其餘維持原序。
+func rankByAuthority(query string, results []SearchResult) {
+	lang := queryLanguage(query)
+	sort.SliceStable(results, func(i, j int) bool {
+		return authorityTierFor(lang, results[i].URL) < authorityTierFor(lang, results[j].URL)
+	})
 }
 
 func (s *Service) searchTavily(ctx context.Context, query string, limit int, cfg ProviderConfig) (SearchOutcome, error) {

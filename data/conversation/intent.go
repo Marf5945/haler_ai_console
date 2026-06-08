@@ -10,8 +10,8 @@ import "strings"
 
 // IntentResult 儲存 LLM 回覆的意圖解析結果。
 type IntentResult struct {
-	IsAction         bool   // true 表示識別到動作標籤
-	ActionTag        string // 匹配到的動作標籤（IsAction=true 時有值）
+	IsAction          bool   // true 表示識別到動作標籤
+	ActionTag         string // 匹配到的動作標籤（IsAction=true 時有值）
 	ConversationReply string // 一般對話回覆（IsAction=false 時有值）
 }
 
@@ -48,7 +48,7 @@ func ClassifyIntent(llmResponse string, availableTags []string) IntentResult {
 
 	// 無匹配，視為一般對話回覆
 	return IntentResult{
-		IsAction:         false,
+		IsAction:          false,
 		ConversationReply: llmResponse,
 	}
 }

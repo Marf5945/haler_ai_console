@@ -164,8 +164,8 @@ func TestHighImpactValidation(t *testing.T) {
 // 測試 UGC ranking 不改變 label
 func TestRankingNeverUpgradesLabel(t *testing.T) {
 	score := AdjustRanking(50, QualitySignal{
-		UpvoteCount:    500,
-		AcceptedAnswer: true,
+		UpvoteCount:      500,
+		AcceptedAnswer:   true,
 		AuthorReputation: 10000,
 	})
 	if score <= 50 {

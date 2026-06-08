@@ -23,10 +23,10 @@ type Sentence struct {
 
 // SentenceStore 以有序切片持有全部句子，mutex 保護並發存取。
 type SentenceStore struct {
-	mu            sync.Mutex
-	sentences     []Sentence
-	nextInputID   int // 下一個 [I-XXX] 序號
-	nextOutputID  int // 下一個 [O-XXX] 序號
+	mu           sync.Mutex
+	sentences    []Sentence
+	nextInputID  int // 下一個 [I-XXX] 序號
+	nextOutputID int // 下一個 [O-XXX] 序號
 }
 
 // ──────────────────────────────────────────────

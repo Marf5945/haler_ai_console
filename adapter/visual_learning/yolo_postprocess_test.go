@@ -145,10 +145,10 @@ func TestScoreFilter(t *testing.T) {
 	// 建立只有 1 個低分 grid cell 的 tensor（conf < 0.25 threshold）
 	entryLen := 85
 	data := make([]float32, entryLen)
-	data[0] = 0.5            // tx（grid 偏移）
-	data[1] = 0.5            // ty
-	data[2] = 0.0            // tw（log-scale）→ exp(0)=1
-	data[3] = 0.0            // th
+	data[0] = 0.5             // tx（grid 偏移）
+	data[1] = 0.5             // ty
+	data[2] = 0.0             // tw（log-scale）→ exp(0)=1
+	data[3] = 0.0             // th
 	data[4] = invSigmoid(0.1) // objectness = 0.1
 	data[5] = invSigmoid(0.1) // class 0 = 0.1 → conf = 0.01
 

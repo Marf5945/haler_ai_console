@@ -32,8 +32,8 @@ func CheckAvatarNotInLLMContext(contextPayloadJSON string) error {
 // §10.1：Avatar 狀態變更不得觸發風險等級變動。
 func CheckAvatarDoesNotAffectRiskPolicy(eventJSON string) error {
 	var event struct {
-		Source     string `json:"source"`
-		Target     string `json:"target"`
+		Source       string `json:"source"`
+		Target       string `json:"target"`
 		FieldChanged string `json:"field_changed"`
 	}
 	if err := json.Unmarshal([]byte(eventJSON), &event); err != nil {
@@ -184,8 +184,8 @@ func CheckRendererDoesNotWriteDirectly(writePathJSON string) error {
 // §10.5：MVP 階段僅支援 PNG/JPEG，不接受 SVG 以避免 XSS。
 func CheckSVGNotAcceptedInMVP(fileInfoJSON string) error {
 	var info struct {
-		Format  string `json:"format"`
-		IsMVP   bool   `json:"is_mvp"`
+		Format string `json:"format"`
+		IsMVP  bool   `json:"is_mvp"`
 	}
 	if err := json.Unmarshal([]byte(fileInfoJSON), &info); err != nil {
 		return nil

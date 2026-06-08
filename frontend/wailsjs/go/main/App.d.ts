@@ -135,6 +135,8 @@ export function DeleteScheduledJob(arg1:string):Promise<void>;
 
 export function DeleteStaticAvatar(arg1:string):Promise<void>;
 
+export function DeleteTalkMessageForAgent(arg1:string,arg2:string):Promise<boolean>;
+
 export function DetectModelPollution(arg1:string):Promise<w3a_media.PollutionReport>;
 
 export function DetectOllamaState():Promise<main.OllamaState>;
@@ -191,6 +193,8 @@ export function ExportVisualLearning(arg1:string):Promise<any>;
 
 export function FetchURLContent(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean):Promise<any>;
 
+export function FinalizeNativeGoProgramAuthoringExport(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
 export function FinalizeNativePersonaExport(arg1:string,arg2:string,arg3:string,arg4:string):Promise<any>;
 
 export function FinalizeNativeReferenceFileExport(arg1:string,arg2:string,arg3:string):Promise<void>;
@@ -233,7 +237,11 @@ export function GetDeviceTrustProfile(arg1:string):Promise<any>;
 
 export function GetEmbeddingConfig():Promise<settings.EmbeddingConfig>;
 
+export function GetGoProgramAuthoringDetail(arg1:string):Promise<main.GoProgramAuthoringDetail>;
+
 export function GetHighImpactDomains():Promise<Array<string>>;
+
+export function GetHookGeneReviewSummary(arg1:string):Promise<main.HookGeneReviewSummary>;
 
 export function GetHookSummary(arg1:string):Promise<any>;
 
@@ -337,6 +345,8 @@ export function ImportReferenceFile(arg1:string):Promise<main.ReferenceFile>;
 
 export function ImportSubHandler(arg1:string):Promise<main.ImportSubResult>;
 
+export function ImportVideoFile(arg1:string):Promise<main.ReferenceFile>;
+
 export function InstallVoiceBaseModel():Promise<voice.State>;
 
 export function InvalidateDualStep(arg1:string):Promise<void>;
@@ -368,6 +378,8 @@ export function ListElementDictionary(arg1:string):Promise<any>;
 export function ListExternalLinksByType(arg1:string):Promise<any>;
 
 export function ListFormalActions():Promise<any>;
+
+export function ListGoProgramAuthoringCatalog(arg1:number):Promise<Array<main.GoProgramAuthoringCatalogItem>>;
 
 export function ListInstalledEmbedModels():Promise<Array<main.EmbedModelInfo>>;
 
@@ -411,6 +423,8 @@ export function ListThreatRecords():Promise<any>;
 
 export function ListTools():Promise<Array<tools.Tool>>;
 
+export function ListVideoFiles():Promise<Array<main.ReferenceFile>>;
+
 export function ListW3ATrustedDevelopers():Promise<any>;
 
 export function MapCanonicalLabel(arg1:string,arg2:string,arg3:number):Promise<visual_learning.CanonicalLabel|boolean>;
@@ -420,6 +434,8 @@ export function MarkSkillFirstUseExplained():Promise<any>;
 export function MarkToolAvailable(arg1:string):Promise<void>;
 
 export function MarkToolUnavailable(arg1:string,arg2:string):Promise<void>;
+
+export function NativeDragExportGoProgramAuthoring(arg1:string):Promise<main.NativeGoProgramDragExportResult>;
 
 export function NativeDragExportPersonaHandler(arg1:string,arg2:string):Promise<main.NativePersonaDragExportResult>;
 
@@ -545,7 +561,11 @@ export function RotateTalkFull():Promise<string>;
 
 export function RouteVoiceCommand(arg1:string):Promise<voice.CommandRoute>;
 
+export function RunGoProgramAuthoringLoop(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<main.GoProgramAuthoringResult>;
+
 export function RunPackageSecurityCheck(arg1:string):Promise<any>;
+
+export function RunSummarizationNow(arg1:string):Promise<string>;
 
 export function SaveDocumentFromAgent(arg1:string,arg2:string,arg3:string):Promise<main.DocumentPreview>;
 
@@ -616,6 +636,8 @@ export function SetToolPreference(arg1:string,arg2:string,arg3:string,arg4:numbe
 export function SetTrustDomAndClick(arg1:boolean):Promise<void>;
 
 export function StartDraftSandbox(arg1:string):Promise<string>;
+
+export function StartGoProgramAuthoring(arg1:string,arg2:string,arg3:string):Promise<main.GoProgramAuthoringResult>;
 
 export function StartHookRun(arg1:string,arg2:string):Promise<string>;
 

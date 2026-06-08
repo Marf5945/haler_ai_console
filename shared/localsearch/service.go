@@ -458,7 +458,9 @@ func stripScopeWords(text string) string {
 		"記憶", "", "文件", "", "紀錄", "", "記錄", "", "trace", "", "Trace", "", "TRACE", "",
 		"監視", "", "工具", "", "技能", "", "document", "", "Document", "", "memory", "", "Memory", "",
 		"tool", "", "Tool", "", "skill", "", "Skill", "",
-		"裡的", "", "中的", "", "裡", "", "中", "",
+		// NOTE: only strip multi-char locatives ("…中的"/"…裡的"). Never strip bare
+		// "中"/"裡": that corrupts real terms like 台中 / 中壢 (target→query).
+		"裡的", "", "中的", "",
 	)
 	return strings.TrimSpace(replacer.Replace(text))
 }
@@ -485,9 +487,9 @@ func normalizeScope(scopes []string) map[string]bool {
 func scopeAllows(scopes map[string]bool, source string) bool {
 	source = strings.ToLower(source)
 	if scopes["all"] {
-		// Trace/debug logs are noisy implementation records. Keep them opt-in so
-		// ordinary searches do not surface the current LLM stdout or adapter traces.
-		return source != "trace" && source != "debug"
+		// Trace/debug 為雜訊；memory/talk（對話）當前已是模型 context，預設不搜，
+		// 避免搜尋命中使用者自己剛打的訊息（自我回音）。明確指定「記憶/對話」才搜。
+		return source != "trace" && source != "debug" && source != "memory" && source != "talk"
 	}
 	if scopes[source] {
 		return true

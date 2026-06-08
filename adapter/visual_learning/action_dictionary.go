@@ -21,10 +21,10 @@ const (
 
 // ActionStep is one step in a replayable action script.
 type ActionStep struct {
-	Order          int    `json:"order"`
-	ElementID      string `json:"element_id"` // reference to ElementDictionary entry
+	Order          int            `json:"order"`
+	ElementID      string         `json:"element_id"` // reference to ElementDictionary entry
 	CanonicalLabel CanonicalLabel `json:"canonical_label"`
-	WaitAfterMs    int    `json:"wait_after_ms"`
+	WaitAfterMs    int            `json:"wait_after_ms"`
 }
 
 // ActionDictionaryEntry records a replayable UI action script.
@@ -44,9 +44,9 @@ type ActionDictionaryEntry struct {
 // ActionDictionary manages the action dictionary for one project.
 // Separation from ElementDictionary is intentional (spec §22).
 type ActionDictionary struct {
-	mu           sync.Mutex
-	formalPath   string
-	pendingPath  string
+	mu            sync.Mutex
+	formalPath    string
+	pendingPath   string
 	formalEntries []ActionDictionaryEntry
 }
 

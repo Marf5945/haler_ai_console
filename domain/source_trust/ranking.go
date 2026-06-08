@@ -8,15 +8,15 @@ package source_trust
 
 // QualitySignal 描述 UGC 來源的品質指標。
 type QualitySignal struct {
-	UpvoteCount       int  `json:"upvote_count"`
-	AcceptedAnswer    bool `json:"accepted_answer"`
-	AnswerAgeDays     int  `json:"answer_age_days"`
-	AuthorReputation  int  `json:"author_reputation"`
-	CitationCount     int  `json:"citation_count"`
-	MaintainerAnswer  bool `json:"maintainer_answer"`
+	UpvoteCount        int  `json:"upvote_count"`
+	AcceptedAnswer     bool `json:"accepted_answer"`
+	AnswerAgeDays      int  `json:"answer_age_days"`
+	AuthorReputation   int  `json:"author_reputation"`
+	CitationCount      int  `json:"citation_count"`
+	MaintainerAnswer   bool `json:"maintainer_answer"`
 	OfficialStaffReply bool `json:"official_staff_reply"`
-	SurvivalTimeDays  int  `json:"survival_time_days"`
-	CrossRefCount     int  `json:"cross_reference_count"`
+	SurvivalTimeDays   int  `json:"survival_time_days"`
+	CrossRefCount      int  `json:"cross_reference_count"`
 }
 
 // ──────────────────────────────────────────────

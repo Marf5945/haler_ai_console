@@ -180,4 +180,3 @@ func TestAuditLogEmptyReadAll(t *testing.T) {
 		t.Errorf("expected nil, got %d entries", len(result))
 	}
 }
-

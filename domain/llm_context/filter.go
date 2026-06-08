@@ -74,18 +74,18 @@ func EscapeExternalTokens(content string) string {
 
 var entryRegexps = []*regexp.Regexp{
 	// 各供應商 API key——與 redaction.go builtinRules 同步
-	regexp.MustCompile(`(?i)\bsk-ant-[A-Za-z0-9\-]{20,}`),                     // Anthropic（先比對長前綴）
-	regexp.MustCompile(`(?i)\bsk-or-v1-[A-Za-z0-9]{20,}`),                     // OpenRouter
-	regexp.MustCompile(`(?i)\b(sk|pk)_(test|live)_[A-Za-z0-9]{24,}`),          // Stripe
-	regexp.MustCompile(`(?i)\bsk-[A-Za-z0-9]{20,}`),                           // OpenAI（放在 Anthropic/OpenRouter 之後）
-	regexp.MustCompile(`\br8_[A-Za-z0-9]{20,}`),                               // Replicate
-	regexp.MustCompile(`\bgh[ps]_[A-Za-z0-9]{36,}`),                           // GitHub PAT
-	regexp.MustCompile(`\bgho_[A-Za-z0-9]{36,}`),                              // GitHub OAuth
-	regexp.MustCompile(`\b(ghu|ghs|ghr)_[A-Za-z0-9]{36,}`),                    // GitHub App
-	regexp.MustCompile(`\bglpat-[A-Za-z0-9]{20,}`),                            // GitLab
-	regexp.MustCompile(`\bAIza[A-Za-z0-9\-_]{35}`),                            // Google AI
-	regexp.MustCompile(`\bAKIA[A-Z0-9]{16}\b`),                                // AWS
-	regexp.MustCompile(`\bhf_[A-Za-z0-9]{34,}`),                               // HuggingFace
+	regexp.MustCompile(`(?i)\bsk-ant-[A-Za-z0-9\-]{20,}`),            // Anthropic（先比對長前綴）
+	regexp.MustCompile(`(?i)\bsk-or-v1-[A-Za-z0-9]{20,}`),            // OpenRouter
+	regexp.MustCompile(`(?i)\b(sk|pk)_(test|live)_[A-Za-z0-9]{24,}`), // Stripe
+	regexp.MustCompile(`(?i)\bsk-[A-Za-z0-9]{20,}`),                  // OpenAI（放在 Anthropic/OpenRouter 之後）
+	regexp.MustCompile(`\br8_[A-Za-z0-9]{20,}`),                      // Replicate
+	regexp.MustCompile(`\bgh[ps]_[A-Za-z0-9]{36,}`),                  // GitHub PAT
+	regexp.MustCompile(`\bgho_[A-Za-z0-9]{36,}`),                     // GitHub OAuth
+	regexp.MustCompile(`\b(ghu|ghs|ghr)_[A-Za-z0-9]{36,}`),           // GitHub App
+	regexp.MustCompile(`\bglpat-[A-Za-z0-9]{20,}`),                   // GitLab
+	regexp.MustCompile(`\bAIza[A-Za-z0-9\-_]{35}`),                   // Google AI
+	regexp.MustCompile(`\bAKIA[A-Z0-9]{16}\b`),                       // AWS
+	regexp.MustCompile(`\bhf_[A-Za-z0-9]{34,}`),                      // HuggingFace
 	// Bearer token
 	regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9\-._~+/]+=*`),
 	// PEM 私鑰

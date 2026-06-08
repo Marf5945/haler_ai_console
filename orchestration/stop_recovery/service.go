@@ -34,11 +34,11 @@ var AllowedActions = []RecoveryAction{
 
 // forbiddenActions 禁止的恢復動作（§21 硬規則）。
 var forbiddenActions = map[string]bool{
-	"ignore_and_continue_for_critical":         true,
-	"auto_solve_captcha":                       true,
-	"auto_login":                               true,
-	"auto_confirm_payment":                     true,
-	"auto_grant_permission":                    true,
+	"ignore_and_continue_for_critical": true,
+	"auto_solve_captcha":               true,
+	"auto_login":                       true,
+	"auto_confirm_payment":             true,
+	"auto_grant_permission":            true,
 }
 
 // ──────────────────────────────────────────────
@@ -49,24 +49,24 @@ var forbiddenActions = map[string]bool{
 type StopReason string
 
 const (
-	ReasonSidecarCrash         StopReason = "sidecar_crashed"
+	ReasonSidecarCrash          StopReason = "sidecar_crashed"
 	ReasonCriticalRuntimeAction StopReason = "critical_runtime_action"
-	ReasonUserStop             StopReason = "user_stop"
-	ReasonResumeGuardFailed    StopReason = "resume_guard_failed"
+	ReasonUserStop              StopReason = "user_stop"
+	ReasonResumeGuardFailed     StopReason = "resume_guard_failed"
 )
 
 // StopRecoveryCard 恢復卡片。
 type StopRecoveryCard struct {
-	ID               string             `json:"id"`
-	StopReason       StopReason         `json:"stop_reason"`
-	DetectedSignal   string             `json:"detected_signal"`    // 偵測到的信號描述
-	SafeNextActions  []ActionOption     `json:"safe_next_actions"`  // 可用的恢復動作
-	ResumeConditions []ResumeCondition  `json:"resume_conditions"`  // §21 恢復前置條件清單
-	UserMessage      string             `json:"user_message"`       // 中文使用者提示
-	CreatedAt        string             `json:"created_at"`
-	Resolved         bool               `json:"resolved"`
-	ResolvedAction   string             `json:"resolved_action"`
-	ResolvedAt       string             `json:"resolved_at"`
+	ID               string            `json:"id"`
+	StopReason       StopReason        `json:"stop_reason"`
+	DetectedSignal   string            `json:"detected_signal"`   // 偵測到的信號描述
+	SafeNextActions  []ActionOption    `json:"safe_next_actions"` // 可用的恢復動作
+	ResumeConditions []ResumeCondition `json:"resume_conditions"` // §21 恢復前置條件清單
+	UserMessage      string            `json:"user_message"`      // 中文使用者提示
+	CreatedAt        string            `json:"created_at"`
+	Resolved         bool              `json:"resolved"`
+	ResolvedAction   string            `json:"resolved_action"`
+	ResolvedAt       string            `json:"resolved_at"`
 }
 
 // ResumeCondition 恢復前置條件（前端渲染為 checklist）。
@@ -78,8 +78,8 @@ type ResumeCondition struct {
 // ActionOption 單一動作選項（含 UI 顯示資訊）。
 type ActionOption struct {
 	Action      RecoveryAction `json:"action"`
-	Label       string         `json:"label"`        // 中文按鈕標籤
-	Description string         `json:"description"`  // 中文說明
+	Label       string         `json:"label"`       // 中文按鈕標籤
+	Description string         `json:"description"` // 中文說明
 }
 
 // ──────────────────────────────────────────────
@@ -88,8 +88,9 @@ type ActionOption struct {
 
 // Service 管理 Stop Recovery 流程。
 type Service struct {
-	mu    sync.Mutex
-	cards map[string]*StopRecoveryCard
+	mu     sync.Mutex
+	cards  map[string]*StopRecoveryCard
+	nextID int64
 }
 
 // NewService 建立 Stop Recovery service。
@@ -109,8 +110,10 @@ func (s *Service) CreateCard(reason StopReason, signal string) *StopRecoveryCard
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.nextID++
 	card := &StopRecoveryCard{
-		ID:             fmt.Sprintf("stop-%d", time.Now().UnixNano()),
+		// 同一個測試/事件循環可能在同一奈秒建多張卡，序號避免 ID 撞覆寫。
+		ID:             fmt.Sprintf("stop-%d-%d", time.Now().UnixNano(), s.nextID),
 		StopReason:     reason,
 		DetectedSignal: signal,
 		CreatedAt:      time.Now().Format(time.RFC3339),

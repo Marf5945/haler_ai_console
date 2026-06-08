@@ -15,10 +15,10 @@ import (
 type SubUsageStats struct {
 	SubID            string    `json:"sub_id"`
 	Name             string    `json:"name"`
-	UsageCount       int       `json:"usage_count"`        // 使用次數
-	LastUsed         time.Time `json:"last_used"`          // 最後使用時間
-	Score            float64   `json:"score"`              // 綜合使用分數
-	CleanupCandidate bool      `json:"cleanup_candidate"`  // 是否為清除候選
+	UsageCount       int       `json:"usage_count"`       // 使用次數
+	LastUsed         time.Time `json:"last_used"`         // 最後使用時間
+	Score            float64   `json:"score"`             // 綜合使用分數
+	CleanupCandidate bool      `json:"cleanup_candidate"` // 是否為清除候選
 }
 
 // CleanupResult 清除決策結果。
@@ -111,9 +111,9 @@ func DetermineCleanup(stats []SubUsageStats) CleanupResult {
 
 	n := len(sorted)
 	// 計算各百分位邊界索引（ceiling）
-	top25 := percentileIndex(n, 25)    // 前 25%
-	top75 := percentileIndex(n, 75)    // 前 75%
-	top90 := percentileIndex(n, 90)    // 前 90%
+	top25 := percentileIndex(n, 25) // 前 25%
+	top75 := percentileIndex(n, 75) // 前 75%
+	top90 := percentileIndex(n, 90) // 前 90%
 
 	var retain, candidates []string
 

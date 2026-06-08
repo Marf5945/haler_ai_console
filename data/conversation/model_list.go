@@ -19,7 +19,7 @@ package conversation
 type ModelOption struct {
 	ModelID     string `json:"model_id"`
 	DisplayName string `json:"display_name"`
-	Source      string `json:"source"`    // "local_ollama" | "local_lmstudio" | "cloud_adapter"
+	Source      string `json:"source"` // "local_ollama" | "local_lmstudio" | "cloud_adapter"
 	Available   bool   `json:"available"`
 }
 

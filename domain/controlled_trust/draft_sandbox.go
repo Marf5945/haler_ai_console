@@ -59,10 +59,10 @@ type DraftSandboxRun struct {
 
 // DraftSandboxService manages draft sandbox sessions.
 type DraftSandboxService struct {
-	mu          sync.Mutex
-	sandboxDir  string
-	activeRun   *DraftSandboxRun
-	log         *TrustLog
+	mu         sync.Mutex
+	sandboxDir string
+	activeRun  *DraftSandboxRun
+	log        *TrustLog
 }
 
 func NewDraftSandboxService(trustDir string, log *TrustLog) *DraftSandboxService {

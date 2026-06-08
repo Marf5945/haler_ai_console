@@ -279,6 +279,12 @@ func (s *LearningService) StartDemonstration(activeWindowHash string) (*Learning
 		Status:           LearningRunActive,
 		TracePath:        tracePath,
 	}
+	if err := os.MkdirAll(filepath.Dir(tracePath), 0o700); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(tracePath, nil, 0o600); err != nil {
+		return nil, err
+	}
 	if err := s.saveRunLocked(run); err != nil {
 		return nil, err
 	}

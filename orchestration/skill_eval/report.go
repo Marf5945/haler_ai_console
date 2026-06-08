@@ -38,7 +38,7 @@ func ShouldSuggestCleanup(keepForever bool, daysSinceIndependentHit int, covered
 // SkillSummary 是合併判定所需的最小資訊（只用三個核心條件）。
 type SkillSummary struct {
 	ActionTag string
-	Purpose   string   // purpose/domain
+	Purpose   string // purpose/domain
 	Domain    string
 	RESteps   []string // RE 必要步驟的簽章（如 "查詢|天氣"）
 }

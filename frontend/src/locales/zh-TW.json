@@ -115,6 +115,8 @@
     "tabExternal": "外部連結",
     "tabAutoflow": "自動流程",
     "tabToolkit": "工具包",
+    "flowCategoryRecording": "錄製",
+    "flowCategorySkill": "Skill",
     "searchPlaceholder": "搜尋工具、skill、流程...",
     "searchLabel": "搜尋工具",
     "searchNameLabel": "搜尋工具名稱",
@@ -282,6 +284,7 @@
   "system": {
     "sidecarFail": "[系統] Sidecar 啟動失敗 — 請確認本機已安裝 Node.js，或查看 log 取得詳細錯誤。",
     "sidecarCrash": "[系統] Sidecar 意外中止 — CLI 通道已斷開，請重新啟動應用程式。",
+    "nativeRecorderDegraded": "[系統] macOS 原生錄製無法啟用，點擊外部視窗將不會被記錄。請到 系統設定 → 隱私權與安全性 → 輔助使用 開啟授權（必要時也開「輸入監控」），然後重新啟動 app。",
     "authBrowserOpen": "[系統] {adapter} 需要瀏覽器授權，已開啟授權頁面。完成後請點擊確認按鈕。",
     "authBrowserConfirm": "[系統] {adapter} 需要瀏覽器授權 ({url})，請確認是否開啟。",
     "imported": "已匯入：{name}",
@@ -381,7 +384,10 @@
     "noLocalModelDetected": "未偵測到本機模型",
     "voiceManualSpecify": "手動指定",
     "voiceAutoDetect": "自動偵測",
-    "localModelDefault": "本機模型"
+    "localModelDefault": "本機模型",
+    "langPt": "pt",
+    "langEs": "es",
+    "langTh": "th"
   },
   "onboarding": {
     "fillNamePath": "請填入名稱與路徑",
@@ -653,6 +659,7 @@
     "exportQuestion": "要對 [{{name}}] 做什麼？",
     "copyAction": "複製",
     "pickModel": "選擇 CLI 模型",
+    "refreshModels": "重新整理模型清單",
     "currentModel": "目前",
     "cliExportNote": "CLI Adapter 只解除連結，不複製第三方 CLI。",
     "apiExportNote": "LLM API 接口含授權設定，只能解除連結，不能複製。"

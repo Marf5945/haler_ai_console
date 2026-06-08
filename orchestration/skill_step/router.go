@@ -72,10 +72,10 @@ type ResolveResult struct {
 // 重要：Router 應與 ArchiveService 共用同一個實例（見 app.go 的初始化），
 // 確保 ListArchived 讀取的是同一份歸檔資料庫，而非另起一個空的 ArchiveService。
 type Router struct {
-	archiveService    *ArchiveService           // 共用的歸檔服務，不可為 nil
-	scorer            *Scorer                   // 相關性評分器
-	ambiguity         *AmbiguityDetector        // 模糊狀態判定器
-	builtinManifests  map[string]*SkillManifest // 內建能力，啟動時註冊，優先於外部 skill
+	archiveService   *ArchiveService           // 共用的歸檔服務，不可為 nil
+	scorer           *Scorer                   // 相關性評分器
+	ambiguity        *AmbiguityDetector        // 模糊狀態判定器
+	builtinManifests map[string]*SkillManifest // 內建能力，啟動時註冊，優先於外部 skill
 }
 
 // NewRouter 建立一個與 archiveService 綁定的 Router。

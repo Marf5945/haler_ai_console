@@ -20,9 +20,9 @@ import (
 // ArchivedCard 是寫入 review_archive.json 的持久化卡片。
 type ArchivedCard struct {
 	ID             string         `json:"id"`
-	RiskClass      risk.RiskClass `json:"risk_class"`         // v3.6.1 新增
-	Level          Level          `json:"level"`               // 向下相容
-	Status         string         `json:"status"`              // "resolved" | "rejected"
+	RiskClass      risk.RiskClass `json:"risk_class"` // v3.6.1 新增
+	Level          Level          `json:"level"`      // 向下相容
+	Status         string         `json:"status"`     // "resolved" | "rejected"
 	SourceType     string         `json:"source_type"`
 	SourceID       string         `json:"source_id"`
 	PlainReason    string         `json:"plain_reason"`

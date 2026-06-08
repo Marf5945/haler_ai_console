@@ -26,8 +26,8 @@ const (
 type AllowedRiskLevel string
 
 const (
-	OverrideLow             AllowedRiskLevel = "low"
-	OverrideMedium          AllowedRiskLevel = "medium"
+	OverrideLow                AllowedRiskLevel = "low"
+	OverrideMedium             AllowedRiskLevel = "medium"
 	OverrideHighNonDestructive AllowedRiskLevel = "high_non_destructive"
 )
 
@@ -43,15 +43,15 @@ var neverOverridable = []string{
 // All fields are REQUIRED — a missing field invalidates the scope.
 // Corresponds to schema #54 in TASKS_1_2.md.
 type OverrideScope struct {
-	DAGRunID          string `json:"dag_run_id"`
-	WorkspaceID       string `json:"workspace_id"`
-	OperationFamily   string `json:"operation_family"`
-	TargetHashSet     string `json:"target_hash_set"`
-	PlanHash          string `json:"plan_hash"`
-	RiskPolicyHash    string `json:"risk_policy_hash"`
-	ToolRegistryHash  string `json:"tool_registry_hash"`
-	DeviceProfileID   string `json:"device_profile_id"`
-	Expiry            time.Time `json:"expiry"`
+	DAGRunID         string    `json:"dag_run_id"`
+	WorkspaceID      string    `json:"workspace_id"`
+	OperationFamily  string    `json:"operation_family"`
+	TargetHashSet    string    `json:"target_hash_set"`
+	PlanHash         string    `json:"plan_hash"`
+	RiskPolicyHash   string    `json:"risk_policy_hash"`
+	ToolRegistryHash string    `json:"tool_registry_hash"`
+	DeviceProfileID  string    `json:"device_profile_id"`
+	Expiry           time.Time `json:"expiry"`
 }
 
 // ContextualRiskOverride allows reducing repeated review interruptions for
@@ -59,12 +59,12 @@ type OverrideScope struct {
 // lower final_risk or disable hard rules.
 // Corresponds to schema #54 in TASKS_1_2.md.
 type ContextualRiskOverride struct {
-	ID                 string           `json:"id"`
-	Scope              OverrideScope    `json:"scope"`
-	AllowedRisk        AllowedRiskLevel `json:"allowed_risk"`
-	Status             OverrideStatus   `json:"status"`
-	CreatedAt          time.Time        `json:"created_at"`
-	InvalidatedReason  string           `json:"invalidated_reason,omitempty"`
+	ID                string           `json:"id"`
+	Scope             OverrideScope    `json:"scope"`
+	AllowedRisk       AllowedRiskLevel `json:"allowed_risk"`
+	Status            OverrideStatus   `json:"status"`
+	CreatedAt         time.Time        `json:"created_at"`
+	InvalidatedReason string           `json:"invalidated_reason,omitempty"`
 }
 
 // ContextualOverrideService manages contextual risk overrides.

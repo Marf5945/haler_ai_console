@@ -7,11 +7,11 @@
 //   - grep_search
 //
 // 設計原則（依使用者 v4.3 spec §1 雙軌 + §6 純 stdlib）：
-//   1. 純 stdlib，不引入第三方套件
-//   2. 路徑邊界：ProjectRoot + data/references/files cache（v1 範圍）
-//   3. 截斷時回傳結構化 metadata（truncated/limit_bytes/reason）
-//   4. next_offset 預留欄位但不啟用（防 LLM token 水車）
-//   5. risk = low（read-only、邊界內）
+//  1. 純 stdlib，不引入第三方套件
+//  2. 路徑邊界：ProjectRoot + data/references/files cache（v1 範圍）
+//  3. 截斷時回傳結構化 metadata（truncated/limit_bytes/reason）
+//  4. next_offset 預留欄位但不啟用（防 LLM token 水車）
+//  5. risk = low（read-only、邊界內）
 //
 // 不抽 helper 出 package main、不新增跨層 import；所有實作 private。
 package main
@@ -37,9 +37,9 @@ import (
 // ──────────────────────────────────────────────────────────────────────
 
 const (
-	fsMaxListEntries       = 200       // list_directory 最多回 200 筆
-	fsMaxListEntryBytes    = 200       // 每筆 entry 描述最多 200 byte
-	fsMaxReadDefaultBytes  = 64 * 1024 // read_file 預設 64 KB
+	fsMaxListEntries       = 200        // list_directory 最多回 200 筆
+	fsMaxListEntryBytes    = 200        // 每筆 entry 描述最多 200 byte
+	fsMaxReadDefaultBytes  = 64 * 1024  // read_file 預設 64 KB
 	fsMaxReadTextBytes     = 128 * 1024 // .md/.txt 提高到 128 KB
 	fsMaxGlobMatches       = 100        // glob 最多回 100 個匹配
 	fsMaxGrepMatches       = 50         // grep_search 最多回 50 筆匹配行
@@ -72,8 +72,8 @@ var fsSensitivePathComponents = []string{
 
 // fsTextExtensions 列出視為「純文字」可放寬到 128 KB 的副檔名。
 var fsTextExtensions = map[string]bool{
-	".md":    true,
-	".txt":   true,
+	".md":       true,
+	".txt":      true,
 	".markdown": true,
 }
 
@@ -140,12 +140,12 @@ func (a *App) fsAllowedRoots() []string {
 // 通過後回傳 resolved 絕對路徑；不通過直接 error。
 //
 // 步驟：
-//   1. trim + filepath.Clean
-//   2. 若為相對路徑，與第一個 allowed root 接合
-//   3. 取絕對路徑
-//   4. EvalSymlinks 解 symlink（檔案不存在不視為錯誤，僅在 read_file 那邊 stat 處理）
-//   5. 路徑必須位於任一 allowed root 之下
-//   6. 任一 path component 不得命中 sensitive 黑名單
+//  1. trim + filepath.Clean
+//  2. 若為相對路徑，與第一個 allowed root 接合
+//  3. 取絕對路徑
+//  4. EvalSymlinks 解 symlink（檔案不存在不視為錯誤，僅在 read_file 那邊 stat 處理）
+//  5. 路徑必須位於任一 allowed root 之下
+//  6. 任一 path component 不得命中 sensitive 黑名單
 func fsCheckPath(allowedRoots []string, target string) (string, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
@@ -299,8 +299,8 @@ type fsReadResult struct {
 	Content         string `json:"content"`
 	Truncated       bool   `json:"truncated,omitempty"`
 	Reason          string `json:"reason,omitempty"`
-	NextOffset      int64  `json:"next_offset,omitempty"`       // 預留，v1 不啟用
-	OffsetSupported bool   `json:"offset_supported"`            // v1 = false
+	NextOffset      int64  `json:"next_offset,omitempty"` // 預留，v1 不啟用
+	OffsetSupported bool   `json:"offset_supported"`      // v1 = false
 }
 
 func fsReadFile(allowedRoots []string, target string) (string, error) {
@@ -444,9 +444,10 @@ func fsGlob(allowedRoots []string, pattern string) (string, error) {
 }
 
 // splitGlobRoot 從 pattern 中拆出「不含 wildcard 的前綴」當 walk 起點。
-//   "data/refs/**/*.md" → ("data/refs", "**/*.md")
-//   "**/*.md"           → ("", "**/*.md")
-//   "*.md"              → ("", "*.md")
+//
+//	"data/refs/**/*.md" → ("data/refs", "**/*.md")
+//	"**/*.md"           → ("", "**/*.md")
+//	"*.md"              → ("", "*.md")
 func splitGlobRoot(pattern string) (string, string) {
 	parts := strings.Split(pattern, "/")
 	for i, p := range parts {
@@ -511,10 +512,10 @@ func globMatch(pattern, name string) bool {
 // ──────────────────────────────────────────────────────────────────────
 
 type fsGrepHit struct {
-	File    string `json:"file"`
-	LineNo  int    `json:"line_no"`
-	Line    string `json:"line"`
-	Truncated bool `json:"line_truncated,omitempty"`
+	File      string `json:"file"`
+	LineNo    int    `json:"line_no"`
+	Line      string `json:"line"`
+	Truncated bool   `json:"line_truncated,omitempty"`
 }
 
 type fsGrepResult struct {

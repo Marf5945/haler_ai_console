@@ -31,13 +31,13 @@ import "time"
 type VerificationStatus string
 
 const (
-	StatusExactOriginal        VerificationStatus = "exact_original"
-	StatusW3AAppProcessed      VerificationStatus = "w3a_app_processed"
-	StatusPlatformProcessed    VerificationStatus = "platform_processed_copy"
-	StatusUnauthorizedCopy     VerificationStatus = "unauthorized_copy"
-	StatusContentModified      VerificationStatus = "content_modified"
-	StatusModelPollutionRisk   VerificationStatus = "model_pollution_risk"
-	StatusUnverified           VerificationStatus = "unverified"
+	StatusExactOriginal      VerificationStatus = "exact_original"
+	StatusW3AAppProcessed    VerificationStatus = "w3a_app_processed"
+	StatusPlatformProcessed  VerificationStatus = "platform_processed_copy"
+	StatusUnauthorizedCopy   VerificationStatus = "unauthorized_copy"
+	StatusContentModified    VerificationStatus = "content_modified"
+	StatusModelPollutionRisk VerificationStatus = "model_pollution_risk"
+	StatusUnverified         VerificationStatus = "unverified"
 )
 
 // Label 回傳驗證狀態的中文名稱。
@@ -171,12 +171,12 @@ const (
 
 // PollutionReport 模型污染偵測結果。
 type PollutionReport struct {
-	HighFreqScore    float64 `json:"high_freq_score"`    // 0.0–1.0，高頻能量異常
-	HistogramScore   float64 `json:"histogram_score"`    // 0.0–1.0，直方圖異常
-	LSBScore         float64 `json:"lsb_score"`          // 0.0–1.0，LSB 分佈異常
-	WeightedTotal    float64 `json:"weighted_total"`     // 加權總分
-	IsPollutionRisk  bool    `json:"is_pollution_risk"`  // WeightedTotal > 0.7
-	Details          string  `json:"details,omitempty"`  // 人可讀說明
+	HighFreqScore   float64 `json:"high_freq_score"`   // 0.0–1.0，高頻能量異常
+	HistogramScore  float64 `json:"histogram_score"`   // 0.0–1.0，直方圖異常
+	LSBScore        float64 `json:"lsb_score"`         // 0.0–1.0，LSB 分佈異常
+	WeightedTotal   float64 `json:"weighted_total"`    // 加權總分
+	IsPollutionRisk bool    `json:"is_pollution_risk"` // WeightedTotal > 0.7
+	Details         string  `json:"details,omitempty"` // 人可讀說明
 }
 
 // PollutionThreshold 模型污染判定閾值。

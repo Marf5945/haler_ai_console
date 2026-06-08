@@ -208,7 +208,15 @@ function publicCLIErrorMessage(err, stdout, stderr) {
   const combined = [err && err.message ? err.message : String(err || ""), stdout || "", stderr || ""].join("\n");
   const unsupported = combined.match(/The '([^']+)' model is not supported[^\n"]*/i);
   if (unsupported) {
+    if (/gemini/i.test(unsupported[1]) || /gemini/i.test(combined)) {
+      return unsupported[1] + " 找不到或目前帳號不支援。請先更新 Gemini CLI，然後雙擊 Gemini adapter 按重新整理；若仍未出現，請改選可用模型。";
+    }
     return "目前的 Codex CLI 帳號不支援模型 " + unsupported[1] + "，請切換到可用模型（例如 gpt-5.5）或清除該 adapter 的 model 選擇。";
+  }
+  const missingGemini = combined.match(/(?:models\/)?([A-Za-z0-9._-]*gemini[A-Za-z0-9._-]*)[^\n"]*(?:not found|not supported|unsupported|not available)|(?:not found|not supported|unsupported|not available)[^\n"]*(?:models\/)?([A-Za-z0-9._-]*gemini[A-Za-z0-9._-]*)/i);
+  if (missingGemini) {
+    const model = missingGemini[1] || missingGemini[2] || "目前選用的 Gemini 模型";
+    return model + " 找不到或目前帳號不支援。請先更新 Gemini CLI，然後雙擊 Gemini adapter 按重新整理；若仍未出現，請改選可用模型。";
   }
   if (/MODEL_CAPACITY_EXHAUSTED|No capacity available for model/i.test(combined)) {
     const modelMatch = combined.match(/model\s+([A-Za-z0-9._-]+)/i);

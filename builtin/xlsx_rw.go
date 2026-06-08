@@ -142,6 +142,138 @@ func GenerateStyledXlsx(spec XlsxSpec, destPath string) error {
 	return writeMinimalZip(destPath, entries)
 }
 
+// GenerateMultiSheetXlsx 從多個 XlsxSpec 產生「多工作表」.xlsx。
+// 每個 spec 對應一個工作表；所有工作表共用一份字串表與樣式表。
+// 純標準庫，無新增依賴，重用 GenerateStyledXlsx 既有的 helper。
+func GenerateMultiSheetXlsx(specs []XlsxSpec, destPath string) error {
+	if len(specs) == 0 {
+		return GenerateStyledXlsx(XlsxSpec{}, destPath)
+	}
+
+	// 合併所有工作表的樣式，共用一份 styles.xml
+	mergedStyles := map[string]XlsxStyle{}
+	for _, spec := range specs {
+		for name, st := range spec.Styles {
+			mergedStyles[name] = st
+		}
+	}
+	styleXML, styleIDs := buildXlsxStyles(mergedStyles)
+
+	// 全活頁簿共用字串表
+	var sharedStrings []string
+	ssIndex := map[string]int{}
+	cellCount := 0
+
+	type builtSheet struct {
+		name string
+		xml  string
+	}
+	sheets := make([]builtSheet, 0, len(specs))
+	usedNames := map[string]bool{}
+
+	for si, spec := range specs {
+		lines, err := xlsxSpecRows(spec)
+		if err != nil {
+			return err
+		}
+
+		var sheetXML strings.Builder
+		sheetXML.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
+		sheetXML.WriteString(`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`)
+		writeXlsxColumns(&sheetXML, spec.ColWidths)
+		sheetXML.WriteString(`<sheetData>`)
+		for rowIdx, row := range lines {
+			fmt.Fprintf(&sheetXML, `<row r="%d">`, rowIdx+1)
+			for colIdx, cell := range row {
+				value := xlsxCellValueString(cell.Value)
+				if _, exists := ssIndex[value]; !exists {
+					ssIndex[value] = len(sharedStrings)
+					sharedStrings = append(sharedStrings, value)
+				}
+				cellCount++
+				ref := fmt.Sprintf("%s%d", xlsxColumnName(colIdx), rowIdx+1)
+				styleAttr := ""
+				if styleID, ok := styleIDs[cell.Style]; ok && styleID > 0 {
+					styleAttr = fmt.Sprintf(` s="%d"`, styleID)
+				}
+				fmt.Fprintf(&sheetXML, `<c r="%s" t="s"%s><v>%d</v></c>`, ref, styleAttr, ssIndex[value])
+			}
+			sheetXML.WriteString(`</row>`)
+		}
+		sheetXML.WriteString(`</sheetData></worksheet>`)
+
+		// 工作表名稱：清理 + 去重（Excel 不允許重名）
+		name := sanitizeXlsxSheetName(spec.SheetName)
+		if spec.SheetName == "" {
+			name = fmt.Sprintf("Sheet%d", si+1)
+		}
+		base := name
+		for n := 2; usedNames[name]; n++ {
+			name = sanitizeXlsxSheetName(fmt.Sprintf("%s_%d", base, n))
+		}
+		usedNames[name] = true
+
+		sheets = append(sheets, builtSheet{name: name, xml: sheetXML.String()})
+	}
+
+	// sharedStrings.xml
+	var ssXML strings.Builder
+	ssXML.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
+	fmt.Fprintf(&ssXML, `<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="%d" uniqueCount="%d">`,
+		cellCount, len(sharedStrings))
+	for _, s := range sharedStrings {
+		ssXML.WriteString(`<si><t xml:space="preserve">` + html.EscapeString(s) + `</t></si>`)
+	}
+	ssXML.WriteString(`</sst>`)
+
+	// [Content_Types].xml：每個工作表一筆 Override
+	var ctXML strings.Builder
+	ctXML.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
+	ctXML.WriteString(`<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">`)
+	ctXML.WriteString(`<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>`)
+	ctXML.WriteString(`<Default Extension="xml" ContentType="application/xml"/>`)
+	ctXML.WriteString(`<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>`)
+	for i := range sheets {
+		fmt.Fprintf(&ctXML, `<Override PartName="/xl/worksheets/sheet%d.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`, i+1)
+	}
+	ctXML.WriteString(`<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>`)
+	ctXML.WriteString(`<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>`)
+	ctXML.WriteString(`</Types>`)
+
+	// xl/workbook.xml：列出所有工作表
+	var wbXML strings.Builder
+	wbXML.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
+	wbXML.WriteString(`<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>`)
+	for i, s := range sheets {
+		fmt.Fprintf(&wbXML, `<sheet name="%s" sheetId="%d" r:id="rId%d"/>`, html.EscapeString(s.name), i+1, i+1)
+	}
+	wbXML.WriteString(`</sheets></workbook>`)
+
+	// xl/_rels/workbook.xml.rels：工作表 rId1..N，接著 styles、sharedStrings
+	var relsXML strings.Builder
+	relsXML.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
+	relsXML.WriteString(`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`)
+	for i := range sheets {
+		fmt.Fprintf(&relsXML, `<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet%d.xml"/>`, i+1, i+1)
+	}
+	fmt.Fprintf(&relsXML, `<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`, len(sheets)+1)
+	fmt.Fprintf(&relsXML, `<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>`, len(sheets)+2)
+	relsXML.WriteString(`</Relationships>`)
+
+	entries := map[string]string{
+		"[Content_Types].xml":        ctXML.String(),
+		"_rels/.rels":                xlsxRels,
+		"xl/_rels/workbook.xml.rels": relsXML.String(),
+		"xl/workbook.xml":            wbXML.String(),
+		"xl/styles.xml":              styleXML,
+		"xl/sharedStrings.xml":       ssXML.String(),
+	}
+	for i, s := range sheets {
+		entries[fmt.Sprintf("xl/worksheets/sheet%d.xml", i+1)] = s.xml
+	}
+	return writeMinimalZip(destPath, entries)
+}
+
 func tsvToXlsxRows(content string) [][]XlsxCell {
 	lines := strings.Split(content, "\n")
 	rows := make([][]XlsxCell, 0, len(lines))

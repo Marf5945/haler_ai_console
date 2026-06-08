@@ -395,6 +395,7 @@ func (a *App) beforeClose(ctx context.Context) bool {
 	if a.allowClose {
 		a.allowClose = false
 		a.closeMu.Unlock()
+		a.stopHookGeneRecorder()
 		return false
 	}
 	a.closeMu.Unlock()
@@ -429,6 +430,7 @@ func (a *App) beforeClose(ctx context.Context) bool {
 	if !analysis.HasContent || !analysis.ShouldPrompt {
 		// 沒內容或不需要提示 → 直接清空並關閉
 		a.ClearMainTalk()
+		a.stopHookGeneRecorder()
 		return false // 允許關閉
 	}
 
@@ -460,6 +462,7 @@ func (a *App) ConfirmClose(saveAsSub bool, subName string) error {
 
 	// 無論如何都清空 main talk
 	a.ClearMainTalk()
+	a.stopHookGeneRecorder()
 
 	a.closeMu.Lock()
 	a.allowClose = true

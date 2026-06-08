@@ -1,15 +1,15 @@
 // ollama_vectorizer_test.go — M2 OllamaEmbedVectorizer 用 httptest mock 全 case 覆蓋。
 //
 // 涵蓋：
-//   1. 成功（新端點 /api/embed 回 embeddings: [[...]]）
-//   2. 成功（舊端點 fallback embedding: [...]）
-//   3. 5xx 連線錯誤 → ErrOllamaUnavailable
-//   4. 404 / model 沒裝 → ErrOllamaUnavailable
-//   5. 200 但 JSON 壞 → ErrOllamaBadResponse
-//   6. 200 但空 embeddings → ErrOllamaBadResponse
-//   7. NaN / Inf → ErrOllamaBadResponse
-//   8. Dimension 第一次量到後固定；第二次不同維度 → ErrOllamaBadResponse
-//   9. text 空 / ModelID 空 → 立即錯誤，不打網路
+//  1. 成功（新端點 /api/embed 回 embeddings: [[...]]）
+//  2. 成功（舊端點 fallback embedding: [...]）
+//  3. 5xx 連線錯誤 → ErrOllamaUnavailable
+//  4. 404 / model 沒裝 → ErrOllamaUnavailable
+//  5. 200 但 JSON 壞 → ErrOllamaBadResponse
+//  6. 200 但空 embeddings → ErrOllamaBadResponse
+//  7. NaN / Inf → ErrOllamaBadResponse
+//  8. Dimension 第一次量到後固定；第二次不同維度 → ErrOllamaBadResponse
+//  9. text 空 / ModelID 空 → 立即錯誤，不打網路
 package builtin
 
 import (

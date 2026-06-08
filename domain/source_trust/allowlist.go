@@ -17,17 +17,17 @@ import (
 
 // AllowlistEntry 代表一筆白名單記錄。
 type AllowlistEntry struct {
-	ID                string    `json:"id"`
-	ProjectID         string    `json:"project_id"`
-	CanonicalHostname string    `json:"canonical_hostname"`
-	URLPattern        string    `json:"url_pattern"`
-	URLPatternHash    string    `json:"url_pattern_hash"`
-	ContentType       []string  `json:"content_type"`
-	SourcePurpose     []string  `json:"source_purpose"`
-	AllowedFor        []string  `json:"allowed_for"`
-	NotAllowedFor     []string  `json:"not_allowed_for"`
-	Expiry            time.Time `json:"expiry"`
-	CreatedAt         time.Time `json:"created_at"`
+	ID                string     `json:"id"`
+	ProjectID         string     `json:"project_id"`
+	CanonicalHostname string     `json:"canonical_hostname"`
+	URLPattern        string     `json:"url_pattern"`
+	URLPatternHash    string     `json:"url_pattern_hash"`
+	ContentType       []string   `json:"content_type"`
+	SourcePurpose     []string   `json:"source_purpose"`
+	AllowedFor        []string   `json:"allowed_for"`
+	NotAllowedFor     []string   `json:"not_allowed_for"`
+	Expiry            time.Time  `json:"expiry"`
+	CreatedAt         time.Time  `json:"created_at"`
 	RenewedAt         *time.Time `json:"renewed_at,omitempty"`
 
 	// ScopeFingerprint 用於續期比對

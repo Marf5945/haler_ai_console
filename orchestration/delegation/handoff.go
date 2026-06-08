@@ -39,7 +39,7 @@ type HandoffMemOp struct {
 
 // HandoffResult 委派建立的結果。
 type HandoffResult struct {
-	SubDir   string       `json:"sub_dir"`  // 建立的 sub 目錄完整路徑
+	SubDir   string       `json:"sub_dir"`   // 建立的 sub 目錄完整路徑
 	MemoryOp HandoffMemOp `json:"memory_op"` // 寫入的記憶操作記錄
 }
 

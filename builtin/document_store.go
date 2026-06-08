@@ -18,8 +18,8 @@ import (
 
 // Store 管理 documents/ 目錄下的所有 DocumentBlob。
 type Store struct {
-	mu       sync.Mutex
-	docsDir  string // documents/ 的絕對路徑
+	mu      sync.Mutex
+	docsDir string // documents/ 的絕對路徑
 }
 
 // NewStore 建立儲存服務。docsDir 不存在時會自動建立。

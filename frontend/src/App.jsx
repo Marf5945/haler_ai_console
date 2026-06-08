@@ -55,8 +55,12 @@ import {
   RestoreUIDefaults,
   SavePanelSettings,
   SavePersona,
+  FinalizeNativeGoProgramAuthoringExport,
   FinalizeNativePersonaExport,
+  GetGoProgramAuthoringDetail,
+  ListGoProgramAuthoringCatalog,
   NativeDragExportPersonaHandler,
+  NativeDragExportGoProgramAuthoring,
   ScanSkillFolder,
   SetBrowserPreference,
   SetToolPreference,
@@ -138,6 +142,7 @@ import {
   GetMemoryPipelineState,
   AppendTalkEntryForAgent,
   GetTalkMessagesForAgent,
+  DeleteTalkMessageForAgent,
   // ── 任務進度 / DAG Runtime v1 接線 ──
   StartTaskProgress,
   CancelActiveTaskProgress,
@@ -148,6 +153,7 @@ import {
   StopLearningMode,
   GenerateLearningRunMetadata,
   IsLearningModeActive,
+  GetActiveLearningRun,
   GetLastLearningReplayPlan,
   GetLearningReplayPlan,
   ListLearningReplayCatalog,
@@ -181,7 +187,7 @@ import {
   RegisterRemoteBridgeChannelWithMode,
   ActivateRemoteBridgeChannel,
   SetRemoteBridgePrimaryChannel,
-  DismissSummarization,
+  RunSummarizationNow,
   DispatchRemoteBridgeAsync,
   DeactivateRemoteBridgeChannel,
   SwitchRemoteBridgeMode,
@@ -195,6 +201,8 @@ import {
   FinalizeNativeReferenceFileExport,
   ImportReferenceFile,
   ListReferenceFiles,
+  ImportVideoFile,
+  ListVideoFiles,
   NativeDragExportReferenceFile,
   StopSidecar,
   // ── v3.6.4 Readiness Gate UI Interaction Layer 接線 ──
@@ -298,8 +306,26 @@ function pickRotatingGreeting(currentText) {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-const defaultPanelStyle = _t('style.default');
-const styleOptions = [defaultPanelStyle, _t('style.options.passiveWhite'), _t('style.options.pinkBetrayal'), _t('style.options.forgiveMeGreen'), _t('style.options.defeatBlue')];
+// Panel-style identity is a STABLE key (language-independent). Labels are
+// resolved live via _t()/styleLabel() so switching language re-translates the
+// buttons (and never resets the active selection).
+const STYLE_KEYS = ['default', 'passiveWhite', 'pinkBetrayal', 'forgiveMeGreen', 'defeatBlue'];
+const STYLE_KEY_I18N = {
+  default: 'style.default',
+  passiveWhite: 'style.options.passiveWhite',
+  pinkBetrayal: 'style.options.pinkBetrayal',
+  forgiveMeGreen: 'style.options.forgiveMeGreen',
+  defeatBlue: 'style.options.defeatBlue',
+};
+const STYLE_KEY_THEME = {
+  default: 'onanegiku',
+  passiveWhite: 'white',
+  pinkBetrayal: 'pink-black',
+  forgiveMeGreen: 'green',
+  defeatBlue: 'blue',
+};
+const defaultPanelStyle = 'default';
+const styleOptions = STYLE_KEYS;
 // Panel font scale is a UI-wide preference; CSS consumes it through --ui-font-scale.
 const fontScaleOptions = ['50%', '80%', '90%', '100%', '110%', '120%'];
 const styleOptionOrderStorageKey = 'ai-console.style-option-order';
@@ -558,6 +584,24 @@ const toolTabById = {
   'flow-mail-digest': 'flow',
   'package-import': 'package',
 };
+
+function toolTabFor(tool = {}) {
+  if (toolTabById[tool.id]) return toolTabById[tool.id];
+  const fields = [tool.id, tool.kind, tool.target, tool.title, tool.detail]
+    .map((value) => String(value || '').toLowerCase());
+  const haystack = fields.join(' ');
+  const kind = fields[1];
+  if (kind === 'skill' || haystack.includes('skill') || haystack.includes('recording') || haystack.includes('replay')) {
+    return 'flow';
+  }
+  if (kind === 'mcp' || kind === 'program' || kind === 'package' || kind === 'cli' || haystack.includes('mcp') || haystack.includes('program')) {
+    return 'package';
+  }
+  if (kind === 'connector' || kind === 'external' || kind === 'api' || kind === 'local' || kind === 'website' || haystack.includes('http')) {
+    return 'external';
+  }
+  return 'package';
+}
 
 const fallbackReviewState = {
   highRisk: {
@@ -1057,12 +1101,6 @@ function App() {
   const [remoteBridgeInboundAdapters, setRemoteBridgeInboundAdapters] = useState([]);
   // §12A.5B Dispatch 狀態追蹤（key: dispatch_id）
   const [dispatchStatus, setDispatchStatus] = useState({});
-  // §29.3 Summary Banner 狀態
-  const [summaryBannerVisible, setSummaryBannerVisible] = useState(false);
-  const [summaryBannerData, setSummaryBannerData] = useState(null);
-  const [summarizing, setSummarizing] = useState(false);
-  const [summaryModelLabel, setSummaryModelLabel] = useState(_t('settings.defaultModel'));
-
   // v3.3.2 P0 state
   const [toolVisibility, setToolVisibility] = useState([]);
   const [pendingImport, setPendingImport] = useState(null);
@@ -1125,6 +1163,7 @@ function App() {
   const activeAdapterIdRef = useRef(null);
   const adapterListRef = useRef([]);
   const subagentTabsRef = useRef([]);
+  const summaryInFlightRef = useRef(false);
   activeAdapterIdRef.current = activeAdapterId;
   adapterListRef.current = adapterList || [];
   subagentTabsRef.current = subagentTabs || [];
@@ -1270,6 +1309,7 @@ function App() {
   const [windowInactive, setWindowInactive] = useState(() => typeof document !== 'undefined' ? document.hidden : false);
   const appStartedAtRef = useRef(Date.now());
   const learningReplayExecutingRef = useRef(false);
+  const [pendingLearningReplayStartConfirm, setPendingLearningReplayStartConfirm] = useState(null);
   const [pendingLearningReplayConfirm, setPendingLearningReplayConfirm] = useState(null);
   const [renderedPixelAvatars, setRenderedPixelAvatars] = useState({});
   const [staticAvatarPreviews, setStaticAvatarPreviews] = useState({});
@@ -1446,6 +1486,21 @@ function App() {
     if (!adapterID || !model) return;
     setAdapterModelChoices((prev) => ({...prev, [adapterID]: model}));
     try { await callWails(() => SetAdapterModelChoice(adapterID, model)); } catch (_) {}
+  };
+
+  const handleAdapterModelRefresh = async (adapterID) => {
+    if (!adapterID) return [];
+    const opts = await callWails(() => ListAdapterModelOptions(adapterID)).catch(() => null);
+    if (Array.isArray(opts) && opts.length > 0) {
+      setAdapterModelOptions((prev) => ({...prev, [adapterID]: opts}));
+      return opts;
+    }
+    setAdapterModelOptions((prev) => {
+      const next = {...prev};
+      delete next[adapterID];
+      return next;
+    });
+    return [];
   };
 
   // Learning mode waits for an idle window before surfacing a digest-ready hint.
@@ -1781,12 +1836,13 @@ function App() {
       }
     });
 
-    // §29.3 Summarization 觸發事件
+    // §29.3 Summarization 觸發事件：背景整理上下文，不顯示手動摘要 banner。
     const offSummarizationNeeded = EventsOn('summarization:needed', (payload) => {
-      if (payload) {
-        setSummaryBannerData(payload);
-        setSummaryBannerVisible(true);
-      }
+      if (!payload || summaryInFlightRef.current) return;
+      summaryInFlightRef.current = true;
+      callWails(() => RunSummarizationNow(activeAdapterIdRef.current || ''))
+        .catch((err) => { console.error('background summarize failed', err); })
+        .finally(() => { summaryInFlightRef.current = false; });
     });
 
     // §12A.5B Dispatch 進度 / 結果事件 — 非同步送出狀態提示
@@ -1855,6 +1911,16 @@ function App() {
       Quit();
     });
 
+    // macOS 原生錄製器降級（多半是缺 Accessibility 授權）→ 明確告知使用者
+    const offNativeRecorderDegraded = EventsOn('visual_learning:native_recorder_degraded', (payload) => {
+      const conversationId = activeConversationIdRef.current || 'main';
+      const detail = (payload && payload.error) ? String(payload.error) : '';
+      setConversationMessages(conversationId, (prev) => [
+        ...prev,
+        t('system.nativeRecorderDegraded') + (detail ? ` (${detail})` : ''),
+      ]);
+    });
+
     return () => {
       offAdapterChanged();
       offAdapterStatus();
@@ -1879,6 +1945,7 @@ function App() {
       offExecInterrupted();
       offSidecarState();
       offCLIAuth();
+      offNativeRecorderDegraded();
       offWebSearchConfigRequired();
       offDigestArchived();
       offRBRegistered();
@@ -2302,16 +2369,33 @@ function App() {
           ...prev,
           `[系統] 示範開始。${run?.id ? `Run: ${run.id}。` : ''}請操作一次你要教我的流程。`,
         ]);
-      } catch {
-        setConversationMessages(conversationId, (prev) => [
-          ...prev,
-          '[系統] 示範開始，但 Visual Learning 後端沒有成功啟動記錄。',
-        ]);
+      } catch (error) {
+        const detail = error?.message || String(error || '');
+        const activeRun = detail.includes('already recording')
+          ? await callWails(GetActiveLearningRun).catch(() => null)
+          : null;
+        if (activeRun) {
+          setVlActiveLearningRun(activeRun);
+          setVlLearningActive(true);
+          setConversationMessages(conversationId, (prev) => [
+            ...prev,
+            `[系統] 已接回仍在進行中的示範。${activeRun?.id ? `Run: ${activeRun.id}。` : ''}請先停止目前示範。`,
+          ]);
+        } else {
+          setConversationMessages(conversationId, (prev) => [
+            ...prev,
+            `[系統] 示範開始，但 Visual Learning 後端沒有成功啟動記錄。${detail ? ` ${detail}` : ''}`,
+          ]);
+        }
       }
       setRecordingEnabled(true);
       setSandboxStopOptions(null);
-    } catch {
-      setConversationMessages(conversationId, (prev) => [...prev, '[系統] 示範啟動失敗。']);
+    } catch (error) {
+      const detail = error?.message || String(error || '');
+      setConversationMessages(conversationId, (prev) => [
+        ...prev,
+        `[系統] 示範啟動失敗。${detail ? ` ${detail}` : ''}`,
+      ]);
     }
   }
 
@@ -2328,8 +2412,12 @@ function App() {
             ...prev,
             formatLearningOperationLearned(namedRun),
           ]);
-        } catch {
-          setConversationMessages(conversationId, (prev) => [...prev, '[系統] 示範結束，但後端停止記錄時回報錯誤。']);
+        } catch (error) {
+          const detail = error?.message || String(error || '');
+          setConversationMessages(conversationId, (prev) => [
+            ...prev,
+            `[系統] 示範結束，但後端停止記錄時回報錯誤。${detail ? ` ${detail}` : ''}`,
+          ]);
         }
         setVlLearningActive(false);
         setVlActiveLearningRun(null);
@@ -2386,13 +2474,26 @@ function App() {
   async function executeLearningReplayWithChat(plan, conversationId, traceId = '') {
     const steps = Array.isArray(plan?.steps) ? plan.steps : [];
     if (!steps.length) return;
-    const confirmed = window.confirm(formatLearningReplayConfirmation(plan));
-    if (!confirmed) {
-      const cancelMessage = 'Ai:已取消執行 replay。示範 plan 保留在對話裡，之後可以再輸入「請按照我剛剛的示範」。';
-      setConversationMessages(conversationId, (prev) => [...prev, cancelMessage]);
-      persistConversationEntry(conversationId, 'assistant', cancelMessage.replace(/^Ai:/, ''), traceId).catch(() => {});
-      return;
-    }
+    setPendingLearningReplayStartConfirm({plan, conversationId, traceId, createdAt: Date.now()});
+  }
+
+  async function startConfirmedLearningReplay() {
+    const pending = pendingLearningReplayStartConfirm;
+    if (!pending || learningReplayExecutingRef.current) return;
+    setPendingLearningReplayStartConfirm(null);
+    await runLearningReplayPlanWithChat(pending.plan, pending.conversationId, pending.traceId);
+  }
+
+  function cancelLearningReplayStartConfirm() {
+    const pending = pendingLearningReplayStartConfirm;
+    setPendingLearningReplayStartConfirm(null);
+    if (!pending) return;
+    const cancelMessage = 'Ai:Replay 尚未執行；我已保留上面的安全 plan，確認內容正確後可以再輸入「請按照我剛剛的示範」。';
+    setConversationMessages(pending.conversationId, (prev) => [...prev, cancelMessage]);
+    persistConversationEntry(pending.conversationId, 'assistant', cancelMessage.replace(/^Ai:/, ''), pending.traceId).catch(() => {});
+  }
+
+  async function runLearningReplayPlanWithChat(plan, conversationId, traceId = '') {
     await delayLearningReplay(350);
     learningReplayExecutingRef.current = true;
     try {
@@ -3918,10 +4019,15 @@ function App() {
       [_t('settings.langZhTW')]: 'zh-TW',
       [_t('settings.langEn')]: 'en',
       [_t('settings.langJa')]: 'ja',
+      [_t('settings.langPt')]: 'pt-PT',
+      [_t('settings.langEs')]: 'es',
+      [_t('settings.langTh')]: 'th',
       // fallback hardcoded labels
       '繁中': 'zh-TW', '英文': 'en', '日文': 'ja',
       'Traditional Chinese': 'zh-TW', 'English': 'en', 'Japanese': 'ja',
       '中': 'zh-TW', 'en': 'en', 'ja': 'ja',
+      'pt': 'pt-PT', 'pt-PT': 'pt-PT', 'es': 'es', 'th': 'th',
+      'Português': 'pt-PT', 'Español': 'es', 'ไทย': 'th',
     };
     return map[displayLabel] || null;
   }
@@ -4054,7 +4160,12 @@ function App() {
         setW3aDetail(popup.info || null);
         setW3aPollutionResult(popup.info?.pollution || null);
       }
-    } catch { /* best-effort */ }
+      return result;
+    } catch (error) {
+      const message = error?.message || String(error);
+      setW3aActionError(message);
+      throw error;
+    }
   }
 
   async function loadW3AMediaInfo() {
@@ -4875,8 +4986,15 @@ function App() {
   }
 
   async function refreshReferenceFiles() {
-    const files = await callWails(ListReferenceFiles);
-    const loadedFiles = Array.isArray(files) ? files : [];
+    // §3.1.11 影片存 data/videos，與引用庫合併成同一份清單顯示
+    const [files, videos] = await Promise.all([
+      callWails(ListReferenceFiles).catch(() => []),
+      callWails(ListVideoFiles).catch(() => []),
+    ]);
+    const loadedFiles = [
+      ...(Array.isArray(files) ? files : []),
+      ...(Array.isArray(videos) ? videos : []),
+    ];
     setReferenceFiles((current) => mergeReferenceLibraryFiles(current, loadedFiles));
     return loadedFiles;
   }
@@ -4964,7 +5082,8 @@ function App() {
         detail: '正在複製到引用庫',
       }));
       try {
-        const imported = await callWails(() => ImportReferenceFile(path));
+        // §3.1.11 影片落獨立資料夾 data/videos，其餘維持引用庫；UI 仍同一份清單
+        const imported = await callWails(() => (isVideoPath(path) ? ImportVideoFile(path) : ImportReferenceFile(path)));
         const importedFile = {
           ...imported,
           status: isW3AMediaPath(path) ? 'checking' : 'ready',
@@ -4975,14 +5094,21 @@ function App() {
           current.filter((file) => file.path !== path),
           importedFile,
         ));
+        setToolResult({
+          toolId: 'doc-entrance',
+          ok: true,
+          message: `${isW3AMediaPath(path) ? '已加入引用媒體' : '已加入引用文件'}：${importedFile.name || name}`,
+        });
       } catch (error) {
+        const message = error?.message || '無法複製，已保留原路徑';
         setReferenceFiles((current) => appendUniqueReferenceFile(current.filter((file) => file.path !== path), {
           name,
           path,
           source: 'memory',
           status: 'error',
-          detail: error?.message || '無法複製，已保留原路徑',
+          detail: message,
         }));
+        setToolResult({toolId: 'doc-entrance', ok: false, message});
       }
       if (isW3AMediaPath(path)) {
         try {
@@ -4992,10 +5118,12 @@ function App() {
             detail: '媒體來源檢查完成',
           }));
         } catch (error) {
+          const message = error?.message || '媒體來源檢查失敗';
           setReferenceFiles((current) => updateReferenceFileStatus(current, referencePathForStatus, {
             status: 'error',
-            detail: error?.message || '媒體來源檢查失敗',
+            detail: message,
           }));
+          setToolResult({toolId: 'doc-entrance', ok: false, message});
         }
       }
     }
@@ -5488,8 +5616,9 @@ function App() {
 
   // v3.6: 學習模式切換 — 對接後端 LearningService
   async function toggleLearning() {
-    const wasEnabled = learningEnabled;
     const conversationId = activeConversationIdRef.current || 'main';
+    const backendActive = await callWails(IsLearningModeActive).catch(() => learningEnabled);
+    const wasEnabled = learningEnabled || !!backendActive;
     if (wasEnabled) {
       // 關閉學習模式
       try {
@@ -5500,8 +5629,12 @@ function App() {
           ...prev,
           formatLearningOperationLearned(namedRun),
         ]);
-      } catch {
-        setConversationMessages(conversationId, (prev) => [...prev, '[系統] 示範結束，但後端停止記錄時回報錯誤。']);
+      } catch (error) {
+        const detail = error?.message || String(error || '');
+        setConversationMessages(conversationId, (prev) => [
+          ...prev,
+          `[系統] 示範結束，但後端停止記錄時回報錯誤。${detail ? ` ${detail}` : ''}`,
+        ]);
       }
       setLearningEnabled(false);
       setVlLearningActive(false);
@@ -5518,8 +5651,25 @@ function App() {
           ...prev,
           `[系統] 示範開始。${run?.id ? `Run: ${run.id}。` : ''}請點一次你要教我的目標。`,
         ]);
-      } catch {
-        setConversationMessages(conversationId, (prev) => [...prev, '[系統] 示範開始，但後端記錄沒有啟動。']);
+      } catch (error) {
+        const detail = error?.message || String(error || '');
+        const activeRun = detail.includes('already recording')
+          ? await callWails(GetActiveLearningRun).catch(() => null)
+          : null;
+        if (activeRun) {
+          setVlActiveLearningRun(activeRun);
+          setVlLearningActive(true);
+          setLearningEnabled(true);
+          setConversationMessages(conversationId, (prev) => [
+            ...prev,
+            `[系統] 已接回仍在進行中的示範。${activeRun?.id ? `Run: ${activeRun.id}。` : ''}再按一次可停止記錄。`,
+          ]);
+          return;
+        }
+        setConversationMessages(conversationId, (prev) => [
+          ...prev,
+          `[系統] 示範開始，但後端記錄沒有啟動。${detail ? ` ${detail}` : ''}`,
+        ]);
       }
       setLearningEnabled(true);
     }
@@ -5684,6 +5834,7 @@ function App() {
         adapterModelChoices={adapterModelChoices}
         adapterModelOptions={adapterModelOptions}
         onAdapterModelPick={handleAdapterModelPick}
+        onAdapterModelRefresh={handleAdapterModelRefresh}
         onLocalAdapterWake={async (adapter) => {
           if (!adapter?.id) return;
           setToolResult({toolId: adapter.id, ok: true, message: t('adapter.wakingModel')});
@@ -5812,22 +5963,6 @@ function App() {
         onExecute={executeDestructiveReview}
         onRecreate={recreateDestructiveReview}
       />
-      {/* i18n: summaryBanner */}
-      {summaryBannerVisible && (
-        <div className="summary-banner">
-          <span className="summary-banner-text">
-            {t('summaryBanner.threshold')}
-            <button type="button" className="summary-banner-model" onClick={() => {}}>
-              {summaryModelLabel || t('settings.defaultModel')}
-            </button>
-            {t('summaryBanner.doSummary')}
-          </span>
-          <button type="button" className="summary-banner-dismiss" onClick={() => {
-            setSummaryBannerVisible(false);
-            callWails(() => DismissSummarization());
-          }}>{t('summaryBanner.later')}</button>
-        </div>
-      )}
       {remoteBridgeSetupOpen && (
         <div className="remote-bridge-setup-overlay">
           <div className="remote-bridge-setup-modal">
@@ -6135,7 +6270,15 @@ function App() {
               draft={draft}
               onDraftChange={setDraft}
               onSend={sendMessage}
-              onDelete={(index) => setMessages((prev) => prev.filter((_, i) => i !== index))}
+              onDelete={(index) => {
+                const target = messages[index];
+                setMessages((prev) => prev.filter((_, i) => i !== index));
+                if (target) {
+                  const convId = activeConversationIdRef.current || 'main';
+                  // 內容比對刪除：後端走 pipeline 記 delete_sentences 維持 hash 鏈；找不到則 no-op。
+                  callWails(() => DeleteTalkMessageForAgent(convId, target)).catch(() => {});
+                }
+              }}
               onSummarizeSearch={(text) => submitComposerText(t('system.summarizeSearch', { text }))}
               // SEC-06: 讀取網址按鈕注入文字，複用後端確認流程
               onInjectText={(text) => submitComposerText(text)}
@@ -6339,6 +6482,14 @@ function App() {
 
       {/* CLI 授權對話框：CLI 需要瀏覽器 OAuth 授權時顯示。
           Go 端已自動開啟瀏覽器，此對話框讓使用者確認授權完成後重試原本的訊息。 */}
+      {pendingLearningReplayStartConfirm && (
+        <LearningReplayStartConfirmCard
+          pending={pendingLearningReplayStartConfirm}
+          onConfirm={startConfirmedLearningReplay}
+          onCancel={cancelLearningReplayStartConfirm}
+        />
+      )}
+
       {pendingLearningReplayConfirm && (
         <LearningReplayConfirmCard
           pending={pendingLearningReplayConfirm}
@@ -6515,7 +6666,7 @@ function App() {
             },
             {
               label: t('tool.copy'),
-              disabled: (toolTabById[dragActionTool.tool.id] || 'external') === 'external',
+              disabled: toolTabFor(dragActionTool.tool) === 'external',
               onClick: () => copyTool(dragActionTool),
             },
             {label: t('common.cancel'), onClick: () => setDragActionTool(null)},
@@ -7369,6 +7520,13 @@ const _panelLangLabelMap = {
   '中': 'settings.langZhTW',
   'en': 'settings.langEn',
   'ja': 'settings.langJa',
+  'pt': 'settings.langPt',
+  'pt-PT': 'settings.langPt',
+  'es': 'settings.langEs',
+  'th': 'settings.langTh',
+  'Português': 'settings.langPt',
+  'Español': 'settings.langEs',
+  'ไทย': 'settings.langTh',
 };
 const _roleLangLabelMap = {
   '自動': 'settings.roleLangAuto',
@@ -7386,23 +7544,53 @@ const _fontPresetLabelMap = {
   'Monospace': 'settings.fontMono',
   'Rounded': 'settings.fontRound',
 };
-const _styleLabelMap = {
-  '喔黏菊': 'style.default',
-  '喔黏橘': 'style.default',
-  '消極白': 'style.options.passiveWhite',
-  '粉切黑': 'style.options.pinkBetrayal',
-  '原諒青': 'style.options.forgiveMeGreen',
-  '敗北藍': 'style.options.defeatBlue',
-  'Sticky Daisy': 'style.default',
-  'Passive White': 'style.options.passiveWhite',
-  'Pink Betrayal': 'style.options.pinkBetrayal',
-  'Forgive-me Green': 'style.options.forgiveMeGreen',
-  'Defeat Blue': 'style.options.defeatBlue',
+// Any historical/localized label (zh-TW / en / ja, current + legacy) → stable key.
+// Used to migrate previously-persisted display strings to language-independent keys.
+const _styleLabelToKey = {
+  // zh-TW
+  '喔黏菊': 'default', '喔黏橘': 'default', '歐黏菊': 'default', '歐黏橘': 'default', '預設': 'default',
+  '消極白': 'passiveWhite', '粉切黑': 'pinkBetrayal', '原諒青': 'forgiveMeGreen', '敗北藍': 'defeatBlue',
+  // en (literal + meme-pun variants)
+  'Sticky Daisy': 'default', 'Legacy Default': 'default', 'Default': 'default', 'Pretty-Please Tangerine': 'default',
+  'Passive White': 'passiveWhite', 'Meh-yo White': 'passiveWhite',
+  'Pink Betrayal': 'pinkBetrayal', 'Ghosted Pink': 'pinkBetrayal',
+  'Forgive-me Green': 'forgiveMeGreen', 'Cuck-Green Pardon': 'forgiveMeGreen',
+  'Defeat Blue': 'defeatBlue', 'L-Taken Blue': 'defeatBlue',
+  // ja (literal + meme-pun variants)
+  'もちもち菊': 'default', 'もちもちオレンジ': 'default', 'おねがいキク': 'default',
+  '消極ホワイト': 'passiveWhite', 'どうでも白': 'passiveWhite',
+  '裏切りピンク': 'pinkBetrayal', '既読スルーピンク': 'pinkBetrayal',
+  '許してグリーン': 'forgiveMeGreen', '寝取られグリーン': 'forgiveMeGreen',
+  '敗北ブルー': 'defeatBlue', '完敗ブルー': 'defeatBlue',
+  // pt-PT
+  'Laranja Faz-Favor': 'default', 'Branco Tanto-Faz': 'passiveWhite',
+  'Rosa Deixado em Visto': 'pinkBetrayal', 'Verde Corno Perdoado': 'forgiveMeGreen',
+  'Azul Levei um L': 'defeatBlue',
+  // es
+  'Naranja Porfa': 'default', 'Blanco Da Igual': 'passiveWhite',
+  'Rosa Dejado en Visto': 'pinkBetrayal', 'Verde Cornudo Perdón': 'forgiveMeGreen',
+  'Azul Me Dieron la L': 'defeatBlue',
+  // th
+  'ส้มอ้อนวอน': 'default', 'ขาวช่างมัน': 'passiveWhite',
+  'ชมพูอ่านไม่ตอบ': 'pinkBetrayal', 'เขียวสวมเขา': 'forgiveMeGreen',
+  'ฟ้าแพ้ราบคาบ': 'defeatBlue',
 };
 
+// Resolve any value (stable key OR localized label, any language) to a stable key.
+function styleKeyOf(value) {
+  if (typeof value !== 'string' || !value) return defaultPanelStyle;
+  if (STYLE_KEYS.includes(value)) return value;
+  return _styleLabelToKey[value] || defaultPanelStyle;
+}
+
+// Live display label for a style, in the current language.
+function styleLabel(value) {
+  return _t(STYLE_KEY_I18N[styleKeyOf(value)] || 'style.default');
+}
+
+// Kept name for compatibility; now returns a stable key (not a display string).
 function normalizePanelStyle(style) {
-  const localized = typeof style === 'string' && _styleLabelMap[style] ? _t(_styleLabelMap[style]) : style;
-  return !localized || localized === _t('settings.fontPresetDefault') || localized === _t('style.legacyDefault') ? defaultPanelStyle : localized;
+  return styleKeyOf(style);
 }
 
 function normalizeStyleOptionOrder(options = []) {
@@ -7436,7 +7624,7 @@ function panelFromUISettings(uiSettings = {}, fallbackPanel = fallbackSettings.p
     roleLanguage: localizeBackendLabel(uiSettings.role_language, _roleLangLabelMap) || fallbackPanel.roleLanguage,
     fontPreset: localizeBackendLabel(uiSettings.font_preset, _fontPresetLabelMap) || fallbackPanel.fontPreset,
     fontScale: uiSettings.font_scale || fallbackPanel.fontScale,
-    panelStyle: normalizePanelStyle(localizeBackendLabel(uiSettings.panel_style, _styleLabelMap) || fallbackPanel.panelStyle),
+    panelStyle: styleKeyOf(uiSettings.panel_style || fallbackPanel.panelStyle),
   };
 }
 
@@ -7482,13 +7670,7 @@ function normalizeToolList(toolList = []) {
 }
 
 function panelStyleTheme(style) {
-  return {
-    [defaultPanelStyle]: 'onanegiku',
-    [_t('style.options.passiveWhite')]: 'white',
-    [_t('style.options.pinkBetrayal')]: 'pink-black',
-    [_t('style.options.forgiveMeGreen')]: 'green',
-    [_t('style.options.defeatBlue')]: 'blue',
-  }[normalizePanelStyle(style)] || 'onanegiku';
+  return STYLE_KEY_THEME[styleKeyOf(style)] || 'onanegiku';
 }
 
 // Converts persisted values like "80%" into a bounded CSS scale number.
@@ -8140,7 +8322,7 @@ function SubToolConflictDialog({result, onResolve, onCancel}) {
 
 function Sidebar({
   adapters, adapterList, activeAdapterId,
-  adapterModelChoices, adapterModelOptions, onAdapterModelPick,
+  adapterModelChoices, adapterModelOptions, onAdapterModelPick, onAdapterModelRefresh,
   onAdapterSelect, onLocalAdapterWake, adapterCandidateLinks, activePanel,
   isToolPopupOpen, panelSettings, onPanelChange, voiceState, voiceInstallBusy,
   onVoiceSettingsChange, onVoiceSettingsRefresh, onVoiceModelInstall, onVoiceModelRemove, onRestoreDefaults, onTogglePanel,
@@ -8449,7 +8631,17 @@ function Sidebar({
               <div className="adapter-model-picker-title">{t('adapter.pickModel') || '選擇 model'}</div>
               <small>{modelPicker.label || modelPicker.adapterID}</small>
             </div>
-            <button type="button" aria-label={t('common.close')} onClick={() => setModelPicker(null)}>×</button>
+            <div className="adapter-model-picker-actions">
+              <button
+                type="button"
+                title={t('adapter.refreshModels') || '重新整理模型'}
+                aria-label={t('adapter.refreshModels') || '重新整理模型'}
+                onClick={() => onAdapterModelRefresh?.(modelPicker.adapterID)}
+              >
+                ↻
+              </button>
+              <button type="button" aria-label={t('common.close')} onClick={() => setModelPicker(null)}>×</button>
+            </div>
           </header>
           {(adapterModelOptions?.[modelPicker.adapterID] || []).map((m) => {
             const isActive = (adapterModelChoices?.[modelPicker.adapterID] || (adapterModelOptions[modelPicker.adapterID] || [])[0]) === m;
@@ -8481,6 +8673,14 @@ function Sidebar({
 // I-6 (#I-601): onReorder(toolId, newRank) 拖曳排序回呼 → 呼叫 SetToolPreference 儲存偏好。
 // Recording catalog shown in the flow popup. DAG run history belongs in the
 // review/debug surfaces, not in the user's recording asset list.
+function ToolFlowSectionLabel({children}) {
+  return (
+    <div className="tool-flow-section-label" aria-hidden="true">
+      {children}
+    </div>
+  );
+}
+
 function RecordingCatalogList() {
   const t = useI18n(s => s.t);
   const [recordings, setRecordings] = useState([]);
@@ -8509,13 +8709,11 @@ function RecordingCatalogList() {
     };
   }, []);
 
-  if (loading) return <div className="recording-catalog-list"><div className="recording-catalog-state">{t('recordingCatalog.loading')}</div></div>;
-  if (!recordings || recordings.length === 0) return <div className="recording-catalog-list"><div className="recording-catalog-state">{t('recordingCatalog.empty')}</div></div>;
+  if (loading || !recordings || recordings.length === 0) return null;
 
   return (
-    <div className="recording-catalog-list">
-      <div className="recording-catalog-title">{t('recordingCatalog.title')}</div>
-      <div className="recording-catalog-grid">
+    <>
+        <ToolFlowSectionLabel>{t('tool.flowCategoryRecording')}</ToolFlowSectionLabel>
         {recordings.map((recording) => {
           const tag = recording.tag || recording.operation_tag || recording.run_id || t('recordingCatalog.untitled');
           const title = recording.title || recording.summary || tag;
@@ -8524,24 +8722,265 @@ function RecordingCatalogList() {
             <button
               key={recording.run_id || tag}
               type="button"
-              className="recording-catalog-card"
+              className="tool-menu-item flow-asset-card flow-recording-card"
               data-full-title={title}
               aria-label={`${tag} ${title}`}
+              aria-disabled="true"
+              onDragStart={(event) => event.preventDefault()}
             >
               {/* Keep recordings framed like tool cards so the flow popup stays visually unified. */}
-              <span className="recording-catalog-icon">◇</span>
-              <span className="recording-catalog-copy">
-                <strong>{tag}</strong>
-                <small>
-                  {recording.step_count || 0} {t('recordingCatalog.steps')}
-                  {stoppedAt ? ` · ${stoppedAt}` : ''}
-                </small>
-              </span>
+              <span className="tool-menu-icon">◇</span>
+              <strong>{tag}</strong>
+              <small>
+                {recording.step_count || 0} {t('recordingCatalog.steps')}
+                {stoppedAt ? ` · ${stoppedAt}` : ''}
+              </small>
             </button>
           );
         })}
-      </div>
-    </div>
+    </>
+  );
+}
+
+const goProgramDagStepCatalog = [
+  {
+    id: 'import',
+    title: '接收程式草稿',
+    detail: '模型只提交 JSON draft；系統建立受控工作區與 Go 原始碼檔案。',
+  },
+  {
+    id: 'validate',
+    title: '契約與權限檢查',
+    detail: '檢查 package main、schema、stdlib/vendor allowlist，攔下未授權網路或子程序。',
+  },
+  {
+    id: 'build',
+    title: '受控編譯',
+    detail: '使用內建 Go toolchain 編譯，禁止下載 module，套用 timeout 與輸出限制。',
+  },
+  {
+    id: 'plan',
+    title: '準備資料輸入',
+    detail: '把天氣 JSON、衣服表格或 DB 查詢結果整理成 stdin JSON，寫入只走 scratch。',
+  },
+  {
+    id: 'execute',
+    title: '執行與結果審核',
+    detail: '限時執行，驗證 stdout JSON contract；成功後只保存為 pending skill。',
+  },
+];
+
+function goProgramStepStatus(run, index) {
+  const status = String(run?.status || '').toLowerCase();
+  if (status === 'completed') return 'done';
+  if (status === 'needs_user_decision') return index === 0 ? 'blocked' : 'pending';
+  if ((run?.attempt_count || 0) > 0) return index === 0 ? 'done' : (index === 1 ? 'active' : 'pending');
+  return index === 0 ? 'active' : 'pending';
+}
+
+function goProgramStepStatusLabel(status) {
+  return {done: '完成', active: '進行中', blocked: '待確認', pending: '等待'}[status] || '等待';
+}
+
+function summarizeGoProgramPermissions(permissions = {}) {
+  const labels = [];
+  if (permissions.read_app_data) labels.push('讀取 app data');
+  if (permissions.read_outputs) labels.push('讀取 outputs');
+  if (permissions.write_outputs_scratch) labels.push('寫入 scratch outputs');
+  if (permissions.read_db_as_json) labels.push('讀取系統提供 DB JSON');
+  if (Array.isArray(permissions.read_mounted_paths) && permissions.read_mounted_paths.length) labels.push('讀取受限掛載路徑');
+  if (permissions.network) labels.push('網路需審核');
+  if (permissions.shell_subprocess) labels.push('子程序需審核');
+  return labels.length ? labels.join('、') : '無額外權限';
+}
+
+function summarizeGoProgramDataSources(sources = []) {
+  const labels = sources.map((source) => source?.name || source?.kind).filter(Boolean);
+  return labels.length ? labels.join('、') : '由系統在執行時注入 JSON；尚未綁定外部資料來源';
+}
+
+function goProgramLifecycleLabel(run = {}) {
+  if (run?.pending_skill_id) return 'Pending skill';
+  return {completed: '完成', ready: '待製作', authoring: '製作中', needs_user_decision: '待確認'}[run?.status] || run?.status || '待命';
+}
+
+function GoProgramAuthoringCatalogList({showLabel = true}) {
+  const t = useI18n(s => s.t);
+  const [runs, setRuns] = useState([]);
+  const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [note, setNote] = useState('');
+  const [exportDialog, setExportDialog] = useState(null);
+
+  const loadRuns = () => {
+    setLoading(true);
+    callWails(() => ListGoProgramAuthoringCatalog(20))
+      .then((data) => setRuns(Array.isArray(data) ? data : []))
+      .catch(() => setRuns([]))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadRuns();
+    const offUpdated = EventsOn('goprogram:authoring_updated', loadRuns);
+    const offNative = EventsOn('goprogram:native_completed', showExportDialog);
+    const timer = setInterval(loadRuns, 12000);
+    return () => {
+      offUpdated && offUpdated();
+      offNative && offNative();
+      clearInterval(timer);
+    };
+  }, []);
+
+  async function openDetail(runID) {
+    try {
+      const data = await callWails(() => GetGoProgramAuthoringDetail(runID));
+      setDetail(data);
+      setNote('');
+    } catch (error) {
+      setNote(error?.message || String(error));
+    }
+  }
+
+  function showExportDialog(result) {
+    if (!result || result.status !== 'success' || !result.landed_path) {
+      if (result?.message) setNote(result.message);
+      return;
+    }
+    setExportDialog({
+      runID: result.run_id,
+      name: result.program_name || result.program_id || 'Go program',
+      tempExportDir: result.export_dir,
+      landedPath: result.landed_path,
+      detail: result.drop_target_kind && result.drop_target_dir
+        ? `${result.landed_path}\n${result.drop_target_kind}: ${result.drop_target_dir}`
+        : result.landed_path,
+    });
+  }
+
+  async function startNativeExport(event, run) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    try {
+      event?.dataTransfer?.setData?.('application/x-ai-console-go-program-run-id', run?.run_id || '');
+      if (event?.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
+    } catch (_) {}
+    if (!run?.run_id) return;
+    setNote('');
+    try {
+      const result = await callWails(() => NativeDragExportGoProgramAuthoring(run.run_id));
+      showExportDialog(result);
+    } catch (error) {
+      setNote(error?.message || String(error));
+    }
+  }
+
+  async function finalizeExport(action) {
+    if (!exportDialog) return;
+    const target = exportDialog;
+    setExportDialog(null);
+    try {
+      await callWails(() => FinalizeNativeGoProgramAuthoringExport(
+        action,
+        target.runID || '',
+        target.tempExportDir || '',
+        target.landedPath || '',
+      ));
+      if (action === 'remove') {
+        setRuns((current) => current.filter((run) => run.run_id !== target.runID));
+      }
+    } catch (error) {
+      setNote(error?.message || String(error));
+    }
+  }
+
+  if ((loading && runs.length === 0) || !runs || runs.length === 0) return null;
+
+  const selected = detail || null;
+  const selectedPermissions = selected?.manifest?.permissions || {};
+  const selectedSources = selected?.manifest?.data_sources || [];
+
+  return (
+    <>
+        {showLabel && <ToolFlowSectionLabel>{t('tool.flowCategorySkill')}</ToolFlowSectionLabel>}
+        {runs.map((run) => {
+          const updated = run.updated_at ? new Date(run.updated_at).toLocaleString('zh-TW', {hour12: false}) : '';
+          const title = run.program_name || run.program_id || run.run_id;
+          return (
+            <button
+              key={run.run_id || title}
+              type="button"
+              className="tool-menu-item flow-asset-card go-program-flow-card"
+              draggable
+              data-full-title={run.message || run.purpose || title}
+              title="點按檢視，拖出資料夾"
+              onClick={() => openDetail(run.run_id)}
+              onDragStart={(event) => startNativeExport(event, run)}
+            >
+              <span className="tool-menu-icon go-program-flow-icon">⌘</span>
+              <strong>{title}</strong>
+              <small>{goProgramLifecycleLabel(run)} · {run.attempt_count || 0}{updated ? ` · ${updated}` : ''}</small>
+            </button>
+          );
+        })}
+      {selected && (
+        <div className="tool-drag-overlay" role="dialog" aria-modal="true" aria-label="Go program authoring detail">
+          <section className="tool-drag-modal go-program-flow-detail-modal">
+            <header>
+              <span>⌘</span>
+              <div className="drag-action-title">
+                <strong>{selected.program_name || selected.program_id}</strong>
+                <small>{goProgramLifecycleLabel(selected)} · {selected.attempt_count || 0} attempts</small>
+              </div>
+            </header>
+            <div className="go-program-flow-detail">
+              <div className="go-program-flow-meta">
+                <span>Run</span><strong>{selected.run_id}</strong>
+                <span>Skill</span><strong>{selected.pending_skill_id || '尚未保存'}</strong>
+                <span>Attempt</span><strong>{selected.attempt_count || 0} 次；{selected.latest_attempt_hash ? `版本 ${String(selected.latest_attempt_hash).slice(0, 12)}` : '尚無版本'}</strong>
+              </div>
+              <div className="go-program-dag" aria-label="Go program authoring DAG">
+                {goProgramDagStepCatalog.map((step, index) => {
+                  const status = goProgramStepStatus(selected, index);
+                  return (
+                    <div className={`go-program-dag-node go-program-dag-node-${status}`} key={step.id}>
+                      <i>{index + 1}</i>
+                      <div>
+                        <strong>{step.title}</strong>
+                        <small>{step.detail}</small>
+                      </div>
+                      <em>{goProgramStepStatusLabel(status)}</em>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="go-program-flow-meta">
+                <span>權限</span><strong>{summarizeGoProgramPermissions(selectedPermissions)}</strong>
+                <span>資料來源</span><strong>{summarizeGoProgramDataSources(selectedSources)}</strong>
+              </div>
+            </div>
+            <div className="tool-drag-actions" style={{gridTemplateColumns: 'repeat(2, minmax(0, 1fr))'}}>
+              <button type="button" onClick={(event) => startNativeExport(event, selected)}>拖出</button>
+              <button type="button" onClick={() => setDetail(null)}>關閉</button>
+            </div>
+          </section>
+        </div>
+      )}
+      {note && <p className="go-program-flow-note">{note}</p>}
+      {exportDialog && (
+        <DragActionModal
+          ariaLabel="Go program export"
+          icon="↗"
+          title={exportDialog.name}
+          detail={exportDialog.detail}
+          actions={[
+            {label: t('adapter.remove'), onClick: () => finalizeExport('remove')},
+            {label: t('adapter.copyAction'), onClick: () => finalizeExport('copy')},
+            {label: t('common.cancel'), onClick: () => finalizeExport('cancel')},
+          ]}
+        />
+      )}
+    </>
   );
 }
 
@@ -8555,13 +8994,28 @@ function ToolPopup({side, tools, activeTab, favoriteToolIds, hiddenToolIds, tool
     tool.id !== 'tool-entrance' &&
     (side !== 'right' || favoriteToolIds.includes(tool.id)) &&
     !hiddenToolIds.includes(tool.id) &&
-    (toolTabById[tool.id] || 'external') === activeTab
+    toolTabFor(tool) === activeTab
   )).filter((tool) => {
     if (!normalizedQuery) return true;
     return [tool.title, tool.detail, tool.id]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(normalizedQuery));
   });
+  const visibleExternalServiceLinks = (externalServiceLinks || []).filter((link) => !hiddenToolIds.includes(link.id));
+  const visibleDocumentationLinks = (documentationLinks || []).filter((link) => !hiddenToolIds.includes(link.id));
+
+  function externalLinkTool(link, icon, detail) {
+    return {
+      id: link.id,
+      icon,
+      title: link.label || link.url,
+      detail: link.url || detail,
+      kind: 'external',
+      target: link.url,
+      enabled: true,
+      available: true,
+    };
+  }
 
   function startToolDrag(event, tool) {
     event.dataTransfer.effectAllowed = 'copyMove';
@@ -8628,7 +9082,7 @@ function ToolPopup({side, tools, activeTab, favoriteToolIds, hiddenToolIds, tool
         {/* I-6 (#I-601): tool-menu-list 同時作為 intra-list 拖曳排序的 drop container。
            拖入同列表另一項時，根據 drop 位置計算 newRank 並呼叫 onReorder。 */}
       <div
-        className={`tool-menu-list ${activeTab === 'flow' ? 'tool-menu-list-flow' : ''}`}
+        className="tool-menu-list"
         onDragOver={(event) => {
           if (event.dataTransfer.types.includes('application/x-ai-console-tool-id')) {
             event.preventDefault();
@@ -8654,26 +9108,25 @@ function ToolPopup({side, tools, activeTab, favoriteToolIds, hiddenToolIds, tool
       >
         {/* I-7: 自動流程 tab mirrors the active DAG Hook Run and node summaries. */}
         {activeTab === 'flow' && dagRun && (
-          <div className="tool-dag-card">
-            <header>
-              <span>{dagRun.title}</span>
-              <strong>{dagStatusLabel(dagRun.status)}</strong>
-            </header>
-            <small>{dagRun.hookRunId || 'Hook Run starting'} · {dagRun.summaries.length} summaries</small>
-            <div className="tool-dag-node-list">
-              {dagRun.nodes.map((node) => (
-                <div className={`tool-dag-node tool-dag-node-${node.status}`} key={node.id}>
-                  <i className={`dag-node-dot dag-risk-${node.risk}`} />
-                  <span>{node.title}</span>
-                  <em>{dagStatusLabel(node.status)}</em>
-                </div>
-              ))}
-            </div>
-          </div>
+          <button
+            type="button"
+            className="tool-menu-item flow-asset-card"
+            title={`${dagRun.title} · ${dagStatusLabel(dagRun.status)}`}
+          >
+            <span className="tool-menu-icon">◇</span>
+            <strong>{dagRun.title}</strong>
+            <small>{dagStatusLabel(dagRun.status)} · {dagRun.nodes?.length || 0}</small>
+          </button>
         )}
         {/* Recording assets live here; DAG run history stays out of this list. */}
         {activeTab === 'flow' && (
           <RecordingCatalogList />
+        )}
+        {activeTab === 'flow' && visibleTools.length > 0 && (
+          <ToolFlowSectionLabel>{t('tool.flowCategorySkill')}</ToolFlowSectionLabel>
+        )}
+        {activeTab === 'flow' && (
+          <GoProgramAuthoringCatalogList showLabel={visibleTools.length === 0} />
         )}
         {/* ── #44 工具清單：可用工具在前、斷線工具在後 ── */}
         {/* unavailable 工具：icon 加黑線打叉覆蓋，保持可見，不灰化 */}
@@ -8711,37 +9164,50 @@ function ToolPopup({side, tools, activeTab, favoriteToolIds, hiddenToolIds, tool
           );
         })}
         {/* I-5: external_service 連結 — 來自 ListExternalLinksByType("external_service")，顯示於「外部連結」tab */}
-        {activeTab === 'external' && (externalServiceLinks || []).map((link) => (
-          <a
-            className="tool-menu-item tool-menu-item-link"
-            key={link.id}
-            href={link.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={link.url}
-          >
-            <span className="tool-menu-icon">↗</span>
-            <strong>{link.label || link.url}</strong>
-            <small>{t('link.externalService')}</small>
-          </a>
-        ))}
+        {activeTab === 'external' && visibleExternalServiceLinks.map((link) => {
+          const linkTool = externalLinkTool(link, '↗', t('link.externalService'));
+          return (
+            <button
+              className="tool-menu-item tool-menu-item-link"
+              key={link.id}
+              draggable
+              type="button"
+              data-tool-id={link.id}
+              title={link.url}
+              onClick={() => openExternal(link.url)}
+              onDragEnd={(event) => finishToolDrag(event, linkTool)}
+              onDragStart={(event) => startToolDrag(event, linkTool)}
+            >
+              <span className="tool-menu-icon">↗</span>
+              <strong>{link.label || link.url}</strong>
+              <small>{t('link.externalService')}</small>
+            </button>
+          );
+        })}
         {/* I-5: documentation 連結 — 純參考，不進工具執行區。
              必須用 Wails BrowserOpenURL 在 OS 預設瀏覽器外部開啟，
              不得在 AI Console 內部 WebView 開啟（#47 合約要求）。 */}
-        {activeTab === 'external' && (documentationLinks || []).map((link) => (
-          <button
-            className="tool-menu-item tool-menu-item-link tool-menu-item-doc"
-            key={link.id}
-            type="button"
-            title={t('link.docLinkTitle', { url: link.url })}
-            onClick={() => openExternal(link.url)}
-          >
-            <span className="tool-menu-icon">▤</span>
-            <strong>{link.label || link.url}</strong>
-            <small>{t('link.docLinkLabel')}</small>
-          </button>
-        ))}
-        {!visibleTools.length && !(activeTab === 'external' && ((externalServiceLinks || []).length || (documentationLinks || []).length)) && (
+        {activeTab === 'external' && visibleDocumentationLinks.map((link) => {
+          const linkTool = externalLinkTool(link, '▤', t('link.docLinkLabel'));
+          return (
+            <button
+              className="tool-menu-item tool-menu-item-link tool-menu-item-doc"
+              key={link.id}
+              draggable
+              type="button"
+              data-tool-id={link.id}
+              title={t('link.docLinkTitle', { url: link.url })}
+              onClick={() => openExternal(link.url)}
+              onDragEnd={(event) => finishToolDrag(event, linkTool)}
+              onDragStart={(event) => startToolDrag(event, linkTool)}
+            >
+              <span className="tool-menu-icon">▤</span>
+              <strong>{link.label || link.url}</strong>
+              <small>{t('link.docLinkLabel')}</small>
+            </button>
+          );
+        })}
+        {!visibleTools.length && activeTab !== 'flow' && !(activeTab === 'external' && (visibleExternalServiceLinks.length || visibleDocumentationLinks.length)) && (
           <div className="tool-search-empty">
             <strong>{t('tool.noMatch')}</strong>
             <span>{t('tool.noMatchHint')}</span>
@@ -8785,6 +9251,38 @@ function DragActionModal({ariaLabel, icon = '↗', title, detail = '', actions =
           ))}
         </div>
       </section>
+    </div>
+  );
+}
+
+function LearningReplayStartConfirmCard({pending, onConfirm, onCancel}) {
+  const plan = pending?.plan || {};
+  const steps = Array.isArray(plan.steps) ? plan.steps : [];
+  const nativeSteps = steps.filter(isNativeReplayStep);
+  const domSteps = steps.length - nativeSteps.length;
+  const windows = Array.from(new Set(nativeSteps.map((step) => (
+    basenameForDisplay(step.window_process || step.tag || step.window_title || 'unknown')
+  )))).filter(Boolean).slice(0, 3);
+  const first = steps[0] || {};
+  const target = first.window_title || first.label || first.role || first.css_selector || first.tag || `座標 (${first.x || 0}, ${first.y || 0})`;
+  return (
+    <div className="learning-replay-confirm" role="dialog" aria-label="Replay start confirmation">
+      <header>
+        <strong>確認 replay plan</strong>
+        <span>尚未執行</span>
+      </header>
+      <p>我已讀到示範並產生安全 plan。確認下面內容正確後，才會真的移動滑鼠或點擊。</p>
+      <div className="learning-replay-confirm-grid">
+        <span>Run</span><strong>{plan.run_id || 'unknown'}</strong>
+        <span>Title</span><strong>{plan.title || plan.run_name || 'untitled'}</strong>
+        <span>Steps</span><strong>{steps.length}（本視窗 {domSteps}，外部 {nativeSteps.length}）</strong>
+        <span>First</span><strong>{target}</strong>
+        {windows.length > 0 && <><span>Windows</span><strong>{windows.join(', ')}</strong></>}
+      </div>
+      <footer>
+        <button type="button" onClick={onCancel}>先不要</button>
+        <button type="button" className="learning-replay-confirm-primary" onClick={onConfirm}>執行 replay</button>
+      </footer>
     </div>
   );
 }
@@ -9173,7 +9671,7 @@ function SettingsMenu({
           icon="◎"
           label={t('settings.panelLanguage')}
           value={panelLanguageValue}
-          onNext={() => onPanelChange({panelLanguage: cycleValue([t('settings.langZhTW'), t('settings.langEn'), t('settings.langJa')], panelLanguageValue)})}
+          onNext={() => onPanelChange({panelLanguage: cycleValue([t('settings.langZhTW'), t('settings.langEn'), t('settings.langJa'), t('settings.langPt'), t('settings.langEs'), t('settings.langTh')], panelLanguageValue)})}
         />
         <SettingSelect
           icon="♙"
@@ -9209,7 +9707,7 @@ function SettingsMenu({
               onDrop={() => moveStyleOption(option)}
               onClick={() => onPanelChange({panelStyle: option})}
             >
-              {option}
+              {styleLabel(option)}
             </button>
           ))}
         </div>
@@ -9386,7 +9884,7 @@ function BrowserSettingsSection({
 
       <div className="ui-settings-info">
         <span className="ui-settings-label">{t('settings.currentPanel')}</span>
-        <span className="ui-settings-value">{normalizePanelStyle(panelSettings?.panelStyle)}</span>
+        <span className="ui-settings-value">{styleLabel(panelSettings?.panelStyle)}</span>
       </div>
 
       <section className="summary-model-settings">
@@ -12618,6 +13116,20 @@ function RightRail({
     setDraggedReferenceKey('');
   }
 
+  function handleReferenceDrop(event) {
+    // 只把內部 reference 排序拖曳吃掉；外部檔案仍要進圖片/引用分流。
+    if (draggedReferenceKeyRef.current) {
+      event?.preventDefault?.();
+      finishReferenceDrag(event);
+      return;
+    }
+    if (event?.dataTransfer?.files?.length) {
+      event.preventDefault();
+      event.stopPropagation();
+      onReferenceFileDrop?.(Array.from(event.dataTransfer.files));
+    }
+  }
+
   return (
     <aside
       className="right-panel"
@@ -12683,37 +13195,28 @@ function RightRail({
           <small>{isRecordingEnabled ? t('rightRail.recording') : t('rightRail.close')}</small>
         </button>
       </div>
-      <div
-        className="tool-card reference-file-card"
-        onDragOver={(event) => {
-          event.preventDefault();
-          event.dataTransfer.dropEffect = 'copy';
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          // §M3+ 同上：reorder 不觸發 import
-          if (draggedReferenceKeyRef.current) {
-            finishReferenceDrag(event);
-            return;
-          }
-          if (event.dataTransfer.files?.length) {
-            onReferenceFileDrop(Array.from(event.dataTransfer.files));
-          }
-        }}
-      >
+	      <div
+	        className="tool-card reference-file-card"
+	        onDragOver={(event) => {
+	          event.preventDefault();
+	          event.dataTransfer.dropEffect = 'copy';
+	        }}
+	        onDrop={(event) => {
+	          handleReferenceDrop(event);
+	        }}
+	      >
         <span>▤</span>
         <span>{t('rightRail.citeFile')}</span>
       </div>
       <div
         className="reference-file-list"
-        onDragOver={(event) => {
-          if (!draggedReferenceKeyRef.current) return;
-          event.preventDefault();
-          event.stopPropagation();
-          event.dataTransfer.dropEffect = 'move';
-        }}
-        onDrop={finishReferenceDrag}
+	        onDragOver={(event) => {
+	          if (!draggedReferenceKeyRef.current) return;
+	          event.preventDefault();
+	          event.stopPropagation();
+	          event.dataTransfer.dropEffect = 'move';
+	        }}
+	        onDrop={handleReferenceDrop}
       >
         {referenceFiles.map((file, index) => {
           const fileKey = referenceFileKey(file) || `${file.path}-${index}`;
@@ -12725,10 +13228,10 @@ function RightRail({
             data-draggable="true"
             draggable
             key={fileKey}
-            title={file.detail || file.path}
-            onDragStart={(event) => handleReferenceDragStart(event, file)}
-            onDragOver={(event) => handleReferenceDragOver(event, file)}
-            onDrop={finishReferenceDrag}
+	            title={file.detail || file.path}
+	            onDragStart={(event) => handleReferenceDragStart(event, file)}
+	            onDragOver={(event) => handleReferenceDragOver(event, file)}
+	            onDrop={handleReferenceDrop}
             onDragEnd={(event) => {
               // §M3+ 失敗 entry 拖到 window 外 → 移除（同 ToolPopup 的 leftWindow pattern）
               const leftWindow =
@@ -12756,6 +13259,7 @@ function RightRail({
               <small className="reference-file-status">{referenceFileStatusLabel(file.status)}</small>
             </div>
             {shouldShowReferenceFileDetail(file) && <small className="reference-file-detail">{file.detail}</small>}
+            {fileExtLabel(file.name) && <span className="reference-file-ext-badge">{fileExtLabel(file.name)}</span>}
           </div>
           );
         })}
@@ -12766,6 +13270,17 @@ function RightRail({
       </button>
     </aside>
   );
+}
+
+// §3.1.11 影片副檔名判斷：拖入時用來分流到 data/videos
+function isVideoPath(p) {
+  return /\.(mp4|mov|m4v|webm|mkv|avi|wmv|flv|mpe?g|3gp|ogv)$/i.test(String(p || ''));
+}
+
+// §3.1.10 檔案方框右下角的副檔名角標（txt / md / jpeg / wmv …）
+function fileExtLabel(name) {
+  const m = /\.([A-Za-z0-9]+)$/.exec(String(name || ''));
+  return m ? m[1].toLowerCase() : '';
 }
 
 function twoLineFileName(name, fallback = 'Unnamed File') {

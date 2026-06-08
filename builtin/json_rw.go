@@ -45,7 +45,7 @@ func extractStrings(v interface{}, out *[]string) {
 		for _, item := range val {
 			extractStrings(item, out)
 		}
-	// 數字、bool、nil：略過
+		// 數字、bool、nil：略過
 	}
 }
 

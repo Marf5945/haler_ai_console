@@ -21,30 +21,30 @@ const (
 
 // Lifecycle thresholds (in days).
 const (
-	freshDays  = 14
-	staleDays  = 30
+	freshDays    = 14
+	staleDays    = 30
 	stalePenalty = -0.10 // confidence penalty applied when stale
 )
 
 // Capacity limits per project.
 const (
-	softLimitPerProject    = 100
-	hardLimitPerProject    = 300
-	softLimitPerSubagent   = 30
-	hardLimitPerSubagent   = 100
+	softLimitPerProject  = 100
+	hardLimitPerProject  = 300
+	softLimitPerSubagent = 30
+	hardLimitPerSubagent = 100
 )
 
 // PendingCandidateRecord wraps a pending action candidate with lifecycle metadata.
 // Corresponds to schema #53 in TASKS_1_2.md.
 type PendingCandidateRecord struct {
-	ID               string             `json:"id"`
-	Type             string             `json:"type"` // "action" | "label" | "fingerprint_patch" | "target_remap" | "risk_word"
-	Status           CandidateAgeStatus `json:"status"`
-	AgeDays          int                `json:"age_days"`
-	ConfidencePenalty float64           `json:"confidence_penalty"`
-	CreatedAt        time.Time          `json:"created_at"`
-	ArchivedAt       *time.Time         `json:"archived_at,omitempty"`
-	SubagentID       string             `json:"subagent_id,omitempty"`
+	ID                string             `json:"id"`
+	Type              string             `json:"type"` // "action" | "label" | "fingerprint_patch" | "target_remap" | "risk_word"
+	Status            CandidateAgeStatus `json:"status"`
+	AgeDays           int                `json:"age_days"`
+	ConfidencePenalty float64            `json:"confidence_penalty"`
+	CreatedAt         time.Time          `json:"created_at"`
+	ArchivedAt        *time.Time         `json:"archived_at,omitempty"`
+	SubagentID        string             `json:"subagent_id,omitempty"`
 }
 
 // PendingCandidateManager enforces lifecycle rules and capacity limits.

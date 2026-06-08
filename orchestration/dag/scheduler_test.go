@@ -1,9 +1,9 @@
 package dag
 
 import (
-	"strings"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -197,7 +197,7 @@ func TestListPersistedRuns(t *testing.T) {
 // 測試 Resume Guard：hash 匹配
 func TestResumeGuardSafe(t *testing.T) {
 	hashes := GuardHashes{
-		SubMemoryHash:   "hash1",
+		SubMemoryHash:    "hash1",
 		ToolRegistryHash: "hash2",
 		RiskPolicyHash:   "hash3",
 		SourceTrustHash:  "hash4",
@@ -213,13 +213,13 @@ func TestResumeGuardSafe(t *testing.T) {
 // 測試 Resume Guard：hash 不匹配
 func TestResumeGuardUnsafe(t *testing.T) {
 	saved := GuardHashes{
-		SubMemoryHash:   "hash1",
+		SubMemoryHash:    "hash1",
 		ToolRegistryHash: "hash2",
 		RiskPolicyHash:   "hash3",
 		SourceTrustHash:  "hash4",
 	}
 	current := GuardHashes{
-		SubMemoryHash:   "hash1_changed",
+		SubMemoryHash:    "hash1_changed",
 		ToolRegistryHash: "hash2",
 		RiskPolicyHash:   "hash3",
 		SourceTrustHash:  "hash4",
@@ -238,13 +238,13 @@ func TestResumeGuardUnsafe(t *testing.T) {
 // 測試詳細 Guard 比對
 func TestResumeGuardDetailed(t *testing.T) {
 	saved := GuardHashes{
-		SubMemoryHash:   "aaa",
+		SubMemoryHash:    "aaa",
 		ToolRegistryHash: "bbb",
 		RiskPolicyHash:   "ccc",
 		SourceTrustHash:  "ddd",
 	}
 	current := GuardHashes{
-		SubMemoryHash:   "aaa",
+		SubMemoryHash:    "aaa",
 		ToolRegistryHash: "bbb_changed",
 		RiskPolicyHash:   "ccc",
 		SourceTrustHash:  "ddd_changed",
@@ -273,7 +273,7 @@ func TestPreExecutionGuardLowRisk(t *testing.T) {
 func TestGuardHashSaveLoad(t *testing.T) {
 	tmpDir := t.TempDir()
 	hashes := GuardHashes{
-		SubMemoryHash:   "m1",
+		SubMemoryHash:    "m1",
 		ToolRegistryHash: "t1",
 		RiskPolicyHash:   "r1",
 		SourceTrustHash:  "s1",

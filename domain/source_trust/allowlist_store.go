@@ -180,9 +180,9 @@ func (s *AllowlistStore) CheckStatus(hostname string) string {
 
 // ExpiringEntry 描述即將到期的白名單記錄。
 type ExpiringEntry struct {
-	Entry      AllowlistEntry `json:"entry"`
-	DaysLeft   int            `json:"days_left"`
-	IsExpired  bool           `json:"is_expired"`
+	Entry     AllowlistEntry `json:"entry"`
+	DaysLeft  int            `json:"days_left"`
+	IsExpired bool           `json:"is_expired"`
 }
 
 // CheckExpiries 掃描所有白名單，回傳已過期或即將到期（3 天內）的記錄。

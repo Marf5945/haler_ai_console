@@ -6,11 +6,11 @@ import "time"
 type DryRunDecision string
 
 const (
-	DryRunConfirmed   DryRunDecision = "confirmed"    // user confirmed position
-	DryRunRelocate    DryRunDecision = "relocate"     // user asked to re-position
-	DryRunManual      DryRunDecision = "manual"       // user specifies manually
-	DryRunStop        DryRunDecision = "stop"         // user aborted
-	DryRunLocateFail  DryRunDecision = "locate_fail"  // system could not locate; halted
+	DryRunConfirmed  DryRunDecision = "confirmed"   // user confirmed position
+	DryRunRelocate   DryRunDecision = "relocate"    // user asked to re-position
+	DryRunManual     DryRunDecision = "manual"      // user specifies manually
+	DryRunStop       DryRunDecision = "stop"        // user aborted
+	DryRunLocateFail DryRunDecision = "locate_fail" // system could not locate; halted
 )
 
 // DryRunResult records the outcome of a new-device first-replay positioning pass.
@@ -83,11 +83,11 @@ func NewDryRunResult(actionID, deviceProfileID string, base, penalty, runtimeEvi
 // TargetRemap is a pending request to update a region mapping after locate failure.
 // It does NOT overwrite the existing dictionary entry — it enters pending review.
 type TargetRemap struct {
-	ID             string         `json:"id"`
-	ActionID       string         `json:"action_id"`
-	DeviceProfileID string        `json:"device_profile_id"`
-	NewBBox        BBox           `json:"new_bbox"`
-	Reason         string         `json:"reason"`
-	Status         string         `json:"status"` // "pending_target_remap"
-	CreatedAt      time.Time      `json:"created_at"`
+	ID              string    `json:"id"`
+	ActionID        string    `json:"action_id"`
+	DeviceProfileID string    `json:"device_profile_id"`
+	NewBBox         BBox      `json:"new_bbox"`
+	Reason          string    `json:"reason"`
+	Status          string    `json:"status"` // "pending_target_remap"
+	CreatedAt       time.Time `json:"created_at"`
 }

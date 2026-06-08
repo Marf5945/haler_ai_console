@@ -562,8 +562,8 @@ func (s *Service) recordSuccess(job *Job, firedAt time.Time, durationMs int64, r
 		JobID:    job.ID,
 		FiredAt:  firedAt.Format(time.RFC3339),
 		Duration: durationMs,
-		Status:  ExecStatusSuccess,
-		Retried: retried,
+		Status:   ExecStatusSuccess,
+		Retried:  retried,
 	}
 	_ = s.store.AppendHistory(exec)
 
@@ -602,8 +602,8 @@ func (s *Service) recordFailure(job *Job, firedAt time.Time, durationMs int64, e
 		JobID:    job.ID,
 		FiredAt:  firedAt.Format(time.RFC3339),
 		Duration: durationMs,
-		Status:  ExecStatusFailed,
-		Error:   execErr.Error(),
+		Status:   ExecStatusFailed,
+		Error:    execErr.Error(),
 		Retried:  retried,
 	}
 	_ = s.store.AppendHistory(exec)

@@ -25,9 +25,9 @@ type Lifecycle struct {
 type ExpectedStep struct {
 	Action      string `json:"action"`
 	Target      string `json:"target"`
-	Next        string `json:"next,omitempty"`  // 省略預設「待命」
-	Code        string `json:"code"`            // ㄅ|ㄔ|ㄇ|ㄖ，獨立欄位（禁止 concat）
-	Requirement string `json:"requirement"`     // OP|RE
+	Next        string `json:"next,omitempty"` // 省略預設「待命」
+	Code        string `json:"code"`           // ㄅ|ㄔ|ㄇ|ㄖ，獨立欄位（禁止 concat）
+	Requirement string `json:"requirement"`    // OP|RE
 }
 
 // ExpectedChain 是 skill 的應然步驟序列；drift 拿它當比對基準。

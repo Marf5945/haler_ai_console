@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // ──────────────────────────────────────────────
@@ -90,6 +91,55 @@ func SaveFullRun(projectRoot string, run *DAGRun) error {
 		return fmt.Errorf("序列化完整 DAGRun 失敗: %w", err)
 	}
 	return os.WriteFile(filepath.Join(dir, run.ID+suffixFull), data, 0o600)
+}
+
+// AtomicSaveFullRun 以 temp file + rename 原子寫入完整 DAGRun。
+// 避免 replan / cancel / executor 幾乎同時寫造成 last-write-wins。
+// 同檔系統上 os.Rename 為原子操作（Windows 用 MoveFileEx 亦可覆寫）。
+func AtomicSaveFullRun(projectRoot string, run *DAGRun) error {
+	dir := filepath.Join(projectRoot, "dag_runs")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	run.Schema = SchemaDagFullV1
+	data, err := json.MarshalIndent(run, "", "  ")
+	if err != nil {
+		return fmt.Errorf("序列化完整 DAGRun 失敗: %w", err)
+	}
+	// temp 檔與目標同目錄，確保 rename 不跨檔系統。
+	tmp, err := os.CreateTemp(dir, run.ID+".full.*.tmp")
+	if err != nil {
+		return fmt.Errorf("建立 temp 檔失敗: %w", err)
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("寫入 temp 檔失敗: %w", err)
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	// 原子替換：成功後舊檔被新檔取代，讀者永遠看到完整檔。
+	return os.Rename(tmpName, filepath.Join(dir, run.ID+suffixFull))
+}
+
+// fullRunWriteMu 序列化完整 DAGRun 的寫入，確保「單一 writer」語意：
+// replan / cancel / executor 對同一 run 的寫入不會交錯覆蓋。
+var fullRunWriteMu sync.Mutex
+
+// SaveFullRunLocked 是 task 進度的單一原子寫入口：取鎖 + temp+rename。
+// 取代散落各處直接呼叫 SaveFullRun（os.WriteFile，非原子）。
+func SaveFullRunLocked(projectRoot string, run *DAGRun) error {
+	fullRunWriteMu.Lock()
+	defer fullRunWriteMu.Unlock()
+	return AtomicSaveFullRun(projectRoot, run)
 }
 
 // ──────────────────────────────────────────────

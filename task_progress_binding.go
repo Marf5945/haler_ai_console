@@ -18,6 +18,7 @@ import (
 	"ui_console/domain/risk"
 	"ui_console/orchestration/dag"
 	"ui_console/orchestration/delegation"
+	"ui_console/orchestration/replan"
 	"ui_console/orchestration/skill_step"
 	"ui_console/shared/actionchain"
 	"ui_console/shared/controlseal"
@@ -70,7 +71,7 @@ func (a *App) StartTaskProgress(userText, adapterID, modelID, sessionID string) 
 	}
 	a.activeTaskRunID = run.ID
 	a.taskMu.Unlock()
-	_ = dag.SaveFullRun(projectRoot, run)
+	_ = dag.SaveFullRunLocked(projectRoot, run)
 	_ = dag.AppendRunIndex(projectRoot, dag.DAGRunSummary{
 		RunID:     run.ID,
 		Status:    run.Status,
@@ -96,6 +97,10 @@ func (a *App) StartTaskProgress(userText, adapterID, modelID, sessionID string) 
 	run.Status = "running"
 	run.Title = normalized.Plan.Title
 	run.Nodes = dag.TaskPlanToNodes(normalized.Plan)
+	// Bounded Replan：plan 階段建立並持久化目標契約，供日後 replan 同目標判定。
+	if gc := dag.NewGoalContractFromPlan(userText, normalized.Plan); !gc.IsZero() {
+		run.GoalContract = &gc
+	}
 	run.UpdatedAt = now
 	run.ActiveTraceID = ""
 	run.Planner = dag.PlannerMetadata{
@@ -112,7 +117,7 @@ func (a *App) StartTaskProgress(userText, adapterID, modelID, sessionID string) 
 		run.HookRunID = hook.ID
 		run.OutlineID = "outline-from-dag"
 	}
-	_ = dag.SaveFullRun(projectRoot, run)
+	_ = dag.SaveFullRunLocked(projectRoot, run)
 	_ = dag.UpdateRunIndex(projectRoot, run.ID, run.Status, "", 0, len(run.Nodes), 0, "")
 
 	a.emitTaskRun("task:progress_updated", run)
@@ -129,7 +134,7 @@ func (a *App) failPlanningTask(projectRoot string, run *dag.DAGRun, message stri
 	run.UpdatedAt = now
 	run.InterruptReason = message
 	run.ActiveTraceID = ""
-	_ = dag.SaveFullRun(projectRoot, run)
+	_ = dag.SaveFullRunLocked(projectRoot, run)
 	_ = dag.UpdateRunIndex(projectRoot, run.ID, run.Status, now, 0, len(run.Nodes), 1, message)
 	a.clearActiveTask(run.ID)
 	a.emitTaskRun("task:progress_failed", run)
@@ -207,7 +212,7 @@ func (a *App) CancelTaskProgress(runID, reason string) (*dag.DAGRun, error) {
 	run.UpdatedAt = now
 	run.InterruptReason = taskInterruptReason(reason)
 	activeTraceID := run.ActiveTraceID
-	_ = dag.SaveFullRun(projectRoot, run)
+	_ = dag.SaveFullRunLocked(projectRoot, run)
 	_ = dag.UpdateRunIndex(projectRoot, run.ID, run.Status, now, 0, len(run.Nodes), 0, run.InterruptReason)
 	a.cancelTaskTrace(activeTraceID)
 	a.resolveTaskReviewCards(projectRoot, reviewIDs)
@@ -282,7 +287,7 @@ func (a *App) ApproveTaskStep(reviewID string) (*dag.DAGRun, error) {
 	}
 	run.Status = "running"
 	run.UpdatedAt = now
-	_ = dag.SaveFullRun(projectRoot, run)
+	_ = dag.SaveFullRunLocked(projectRoot, run)
 	_ = a.reviewService.Resolve(reviewID, projectRoot)
 	a.clearTaskReviewRefs([]string{reviewID})
 	a.eventBus.Emit(eventbus.EventReviewCardResolved, map[string]string{"review_id": reviewID})
@@ -1219,7 +1224,7 @@ func (a *App) pauseForTaskReview(projectRoot string, run *dag.DAGRun, node *dag.
 	a.taskMu.Lock()
 	a.taskReviewIndex[card.ID] = taskReviewRef{RunID: run.ID, NodeID: node.ID}
 	a.taskMu.Unlock()
-	_ = dag.SaveFullRun(projectRoot, run)
+	_ = dag.SaveFullRunLocked(projectRoot, run)
 	_ = dag.UpdateRunIndex(projectRoot, run.ID, run.Status, "", 0, len(run.Nodes), 0, "")
 	a.eventBus.Emit(eventbus.EventReviewCardAdded, card)
 	a.emitTaskRun("task:progress_waiting_review", run)
@@ -1235,7 +1240,7 @@ func (a *App) executeTaskNode(projectRoot string, run *dag.DAGRun, idx int, adap
 	run.ActiveTraceID = traceID
 	run.Status = "running"
 	run.UpdatedAt = now
-	_ = dag.SaveFullRun(projectRoot, run)
+	_ = dag.SaveFullRunLocked(projectRoot, run)
 	a.emitTaskRun("task:progress_updated", run)
 
 	result, err := a.executeTaskNodeAction(run, *node, adapterID, sessionID, traceID)
@@ -1251,14 +1256,31 @@ func (a *App) executeTaskNode(projectRoot string, run *dag.DAGRun, idx int, adap
 	node.OutputRef = run.HookRunID
 	run.ActiveTraceID = ""
 	if err != nil {
+		// Bounded Replan：先轉結構化 FailureCategory，再嘗試 low-risk 自動換路（flag 預設關）。
+		node.FailureCategory = string(replan.ClassifyFailure(node.Action, result, err))
+		if a.tryReplanOnFailure(projectRoot, run, node, adapterID, sessionID, result, err) {
+			return // 已 silent re-route；runTaskProgress 會 reload 接上新 tail
+		}
 		node.Status = dag.StatusFailed
 		node.Error = err.Error()
 		run.Status = "failed"
 	} else {
 		node.Status = dag.StatusSucceeded
+		if replanEnabled() {
+			// Bounded Replan 軟失敗：節點「成功」但結果是失敗訊號（找不到/不存在…）→ 嘗試換路。
+			if cat := replan.ClassifyResult(result); cat != "" {
+				node.FailureCategory = string(cat)
+				if a.tryReplanOnFailure(projectRoot, run, node, adapterID, sessionID, result, fmt.Errorf("soft failure: %s", cat)) {
+					return // 已 silent re-route；runTaskProgress 會 reload 接上新 tail
+				}
+			} else {
+				// 真正成功且有摘要 → 連續無進展計數歸零。
+				replanCounterFor(run.ID).RecordProgress(*node)
+			}
+		}
 	}
 	run.UpdatedAt = end
-	_ = dag.SaveFullRun(projectRoot, run)
+	_ = dag.SaveFullRunLocked(projectRoot, run)
 	_ = a.recordTaskTrace(run, node)
 	if err != nil {
 		_ = dag.UpdateRunIndex(projectRoot, run.ID, run.Status, end, 0, len(run.Nodes), 1, err.Error())
@@ -1660,7 +1682,12 @@ func buildTaskNodePrompt(run *dag.DAGRun, node dag.DAGNode) string {
 	}
 	// cli_task 走對話口吻；摘要/回覆類步驟要直接收尾，不硬問下一步。
 	if node.ExecutorType == "cli_task" {
-		assembled = buildCLITaskNodeInstruction() + "\n\n" + assembled
+		instruction := buildCLITaskNodeInstruction()
+		// Bounded Replan（flag 開時）：引導「找不到」短答，配合 ClassifyResult 長度守門。
+		if replanEnabled() {
+			instruction += " " + replanShortFailureHint()
+		}
+		assembled = instruction + "\n\n" + assembled
 	}
 	// SEC-C 補洞（2026-05-28）：node.Action/Target 來自 LLM 規劃、depContext 是
 	// 上游節點 result_summary——兩者都可能含 injection。整段拼好後過一次 sanitizer，
@@ -1755,7 +1782,7 @@ func (a *App) finishTaskIfDone(projectRoot string, run *dag.DAGRun) {
 	}
 	run.ActiveNodeID = ""
 	run.UpdatedAt = now
-	_ = dag.SaveFullRun(projectRoot, run)
+	_ = dag.SaveFullRunLocked(projectRoot, run)
 	_ = dag.UpdateRunIndex(projectRoot, run.ID, run.Status, now, 0, len(run.Nodes), 0, "")
 	a.appendTaskResultMessage(run, hasFailed)
 	a.clearActiveTask(run.ID)
@@ -1886,7 +1913,7 @@ func (a *App) interruptStaleTaskRuns(reason string) {
 			}
 		}
 		run.UpdatedAt = now
-		_ = dag.SaveFullRun(projectRoot, run)
+		_ = dag.SaveFullRunLocked(projectRoot, run)
 		_ = dag.UpdateRunIndex(projectRoot, run.ID, run.Status, now, 0, len(run.Nodes), 0, run.InterruptReason)
 		_ = reason
 	}

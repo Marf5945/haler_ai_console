@@ -27,7 +27,7 @@ type DocMeta struct {
 // DocumentBlob 合併式儲存單元：meta + content 在同一個 JSON。
 // 磁碟上存為 documents/{doc_id}.json。
 type DocumentBlob struct {
-	SchemaVersion string `json:"schema_version"` // 固定 "document_blob.v1"
+	SchemaVersion string  `json:"schema_version"` // 固定 "document_blob.v1"
 	Meta          DocMeta `json:"meta"`
 	Content       string  `json:"content"` // 文件的純文字內容（已轉 UTF-8）
 }

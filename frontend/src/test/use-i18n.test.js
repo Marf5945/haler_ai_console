@@ -16,4 +16,14 @@ describe('useI18n', () => {
     expect(document.documentElement.dir).toBe('ltr');
     expect(useI18n.getState().t('settings.panelSettings')).toBe('Panel Settings');
   });
+
+  it('loads Japanese translations without falling back to zh-TW', () => {
+    useI18n.getState().setLanguage('ja');
+
+    expect(useI18n.getState().language).toBe('ja');
+    expect(window.localStorage.getItem('i18n_language')).toBe('ja');
+    expect(document.documentElement.lang).toBe('ja');
+    expect(document.documentElement.dir).toBe('ltr');
+    expect(useI18n.getState().t('settings.panelSettings')).toBe('パネル設定');
+  });
 });

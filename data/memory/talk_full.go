@@ -18,8 +18,8 @@ import (
 type TalkIndexEntry struct {
 	Timestamp string `json:"timestamp"`
 	Role      string `json:"role"`
-	Preview   string `json:"preview"`  // 前 50 字元摘要
-	Offset    int64  `json:"offset"`   // 在 talk_full.md 中的 byte offset
+	Preview   string `json:"preview"` // 前 50 字元摘要
+	Offset    int64  `json:"offset"`  // 在 talk_full.md 中的 byte offset
 }
 
 // ──────────────────────────────────────────────

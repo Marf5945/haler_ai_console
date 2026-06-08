@@ -24,11 +24,11 @@ type fieldRange struct {
 
 // cronFieldRanges 依序為：分鐘、小時、日、月、星期。
 var cronFieldRanges = [5]fieldRange{
-	{0, 59},  // 分鐘
-	{0, 23},  // 小時
-	{1, 31},  // 日
-	{1, 12},  // 月
-	{0, 6},   // 星期（0=週日, 6=週六）
+	{0, 59}, // 分鐘
+	{0, 23}, // 小時
+	{1, 31}, // 日
+	{1, 12}, // 月
+	{0, 6},  // 星期（0=週日, 6=週六）
 }
 
 // cronFieldNames 用於錯誤訊息，與 cronFieldRanges 同序。

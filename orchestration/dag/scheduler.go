@@ -47,31 +47,32 @@ func IsTerminal(s NodeStatus) bool {
 
 // DAGNode 是 DAG 中的單一節點。
 type DAGNode struct {
-	ID             string     `json:"id"`
-	Title          string     `json:"title,omitempty"`
-	Operation      string     `json:"operation"`
-	Action         string     `json:"action,omitempty"`
-	ActionCode     string     `json:"action_code,omitempty"`
-	Target         string     `json:"target,omitempty"`
-	ExecutorType   string     `json:"executor_type,omitempty"`
-	RiskClass      string     `json:"risk_class"`
-	ModelRiskClass string     `json:"model_risk_class,omitempty"`
-	Status         NodeStatus `json:"status"`
-	Dependencies   []string   `json:"dependencies"` // 前置節點 ID
-	ParallelRoot   bool       `json:"parallel_root,omitempty"` // TASK 31：合法平行起始節點
-	BlockReason    string     `json:"block_reason"` // blocked 時的原因
-	Error          string     `json:"error"`        // failed 時的錯誤訊息
-	StartedAt      string     `json:"started_at"`
-	CompletedAt    string     `json:"completed_at"`
-	ReviewID       string     `json:"review_id,omitempty"`
-	ResultSummary  string     `json:"result_summary,omitempty"`
-	OutputRef      string     `json:"output_ref,omitempty"`
-	TraceHash      string     `json:"trace_hash,omitempty"`
-	RetryCount     int        `json:"retry_count"`
-	MaxRetries     int        `json:"max_retries"`
-	ApprovedBy     string     `json:"approved_by,omitempty"`
-	ApprovedAt     string     `json:"approved_at,omitempty"`
-	AppSessionID   string     `json:"app_session_id,omitempty"`
+	ID              string     `json:"id"`
+	Title           string     `json:"title,omitempty"`
+	Operation       string     `json:"operation"`
+	Action          string     `json:"action,omitempty"`
+	ActionCode      string     `json:"action_code,omitempty"`
+	Target          string     `json:"target,omitempty"`
+	ExecutorType    string     `json:"executor_type,omitempty"`
+	RiskClass       string     `json:"risk_class"`
+	ModelRiskClass  string     `json:"model_risk_class,omitempty"`
+	Status          NodeStatus `json:"status"`
+	Dependencies    []string   `json:"dependencies"`               // 前置節點 ID
+	ParallelRoot    bool       `json:"parallel_root,omitempty"`    // TASK 31：合法平行起始節點
+	BlockReason     string     `json:"block_reason"`               // blocked 時的原因
+	Error           string     `json:"error"`                      // failed 時的錯誤訊息
+	FailureCategory string     `json:"failure_category,omitempty"` // Bounded Replan：失敗的結構化分類
+	StartedAt       string     `json:"started_at"`
+	CompletedAt     string     `json:"completed_at"`
+	ReviewID        string     `json:"review_id,omitempty"`
+	ResultSummary   string     `json:"result_summary,omitempty"`
+	OutputRef       string     `json:"output_ref,omitempty"`
+	TraceHash       string     `json:"trace_hash,omitempty"`
+	RetryCount      int        `json:"retry_count"`
+	MaxRetries      int        `json:"max_retries"`
+	ApprovedBy      string     `json:"approved_by,omitempty"`
+	ApprovedAt      string     `json:"approved_at,omitempty"`
+	AppSessionID    string     `json:"app_session_id,omitempty"`
 }
 
 // PlannerMetadata captures the model output used to create a run.
@@ -100,7 +101,10 @@ type DAGRun struct {
 	ActiveTraceID   string          `json:"active_trace_id,omitempty"`
 	InterruptReason string          `json:"interrupt_reason,omitempty"`
 	Planner         PlannerMetadata `json:"planner,omitempty"`
-	Schema          string          `json:"schema,omitempty"` // TASK 31：持久化格式標記（dag_run.full.v1）
+	Schema          string          `json:"schema,omitempty"`          // TASK 31：持久化格式標記（dag_run.full.v1）
+	Revision        int             `json:"revision,omitempty"`        // Bounded Replan：CAS 樂觀鎖版本，每次 ApplyTailPatch +1
+	GoalContract    *GoalContract   `json:"goal_contract,omitempty"`   // Bounded Replan：目標契約，replan 同目標判定依據
+	ReplanActivity  string          `json:"replan_activity,omitempty"` // Bounded Replan：給 status rail 的一句活動摘要
 }
 
 // ──────────────────────────────────────────────

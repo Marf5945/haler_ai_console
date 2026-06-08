@@ -15,7 +15,7 @@ import (
 type WarningTokenType string
 
 const (
-	WarnUnverifiedSource  WarningTokenType = "UNVERIFIED_SOURCE"
+	WarnUnverifiedSource WarningTokenType = "UNVERIFIED_SOURCE"
 	WarnLowTrustSource   WarningTokenType = "LOW_TRUST_SOURCE"
 	WarnPendingReview    WarningTokenType = "PENDING_REVIEW"
 	WarnHighImpactNoAuth WarningTokenType = "HIGH_IMPACT_NO_AUTH"

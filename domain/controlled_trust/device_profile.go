@@ -14,19 +14,19 @@ import (
 // CANNOT cancel the first-replay dry-run requirement on any new device.
 // Corresponds to schema #54 in TASKS_1_2.md.
 type DeviceTrustProfile struct {
-	DeviceProfileID           string    `json:"device_profile_id"`
-	DPIBucket                 string    `json:"dpi_bucket"`            // e.g. "1x", "2x", "3x"
-	DisplayScaleBucket        string    `json:"display_scale_bucket"`  // e.g. "100%", "125%", "150%"
-	AppBundleHash             string    `json:"app_bundle_hash"`
-	AccessibilityTreeAvailable bool     `json:"accessibility_tree_available"`
-	FirstSeenAt               time.Time `json:"first_seen_at"`
-	IsNewDevice               bool      `json:"is_new_device"` // always true until first dry-run completes
+	DeviceProfileID            string    `json:"device_profile_id"`
+	DPIBucket                  string    `json:"dpi_bucket"`           // e.g. "1x", "2x", "3x"
+	DisplayScaleBucket         string    `json:"display_scale_bucket"` // e.g. "100%", "125%", "150%"
+	AppBundleHash              string    `json:"app_bundle_hash"`
+	AccessibilityTreeAvailable bool      `json:"accessibility_tree_available"`
+	FirstSeenAt                time.Time `json:"first_seen_at"`
+	IsNewDevice                bool      `json:"is_new_device"` // always true until first dry-run completes
 }
 
 // Penalty limits for device profile adjustments (spec #32).
 const (
-	maxDPIPenaltyReduction         = 0.08
-	maxResolutionPenaltyReduction  = 0.05
+	maxDPIPenaltyReduction        = 0.08
+	maxResolutionPenaltyReduction = 0.05
 )
 
 // DeviceProfileService manages device trust profiles.

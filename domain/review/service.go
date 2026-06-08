@@ -77,11 +77,11 @@ type Service struct {
 	mu               sync.Mutex
 	cards            []Card
 	lightweightCards []LightweightCard
-	dataRoot         string                                  // 專案資料根目錄，用於寫入 log
-	inboxPath        string                                  // review/review_inbox.json 完整路徑
-	archive          *ArchiveService                         // 管理 review_archive.json
-	decisionLog      *audit_log.AppendLog[decisionLogEntry]  // append-only 決策日誌
-	securityLog      *audit_log.AppendLog[decisionLogEntry]  // security_boundary_rewrite 額外日誌
+	dataRoot         string                                 // 專案資料根目錄，用於寫入 log
+	inboxPath        string                                 // review/review_inbox.json 完整路徑
+	archive          *ArchiveService                        // 管理 review_archive.json
+	decisionLog      *audit_log.AppendLog[decisionLogEntry] // append-only 決策日誌
+	securityLog      *audit_log.AppendLog[decisionLogEntry] // security_boundary_rewrite 額外日誌
 }
 
 // NewService 建立 review service。dataRoot 為專案資料根目錄。

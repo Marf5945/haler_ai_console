@@ -34,10 +34,10 @@ const (
 
 // State represents the current degraded mode status.
 type State struct {
-	Active      bool      `json:"active"`
-	Reason      Reason    `json:"reason,omitempty"`
-	EnteredAt   time.Time `json:"entered_at,omitempty"`
-	BlockedOps  []string  `json:"blocked_ops"` // list of blocked operation categories
+	Active     bool      `json:"active"`
+	Reason     Reason    `json:"reason,omitempty"`
+	EnteredAt  time.Time `json:"entered_at,omitempty"`
+	BlockedOps []string  `json:"blocked_ops"` // list of blocked operation categories
 }
 
 // Service manages degraded mode transitions.

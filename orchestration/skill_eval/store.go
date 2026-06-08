@@ -1,6 +1,8 @@
 // store.go — skill_eval 的 append-only JSONL 持久化（TASK 31 / Phase 1.3）。
 // 路徑刻意放在 localsearch 掃描範圍外（不變式 1/2）：
-//   <dataRoot>/data/projects/<project>/skill_eval/events.jsonl
+//
+//	<dataRoot>/data/projects/<project>/skill_eval/events.jsonl
+//
 // shouldSkipDir 已將 "skill_eval" 列入跳過，確保事件不會被當語料餵回 LLM。
 package skill_eval
 
@@ -21,12 +23,12 @@ const (
 
 // EventRecord 是一筆評量事件（drift / score / candidate）。
 type EventRecord struct {
-	Schema    string       `json:"schema"`              // 固定 SchemaEventV1
-	Timestamp time.Time    `json:"timestamp"`           // UTC
+	Schema    string       `json:"schema"`    // 固定 SchemaEventV1
+	Timestamp time.Time    `json:"timestamp"` // UTC
 	SessionID string       `json:"session_id,omitempty"`
 	SkillID   string       `json:"skill_id,omitempty"`
-	Drifts    []DriftEvent `json:"drifts,omitempty"`    // 本次評量產生的 drift
-	Score     float64      `json:"score,omitempty"`     // 相似度/評分（Phase 1.5）
+	Drifts    []DriftEvent `json:"drifts,omitempty"` // 本次評量產生的 drift
+	Score     float64      `json:"score,omitempty"`  // 相似度/評分（Phase 1.5）
 	Note      string       `json:"note,omitempty"`
 }
 

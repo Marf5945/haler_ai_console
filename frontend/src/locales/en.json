@@ -23,12 +23,12 @@
     "untitled": "Untitled recording"
   },
   "style": {
-    "default": "Sticky Daisy",
+    "default": "Pretty-Please Tangerine",
     "options": {
-      "passiveWhite": "Passive White",
-      "pinkBetrayal": "Pink Betrayal",
-      "forgiveMeGreen": "Forgive-me Green",
-      "defeatBlue": "Defeat Blue"
+      "passiveWhite": "Meh-yo White",
+      "pinkBetrayal": "Ghosted Pink",
+      "forgiveMeGreen": "Cuck-Green Pardon",
+      "defeatBlue": "L-Taken Blue"
     },
     "legacyDefault": "Legacy Default"
   },
@@ -115,6 +115,8 @@
     "tabExternal": "External Links",
     "tabAutoflow": "Autoflow",
     "tabToolkit": "Toolkit",
+    "flowCategoryRecording": "Recording",
+    "flowCategorySkill": "Skill",
     "searchPlaceholder": "Search tools, skills, flows...",
     "searchLabel": "Search Tools",
     "searchNameLabel": "Search tool name",
@@ -282,6 +284,7 @@
   "system": {
     "sidecarFail": "[System] Sidecar failed to start — please verify Node.js is installed locally, or check the log for details.",
     "sidecarCrash": "[System] Sidecar terminated unexpectedly — CLI channel disconnected. Please restart the application.",
+    "nativeRecorderDegraded": "[System] macOS native recording is unavailable — external-window clicks won't be recorded. Grant Accessibility (System Settings → Privacy & Security → Accessibility), and Input Monitoring if prompted, then restart the app.",
     "authBrowserOpen": "[System] {adapter} requires browser authorization. The authorization page has been opened. Click Confirm when done.",
     "authBrowserConfirm": "[System] {adapter} requires browser authorization ({url}). Please confirm whether to open.",
     "imported": "Imported: {name}",
@@ -381,7 +384,10 @@
     "noLocalModelDetected": "No local models detected",
     "voiceManualSpecify": "Manual",
     "voiceAutoDetect": "Auto-detect",
-    "localModelDefault": "Local Model"
+    "localModelDefault": "Local Model",
+    "langPt": "pt",
+    "langEs": "es",
+    "langTh": "th"
   },
   "onboarding": {
     "fillNamePath": "Please fill in a name and path",
@@ -653,6 +659,7 @@
     "exportQuestion": "What to do with [{{name}}]?",
     "copyAction": "Copy",
     "pickModel": "Choose CLI model",
+    "refreshModels": "Refresh model list",
     "currentModel": "Current",
     "cliExportNote": "CLI Adapter only unlinks, does not copy the third-party CLI.",
     "apiExportNote": "LLM API adapter includes auth settings, can only unlink, not copy."

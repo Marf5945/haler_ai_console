@@ -154,7 +154,8 @@ var localLLMProviders = map[string]bool{
 // ollama/lmstudio → PolicyLocalLLM（允許 localhost http）
 // 其他 provider → PolicyCloudAPI（僅 https、禁 private IP）
 // 回傳 (needConfirm, hostname, error)：
-//   needConfirm=true 代表 private IP 需前端確認框。
+//
+//	needConfirm=true 代表 private IP 需前端確認框。
 func ValidateLLMBaseURL(providerID, baseURL string) (needConfirm bool, hostname string, err error) {
 	providerID = strings.ToLower(strings.TrimSpace(providerID))
 	baseURL = strings.TrimSpace(baseURL)
@@ -191,7 +192,6 @@ func ValidateLLMBaseURL(providerID, baseURL string) (needConfirm bool, hostname 
 
 	return false, hostname, err // 公網 http 等直接拒絕
 }
-
 
 // PolicyForLLMEndpoint 集中決定 LLM / model endpoint 的 dial policy。
 // 2a 所有呼叫點一律由此取 policy，不要在呼叫點各自判斷。

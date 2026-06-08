@@ -109,24 +109,41 @@ func (a *App) ExecuteSkillMessage(adapterID, sessionID, userText, traceID string
 			Message:  "未偵測到可路由的 skill action，已走一般流程。",
 		}, nil
 	}
+	invocationID := a.hookGeneInvocationID(traceID, "skill-execution")
 	out, err := a.resolveSkillExecution(actionTarget, sessionID)
 	if err != nil {
 		return nil, err
+	}
+	geneSkillID := hookGeneSkillID(out.SkillID)
+	if geneSkillID != "" {
+		a.emitHookGeneDataEntered(geneSkillID, invocationID)
+		a.emitHookGeneDataProcessed(geneSkillID, invocationID)
+		// 保證所有 return 路徑都收尾（與 go_program / native replay 一致），避免缺 completed 造成 pending 殘留。
+		defer a.emitHookGeneCompleted(geneSkillID, invocationID)
 	}
 	if blocked := a.createBlockedSkillDriftReview(actionTarget, out.SkillID, sessionID, userText); blocked != nil {
 		out.Decision = string(skill_eval.ExecReview)
 		out.Executed = false
 		out.Message = "偵測到高風險 skill drift，已建立 review card，暫停本次執行。"
+		if geneSkillID != "" {
+			a.emitHookGenePaused(geneSkillID, invocationID)
+		}
 		return out, nil
 	}
 	switch skill_eval.ExecDecision(out.Decision) {
 	case skill_eval.ExecAuto:
 		resp, err := a.sendSkillMessage(adapterID, sessionID, userText, traceID)
 		if err != nil {
+			if geneSkillID != "" {
+				a.emitHookGenePaused(geneSkillID, invocationID)
+			}
 			return nil, err
 		}
 		out.Executed = true
 		out.Response = resp
+		if geneSkillID != "" {
+			a.emitHookGeneDataLeft(geneSkillID, invocationID, true)
+		}
 	case skill_eval.ExecNoSkill:
 		resp, err := a.sendSkillMessage(adapterID, sessionID, userText, traceID)
 		if err != nil {
@@ -134,6 +151,10 @@ func (a *App) ExecuteSkillMessage(adapterID, sessionID, userText, traceID string
 		}
 		out.Executed = true
 		out.Response = resp
+	default:
+		if geneSkillID != "" {
+			a.emitHookGenePaused(geneSkillID, invocationID)
+		}
 	}
 	return out, nil
 }
@@ -183,12 +204,26 @@ func (a *App) ConfirmAndExecuteSkillExecution(resolveID, sessionID, choice, adap
 	if err != nil || out == nil || out.Decision == "cancelled" {
 		return out, err
 	}
+	invocationID := a.hookGeneInvocationID(traceID, "skill-confirm-execution")
+	geneSkillID := hookGeneSkillID(out.SkillID)
+	if geneSkillID != "" {
+		a.emitHookGeneDataEntered(geneSkillID, invocationID)
+		a.emitHookGeneDataProcessed(geneSkillID, invocationID)
+		// defer 收尾，保證 sendSkillMessage 成功/失敗兩條路徑都結 gene。
+		defer a.emitHookGeneCompleted(geneSkillID, invocationID)
+	}
 	resp, err := a.sendSkillMessage(adapterID, sessionID, userText, traceID)
 	if err != nil {
+		if geneSkillID != "" {
+			a.emitHookGenePaused(geneSkillID, invocationID)
+		}
 		return nil, err
 	}
 	out.Executed = true
 	out.Response = resp
+	if geneSkillID != "" {
+		a.emitHookGeneDataLeft(geneSkillID, invocationID, true)
+	}
 	return out, nil
 }
 

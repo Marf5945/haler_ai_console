@@ -1,11 +1,11 @@
 // task_progress_fs_test.go — Phase A FS read actions table test
 //
 // 涵蓋：
-//   1. fsCheckPath：邊界內成功 / 邊界外 reject / 敏感 component reject / symlink escape reject
-//   2. fsListDirectory：合法目錄 / 截斷 / 非目錄 reject
-//   3. fsReadFile：合法檔 / 截斷 metadata / .md 升上限 / 目錄 reject
-//   4. fsGlob：單層、遞迴 **、brace {md,txt} 展開、截斷
-//   5. fsGrepSearch：純文字檔匹配、行截斷、跳過超大 line
+//  1. fsCheckPath：邊界內成功 / 邊界外 reject / 敏感 component reject / symlink escape reject
+//  2. fsListDirectory：合法目錄 / 截斷 / 非目錄 reject
+//  3. fsReadFile：合法檔 / 截斷 metadata / .md 升上限 / 目錄 reject
+//  4. fsGlob：單層、遞迴 **、brace {md,txt} 展開、截斷
+//  5. fsGrepSearch：純文字檔匹配、行截斷、跳過超大 line
 //
 // 用 t.TempDir() 模擬 ProjectRoot；不需要真實的 appDataRoot()。
 package main
@@ -70,10 +70,10 @@ func TestFSCheckPath_BoundaryAndSensitive(t *testing.T) {
 	root, allowed := makeFSFixture(t)
 
 	cases := []struct {
-		name      string
-		target    string
-		wantErr   bool
-		wantSub   string // error 必含此 substring（wantErr=true 才檢查）
+		name    string
+		target  string
+		wantErr bool
+		wantSub string // error 必含此 substring（wantErr=true 才檢查）
 	}{
 		{"absolute within root", filepath.Join(root, "data", "references", "files"), false, ""},
 		{"relative path joined to root", "data/references/files", false, ""},

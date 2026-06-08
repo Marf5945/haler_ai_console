@@ -114,9 +114,9 @@ func TestSameOrigin(t *testing.T) {
 	}{
 		{"https://a.com/x", "https://a.com/y", true},
 		{"https://a.com", "https://a.com:443/z", true}, // 補預設埠後同 origin
-		{"https://a.com", "http://a.com", false},        // 降級
-		{"https://a.com", "https://a.com:444", false},   // 換埠
-		{"https://a.com", "https://b.com", false},        // 換 host
+		{"https://a.com", "http://a.com", false},       // 降級
+		{"https://a.com", "https://a.com:444", false},  // 換埠
+		{"https://a.com", "https://b.com", false},      // 換 host
 	}
 	for _, tt := range tests {
 		a, _ := url.Parse(tt.a)

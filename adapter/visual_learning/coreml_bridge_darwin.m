@@ -84,11 +84,10 @@ CoreMLHandle CoreML_LoadModel(const char* modelDirPath, char** errMsg) {
         MLModel* model = nil;
         if (@available(macOS 10.14, *)) {
             // ── MLModelConfiguration ──
-            // computeUnits = All：讓 CoreML 自動選擇最佳裝置
-            //   Apple Silicon → Neural Engine（最快）
-            //   Intel Mac → GPU 或 CPU
+            // computeUnits = CPUAndGPU：避開部分 MLProgram/Neural Engine
+            // execution plan 在 app 內載入時回 error -6；仍保留硬體加速。
             MLModelConfiguration* config = [[MLModelConfiguration alloc] init];
-            config.computeUnits = MLComputeUnitsAll;
+            config.computeUnits = MLComputeUnitsCPUAndGPU;
             model = [MLModel modelWithContentsOfURL:url
                                       configuration:config
                                               error:&error];

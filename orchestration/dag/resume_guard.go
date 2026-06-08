@@ -29,9 +29,9 @@ type GuardHashes struct {
 
 // GuardCheckResult Resume Guard 檢查結果。
 type GuardCheckResult struct {
-	Safe           bool     `json:"safe"`
-	ChangedFields  []string `json:"changed_fields"`  // 哪些 hash 不匹配
-	BlockReason    string   `json:"block_reason"`
+	Safe          bool     `json:"safe"`
+	ChangedFields []string `json:"changed_fields"` // 哪些 hash 不匹配
+	BlockReason   string   `json:"block_reason"`
 }
 
 // ──────────────────────────────────────────────
@@ -204,7 +204,7 @@ func computeFileHash(path string) string {
 
 // isHighRiskClass 判斷是否為高風險等級。
 var highRiskClasses = map[string]bool{
-	"high_non_destructive":        true,
+	"high_non_destructive":         true,
 	"user_owned_asset_destructive": true,
 	"subagent_lifecycle_removal":   true,
 	"security_boundary_rewrite":    true,

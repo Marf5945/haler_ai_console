@@ -22,9 +22,9 @@ type OutlineSource string
 
 const (
 	SourceMainAgent      OutlineSource = "main_agent_outline"      // weight 4
-	SourceSemanticRouter OutlineSource = "semantic_router_outline"  // weight 3
-	SourceReused         OutlineSource = "reused_outline"           // weight 2
-	SourceCLIAssist      OutlineSource = "cli_assist_outline"       // weight 1
+	SourceSemanticRouter OutlineSource = "semantic_router_outline" // weight 3
+	SourceReused         OutlineSource = "reused_outline"          // weight 2
+	SourceCLIAssist      OutlineSource = "cli_assist_outline"      // weight 1
 )
 
 // sourceWeight maps each source to its priority weight.
@@ -43,12 +43,12 @@ type OutlineStep = execution_hook.OutlineStep
 // StepOutline is the full predicted execution plan for a DAG run.
 // Corresponds to schema #52 in TASKS_1_2.md.
 type StepOutline struct {
-	ID          string        `json:"id"`
-	Source      OutlineSource `json:"source"`
-	SourceWeight int          `json:"source_weight"`
-	CreatedAt   time.Time     `json:"created_at"`
-	Steps       []OutlineStep `json:"steps"`
-	OutlineHash string        `json:"outline_hash"`
+	ID           string        `json:"id"`
+	Source       OutlineSource `json:"source"`
+	SourceWeight int           `json:"source_weight"`
+	CreatedAt    time.Time     `json:"created_at"`
+	Steps        []OutlineStep `json:"steps"`
+	OutlineHash  string        `json:"outline_hash"`
 }
 
 // Service manages step outline storage and retrieval for one project.

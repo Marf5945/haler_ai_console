@@ -2,26 +2,27 @@
 //
 // 第一刀（2026-05-24，SEC-W05 minimal cut）後鎖住三件事，防止回潮：
 //
-//   T-1  TestBindListOnlyApp
-//        wails_main.go 的 Bind 物件只能有 1 個（必須是 app）。
-//        防止未來偷偷多綁 devTools / 二次 service，瞬間擴大攻擊面。
+//	T-1  TestBindListOnlyApp
+//	     wails_main.go 的 Bind 物件只能有 1 個（必須是 app）。
+//	     防止未來偷偷多綁 devTools / 二次 service，瞬間擴大攻擊面。
 //
-//   T-2  TestWailsExposedMethodSetMatchesCodegen
-//        Go 跨檔的 exported App method 集合，必須與
-//        frontend/wailsjs/go/main/App.d.ts 的 export function 集合相同。
-//        - Go 多了：忘記跑 `wails generate module`。
-//        - codegen 多了：舊 binding 殘留沒清。
-//        用「集合相等」而非「count 相等」，可抓「同一 PR 加 1 個刪 1 個」。
+//	T-2  TestWailsExposedMethodSetMatchesCodegen
+//	     Go 跨檔的 exported App method 集合，必須與
+//	     frontend/wailsjs/go/main/App.d.ts 的 export function 集合相同。
+//	     - Go 多了：忘記跑 `wails generate module`。
+//	     - codegen 多了：舊 binding 殘留沒清。
+//	     用「集合相等」而非「count 相等」，可抓「同一 PR 加 1 個刪 1 個」。
 //
-//   T-3  TestForbiddenInternalMethodsNotExposed
-//        指定為 internal-only / orphan 的方法名，永遠不得出現在 App.d.ts
-//        或 App.js。第一刀已刪除的 5 個 method 直接列在 forbiddenInternalMethods。
-//        未來認定為 internal-only 的新方法，加進此清單。
+//	T-3  TestForbiddenInternalMethodsNotExposed
+//	     指定為 internal-only / orphan 的方法名，永遠不得出現在 App.d.ts
+//	     或 App.js。第一刀已刪除的 5 個 method 直接列在 forbiddenInternalMethods。
+//	     未來認定為 internal-only 的新方法，加進此清單。
 //
 // 執行：
-//   go test -run TestBindListOnlyApp -v
-//   go test -run TestWailsExposedMethodSetMatchesCodegen -v
-//   go test -run TestForbiddenInternalMethodsNotExposed -v
+//
+//	go test -run TestBindListOnlyApp -v
+//	go test -run TestWailsExposedMethodSetMatchesCodegen -v
+//	go test -run TestForbiddenInternalMethodsNotExposed -v
 //
 // 注意：findProjectRoot helper 已由 architecture_imports_test.go 提供（同 package main）。
 package main

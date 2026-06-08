@@ -51,13 +51,13 @@ type CanonicalLabel struct {
 
 // LabelCandidate is a proposed new label awaiting review.
 type LabelCandidate struct {
-	ID              string         `json:"id"`
-	ProposedLabel   CanonicalLabel `json:"proposed_label"`
-	SourceRegionID  string         `json:"source_region_id"`
-	LLMDescription  string         `json:"llm_description"`
-	Confidence      float64        `json:"confidence"`
-	Status          string         `json:"status"` // "pending" | "approved" | "rejected"
-	CreatedAt       time.Time      `json:"created_at"`
+	ID             string         `json:"id"`
+	ProposedLabel  CanonicalLabel `json:"proposed_label"`
+	SourceRegionID string         `json:"source_region_id"`
+	LLMDescription string         `json:"llm_description"`
+	Confidence     float64        `json:"confidence"`
+	Status         string         `json:"status"` // "pending" | "approved" | "rejected"
+	CreatedAt      time.Time      `json:"created_at"`
 }
 
 // CanonicalLabelService manages the schema and pending candidates.

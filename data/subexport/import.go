@@ -22,10 +22,10 @@ type ToolConflict struct {
 
 // ImportResult 匯入結果。
 type ImportResult struct {
-	NewSystemCode string         `json:"new_system_code"` // 新產生的系統碼
-	SubDir        string         `json:"sub_dir"`         // 安裝的 sub 目錄
-	ToolConflicts []ToolConflict `json:"tool_conflicts"`  // 需要使用者決定的工具衝突
-	InstalledTools []string      `json:"installed_tools"`  // 已自動安裝的工具
+	NewSystemCode  string         `json:"new_system_code"` // 新產生的系統碼
+	SubDir         string         `json:"sub_dir"`         // 安裝的 sub 目錄
+	ToolConflicts  []ToolConflict `json:"tool_conflicts"`  // 需要使用者決定的工具衝突
+	InstalledTools []string       `json:"installed_tools"` // 已自動安裝的工具
 }
 
 // ──────────────────────────────────────────────

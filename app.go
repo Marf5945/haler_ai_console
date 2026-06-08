@@ -53,6 +53,7 @@ import (
 	"ui_console/shared/eventbus"
 	"ui_console/shared/executil"
 	"ui_console/shared/health"
+	"ui_console/shared/hookgene"
 	"ui_console/shared/localsearch"
 	"ui_console/shared/onboarding"
 	"ui_console/shared/package_import"
@@ -256,6 +257,11 @@ type App struct {
 	schedulerService *scheduler.Service
 	pathGuard        *builtin.PathGuard
 	docOnce          sync.Once
+
+	// H-12 / §3.1.5.18.7: main app owns the single hook gene recorder.
+	hookGeneMu       sync.Mutex
+	hookGeneRecorder *hookgene.Recorder
+	hookGeneStarted  bool
 }
 
 const inspectorHistoryLimit = 30
@@ -407,6 +413,9 @@ func NewApp() *App {
 	sidecarAdapter.SetModelProvider(func(adapterID string) string {
 		return a.settingsService.AdapterModelChoices()[adapterID]
 	})
+	// §29.3：注入事件匯流排，否則 checkAndEmitSummarizationNeeded 因 eventBus==nil 早退，
+	// 摘要 banner 永遠不會出現（這是先前 ④ 沉睡的根因）。
+	sidecarAdapter.SetEventBus(a.eventBus)
 	a.cliAdapter = sidecarAdapter
 
 	// #I-804: DAG 節流閥，避免高頻事件卡住前端
@@ -559,6 +568,7 @@ func appDataRoot() string {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.startHookGeneRecorder()
 	// DEBUG_TRACE_REMOVE: Temporary local trace viewer for UI -> CLI diagnostics.
 	// Keep while cleaning dead code: the monitor can look offline when the app is
 	// stopped, but previous trace logs depend on this UI -> Go -> sidecar path.
@@ -905,6 +915,104 @@ func (a *App) AppendTalkEntryForAgent(agentID, role, text string) error {
 	return err
 }
 
+// DeleteTalkMessageForAgent 刪除指定 agent 的 talk_full.md 中「內容相符」的第一筆對話。
+// 為何用內容比對而非索引：前端 messages 是混合陣列（talk_full 歷史 + session 即時訊息
+// + 系統橫幅），index 與檔案條目不是 1:1，按 index 刪會刪錯。內容比對最壞只是 no-op
+// （即時/系統訊息在檔案找不到），絕不刪錯條目。走 pipeline 記 delete_sentences 維持 hash 鏈。
+// 回傳是否真的從檔案刪到一筆。
+func (a *App) DeleteTalkMessageForAgent(agentID, display string) (bool, error) {
+	target := strings.TrimSpace(display)
+	if target == "" {
+		return false, nil
+	}
+	root, err := conversationRootForAgent(agentID)
+	if err != nil {
+		return false, err
+	}
+	raw, err := memory.ReadTalkFull(root)
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return false, err
+	}
+	// 以與 parseTalkMessages 相同的切塊規則切，逐塊還原顯示字串比對。
+	parts := strings.Split(raw, "\n## [")
+	deleted := false
+	var b strings.Builder
+	b.WriteString(parts[0]) // 開頭（# Talk Full 標頭區）原樣保留
+	for _, block := range parts[1:] {
+		if !deleted {
+			if disp, ok := talkBlockDisplay(block); ok && disp == target {
+				deleted = true
+				continue // 跳過此塊 = 刪除
+			}
+		}
+		b.WriteString("\n## [")
+		b.WriteString(block)
+	}
+	if !deleted {
+		return false, nil // 檔案沒有對應條目（前端即時/系統訊息）→ 不動檔案
+	}
+	if err := memory.NewPipeline(root).RewriteTalkFullForDelete(b.String()); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// talkBlockDisplay 把 talk_full 一個區塊（"時間] 角色\n內文…"）還原成
+// 與 parseTalkMessages 相同的顯示字串，供刪除比對。
+func talkBlockDisplay(block string) (string, bool) {
+	lines := strings.SplitN(block, "\n", 2)
+	if len(lines) < 2 {
+		return "", false
+	}
+	role := strings.TrimSpace(lines[0])
+	if idx := strings.LastIndex(role, "]"); idx >= 0 {
+		role = strings.TrimSpace(role[idx+1:])
+	}
+	body := strings.TrimSpace(lines[1])
+	if body == "" {
+		return "", false
+	}
+	switch role {
+	case "assistant", "ai":
+		return "Ai:" + body, true
+	case "user":
+		return body, true
+	default:
+		return "[" + role + "] " + body, true
+	}
+}
+
+// cliSummarizer 是 adapter 摘要能力的窄介面（避免 app 直接依賴 cli_manager 具體型別）。
+type cliSummarizer interface {
+	RunSummarizationNow(adapterID, cliPath, model string) (conversation.Summary, error)
+}
+
+// RunSummarizationNow 由前端 banner「整理」觸發：呼叫 adapter 產摘要、寫 summaries.md、回摘要文字。
+// 失敗直接回 error（Rule 11：不靜默續用舊 context）。
+func (a *App) RunSummarizationNow(adapterID string) (string, error) {
+	summer, ok := a.cliAdapter.(cliSummarizer)
+	if !ok {
+		return "", fmt.Errorf("此 adapter 不支援摘要")
+	}
+	// cliPath 與 sendCLIMessage 相同方式解析；model 留空交給 adapter 的 modelProvider。
+	cliPath := ""
+	if adapterID != "" && a.adapterRegistry != nil {
+		if resolved, err := a.adapterRegistry.ResolveExecutable(adapterID); err == nil {
+			cliPath = resolved
+		}
+	}
+	sum, err := summer.RunSummarizationNow(adapterID, cliPath, "")
+	if err != nil {
+		return "", err
+	}
+	// Rule 15：寫 summaries.md（非 talk_full）；Rule 8：AppendSummary 內部做 redaction。
+	root := storage.ProjectRoot(appDataRoot(), "default")
+	if _, err := memory.NewPipeline(root).AppendSummary(sum.Tag, sum.Content); err != nil {
+		return "", fmt.Errorf("寫入 summaries.md 失敗: %w", err)
+	}
+	return sum.Content, nil
+}
+
 // validAgentID SEC-W03 第二刀（2026-05-24）：agentID 只允許英數、底線、連字號。
 // 例外 white-list：空字串 / "main" / "主haㄌer" 由上方 if 早退。
 // 與 sub_export_binding.go 的 validSubID 風格一致。
@@ -930,6 +1038,36 @@ func conversationRootForAgent(agentID string) (string, error) {
 	}
 	return subRoot, nil
 }
+
+// recentConversationSentences 讀目前對話 agent 的 talk_full.md（UI 刪除對話會清空它，
+// 故天然刪除感知；內容只含 user/assistant，不含系統提示），回傳最後 n 句作為路由子呼叫的歷史 H。
+func (a *App) recentConversationSentences(n int) []conversation.Sentence {
+	root, err := conversationRootForAgent(a.activeAgentID)
+	if err != nil {
+		return nil
+	}
+	text, err := memory.ReadTalkFull(root)
+	if err != nil || strings.TrimSpace(text) == "" {
+		return nil
+	}
+	sentences := conversation.ParseTalkFull(text)
+	if n > 0 && len(sentences) > n {
+		sentences = sentences[len(sentences)-n:]
+	}
+	// 截斷每句內容，避免把整串網頁/工具結果原文塞進每次 routing 子呼叫造成 token 暴增。
+	// 路由與指代解析只需要「上一輪講了什麼」的梗概，不需要完整結果。
+	out := make([]conversation.Sentence, len(sentences))
+	for i, sent := range sentences {
+		if r := []rune(sent.Content); len(r) > recentHistoryMaxRunesPerTurn {
+			sent.Content = string(r[:recentHistoryMaxRunesPerTurn]) + "…"
+		}
+		out[i] = sent
+	}
+	return out
+}
+
+// recentHistoryMaxRunesPerTurn 是注入路由子呼叫的每句歷史長度上限（rune）。
+const recentHistoryMaxRunesPerTurn = 200
 
 func parseTalkMessages(talk string, limit int) []string {
 	sections := strings.Split(talk, "\n## [")
@@ -980,6 +1118,18 @@ func (a *App) PollStatusRail() statusrail.View {
 func (a *App) RecordMainInteraction(role string, text string) statusrail.View {
 	a.statusRail.AddSnapshot(role, text)
 	return a.statusRail.RecordMainInteraction()
+}
+
+// pushActionStatus 把一個動作合成人類狀態句推到 status rail（只給人看，不外洩 ㄌ wire format）。
+// 動作執行前呼叫，讓使用者看到「正在用網路搜尋「…」…」這類即時狀態。
+func (a *App) pushActionStatus(action, target string) {
+	if a == nil || a.statusRail == nil {
+		return
+	}
+	view := a.statusRail.SetText(actionchain.HumanStatus(action, target, actionchain.PhaseRunning))
+	if a.eventBus != nil {
+		a.eventBus.Emit(eventbus.EventStatusRailUpdated, view)
+	}
 }
 
 func (a *App) NotifyStatusRail(source string, template string, subject string, priority string) statusrail.View {
@@ -1132,7 +1282,7 @@ func (a *App) collectActionTags() []string {
 		}
 	}
 	// Visual Learning operation replay is app-owned; LLMs may select it via action-chain.
-	add([]string{"操作"})
+	add([]string{"操作", "程式"})
 	sort.Strings(tags)
 	return tags
 }
@@ -1152,7 +1302,7 @@ func (a *App) maybeHandleLocalSearch(userText, sessionID, traceID string) (*skil
 		return nil, false
 	}
 	decision := toolRoutingDecision{Kind: toolRoutingDecisionAction, Action: "搜尋", Target: req.Query, Next: actionchain.StandbyNext}
-	if handled, resp := a.maybeAskForToolReadiness(sessionID, decision, traceID); handled {
+	if handled, resp := a.maybeAskForToolReadiness(sessionID, decision, userText, traceID); handled {
 		return &resp, true
 	}
 	resp := a.executeLocalSearch(req, sessionID, traceID)
@@ -1220,6 +1370,7 @@ func rememberLocalSearchWebFallback(sessionID string, req localsearch.SearchRequ
 }
 
 func (a *App) executeLocalSearch(req localsearch.SearchRequest, sessionID, traceID string) skill_step.CLIResponse {
+	a.pushActionStatus("搜尋", req.Query) // status rail：正在搜尋本機資料「…」…
 	debugtrace.Record("local_search.enter", traceID, map[string]interface{}{
 		"query": req.Query,
 		"scope": req.Scope,
@@ -1267,6 +1418,7 @@ func (a *App) localSearchRoots() []localsearch.Root {
 		{Path: filepath.Join(root, "documents"), Source: "document"},
 		{Path: filepath.Join(root, "data", "documents"), Source: "document"},
 		{Path: filepath.Join(root, "data", "references", "files"), Source: "document"},
+		{Path: filepath.Join(root, "data", "videos"), Source: "video"}, // 影片獨立資料夾：agent 可發現
 		{Path: filepath.Join(root, "data", "skills"), Source: "skill"},
 		{Path: filepath.Join(root, "debug"), Source: "trace"},
 	}
@@ -1753,7 +1905,7 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 			return resp, nil
 		}
 		if decision, handled := a.consumePendingToolAnswer(sessionID, userText, traceID); handled {
-			if routed, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID); routed {
+			if routed, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID, decision.Raw); routed {
 				return &routedResp, nil
 			}
 		}
@@ -1846,11 +1998,17 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 	}
 	routingContextForToolPrompt := ""
 	if !isTaskProgressInternal {
+		// Problem 2：上一輪本機找不到並記了 pending 網路 fallback，這輪是肯定回覆
+		// → 直接走網路、跳過 keyword/judge（修迴圈、省 token）。
+		if resp, ok := a.maybeHandlePendingLocalSearchWebFallback(userText, sessionID, traceID); ok {
+			return resp, nil
+		}
+		recentHistory := a.recentConversationSentences(6)
 		keywordResp, keywordErr := a.cliAdapter.SendMessage(skill_step.CLIMessageOptions{
 			AdapterID:      adapterID,
 			CLIPath:        cliPath,
 			SessionID:      sessionID,
-			UserText:       buildSearchTermExtractionPrompt(personaPrompt, userText),
+			UserText:       buildSearchTermExtractionPrompt(personaPrompt, userText, recentHistory),
 			Model:          strings.TrimSpace(modelOverride),
 			SystemPrompt:   personaPrompt,
 			ContinuityKey:  conversationContinuityKey("tool-keywords", sessionID),
@@ -1874,14 +2032,41 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 			AdapterID:      adapterID,
 			CLIPath:        cliPath,
 			SessionID:      sessionID,
-			UserText:       buildToolRoutingDecisionPrompt(personaPrompt, userText, routingContextForToolPrompt),
+			UserText:       buildToolRoutingDecisionPrompt(personaPrompt, userText, routingContextForToolPrompt, recentHistory),
 			Model:          strings.TrimSpace(modelOverride),
 			SystemPrompt:   personaPrompt,
 			ContinuityKey:  conversationContinuityKey("tool-judge", sessionID),
 			TraceID:        traceID,
 			SkipContinuity: true,
 		})
+		if judgeErr != nil || judgeResp.Error != "" || judgeResp.AuthRequired {
+			return &judgeResp, judgeErr
+		}
 		decision := normalizeToolRoutingDecision(parseToolRoutingDecision(judgeResp.Text), userText, routingLookup)
+		if shouldRepairToolRoutingDecision(userText, decision) {
+			repairResp, repairErr := a.cliAdapter.SendMessage(skill_step.CLIMessageOptions{
+				AdapterID:      adapterID,
+				CLIPath:        cliPath,
+				SessionID:      sessionID,
+				UserText:       buildToolRoutingRepairPrompt(buildToolRoutingDecisionPrompt(personaPrompt, userText, routingContextForToolPrompt, recentHistory), judgeResp.Text, userText),
+				Model:          strings.TrimSpace(modelOverride),
+				SystemPrompt:   personaPrompt,
+				ContinuityKey:  conversationContinuityKey("tool-judge-repair", sessionID),
+				TraceID:        traceID + "-repair",
+				SkipContinuity: true,
+			})
+			debugtrace.Record("go.toolRouting.judge_repair", traceID, map[string]interface{}{
+				"text":        repairResp.Text,
+				"error":       repairResp.Error,
+				"judge_error": errorString(repairErr),
+			})
+			if repairErr == nil && repairResp.Error == "" && !repairResp.AuthRequired {
+				repaired := normalizeToolRoutingDecision(parseToolRoutingDecision(repairResp.Text), userText, routingLookup)
+				if repaired.Kind == toolRoutingDecisionAction || repaired.Kind == toolRoutingDecisionNeedTool {
+					decision = repaired
+				}
+			}
+		}
 		debugtrace.Record("go.toolRouting.judge", traceID, map[string]interface{}{
 			"text":           judgeResp.Text,
 			"error":          judgeResp.Error,
@@ -1896,10 +2081,7 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 			"local_hits":     len(routingLookup.LocalMatches),
 			"judge_error":    errorString(judgeErr),
 		})
-		if judgeErr != nil || judgeResp.Error != "" || judgeResp.AuthRequired {
-			return &judgeResp, judgeErr
-		}
-		if handled, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID); handled {
+		if handled, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID, userText); handled {
 			return &routedResp, nil
 		}
 	}
@@ -1976,8 +2158,11 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 		resp.Text = executeGitStatusShort()
 	}
 	decision := toolRoutingDecision{Kind: toolRoutingDecisionAction, Action: resp.Action, Target: resp.Target, Next: resp.Next}
-	if handled, readinessResp := a.maybeAskForToolReadiness(sessionID, decision, traceID); handled {
+	if handled, readinessResp := a.maybeAskForToolReadiness(sessionID, decision, userText, traceID); handled {
 		return &readinessResp, nil
+	}
+	if handled, programResp := a.maybeHandleGoProgramAuthoring(decision, sessionID, traceID, userText); handled {
+		return &programResp, nil
 	}
 	target := resp.Target
 	if resp.Action == "網路" {
@@ -2200,7 +2385,12 @@ func (a *App) SendAPIMessage(adapterID string, sessionID string, userText string
 	}
 	routingContextForToolPrompt := ""
 	if !isTaskProgressInternal && !isLocalAdapter {
-		keywordText, keywordErr := callAPI(buildSearchTermExtractionPrompt(personaPrompt, userText))
+		// Problem 2（API 路徑同 CLI）：pending 網路 fallback + 肯定回覆 → 直接走網路。
+		if resp, ok := a.maybeHandlePendingLocalSearchWebFallback(userText, sessionID, traceID); ok {
+			return resp, nil
+		}
+		recentHistory := a.recentConversationSentences(6)
+		keywordText, keywordErr := callAPI(buildSearchTermExtractionPrompt(personaPrompt, userText, recentHistory))
 		debugtrace.Record("go.searchTerms.extract", traceID, map[string]interface{}{
 			"text":         keywordText,
 			"error":        errorString(keywordErr),
@@ -2213,8 +2403,25 @@ func (a *App) SendAPIMessage(adapterID string, sessionID string, userText string
 		routingLookup := a.lookupToolRoutingContext(terms, userText, traceID)
 		// SEC-06: judge prompt 帶 pending 確認摘要（同 CLI 路徑）。
 		routingContextForToolPrompt = formatToolRoutingLookupContext(routingLookup) + pendingConfirmPromptContext(sessionID)
-		judgeText, judgeErr := callAPI(buildToolRoutingDecisionPrompt(personaPrompt, userText, routingContextForToolPrompt))
+		judgeText, judgeErr := callAPI(buildToolRoutingDecisionPrompt(personaPrompt, userText, routingContextForToolPrompt, recentHistory))
+		if judgeErr != nil {
+			return &skill_step.CLIResponse{Error: judgeErr.Error()}, nil
+		}
 		decision := normalizeToolRoutingDecision(parseToolRoutingDecision(judgeText), userText, routingLookup)
+		if shouldRepairToolRoutingDecision(userText, decision) {
+			repairText, repairErr := callAPI(buildToolRoutingRepairPrompt(buildToolRoutingDecisionPrompt(personaPrompt, userText, routingContextForToolPrompt, recentHistory), judgeText, userText))
+			debugtrace.Record("go.toolRouting.judge_repair", traceID, map[string]interface{}{
+				"text":         repairText,
+				"error":        errorString(repairErr),
+				"adapter_kind": "api",
+			})
+			if repairErr == nil {
+				repaired := normalizeToolRoutingDecision(parseToolRoutingDecision(repairText), userText, routingLookup)
+				if repaired.Kind == toolRoutingDecisionAction || repaired.Kind == toolRoutingDecisionNeedTool {
+					decision = repaired
+				}
+			}
+		}
 		debugtrace.Record("go.toolRouting.judge", traceID, map[string]interface{}{
 			"text":           judgeText,
 			"error":          errorString(judgeErr),
@@ -2229,10 +2436,7 @@ func (a *App) SendAPIMessage(adapterID string, sessionID string, userText string
 			"local_hits":     len(routingLookup.LocalMatches),
 			"adapter_kind":   "api",
 		})
-		if judgeErr != nil {
-			return &skill_step.CLIResponse{Error: judgeErr.Error()}, nil
-		}
-		if handled, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID); handled {
+		if handled, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID, userText); handled {
 			return &routedResp, nil
 		}
 	}
@@ -2598,9 +2802,10 @@ func webSearchRoutingPrompt() string {
 		"[/web_search_routing]"
 }
 
-func buildSearchTermExtractionPrompt(systemPrompt string, userText string) string {
+func buildSearchTermExtractionPrompt(systemPrompt string, userText string, recent []conversation.Sentence) string {
 	return conversation.Synthesize(conversation.SynthesisConfig{
-		SystemPrompt: systemPrompt + "\n\n請解析使用者訊息中的查詢詞與指代詞，只輸出可用來搜尋、比對資料的關鍵字詞。\n\n規則：\n- 不回答使用者問題。\n- 不判斷是否閒聊。\n- 不判斷是否使用工具。\n- 若具網路搜尋目標，輸出適合網路搜尋的關鍵字。\n- 保留使用者提到的動作、物件、App、時間指代、文件/skill/操作/對話等詞。\n- 若提到剛剛、最近、上一個、錄製、回放、重現、點擊、開啟、關閉，請保留這些指代或操作詞。\n- 請用空格分隔詞，不要句子，不要 JSON，不要 Markdown。",
+		SystemPrompt: systemPrompt + "\n\n請解析使用者訊息中的查詢詞與指代詞，只輸出可用來搜尋、比對資料的關鍵字詞。\n\n規則：\n- 不回答使用者問題。\n- 不判斷是否閒聊。\n- 不判斷是否使用工具。\n- 若具網路搜尋目標，輸出適合網路搜尋的關鍵字。\n- 保留使用者提到的動作、物件、App、時間指代、文件/skill/操作/對話等詞。\n- 若提到剛剛、最近、上一個、錄製、回放、重現、點擊、開啟、關閉，請保留這些指代或操作詞。\n- 若本輪缺地點、主詞或對象，但 H 上一輪有提到，請從 H 補上（例：上一輪查台中天氣、本輪只說查溫度 → 輸出 台中 溫度）。\n- 請用空格分隔詞，不要句子，不要 JSON，不要 Markdown。",
+		RawSentences: recent, // 帶最近對話歷史，讓模型能解析「溫度」這類缺地點的指代
 		CurrentInput: userText,
 		SanitizeLLM:  true,
 	})
@@ -2740,27 +2945,38 @@ func formatToolRoutingLookupContext(ctx toolRoutingLookupContext) string {
 	return b.String()
 }
 
-func buildToolRoutingDecisionPrompt(systemPrompt string, userText string, lookupContext string) string {
+func buildToolRoutingDecisionPrompt(systemPrompt string, userText string, lookupContext string, recentOpt ...[]conversation.Sentence) string {
+	var recent []conversation.Sentence
+	if len(recentOpt) > 0 {
+		recent = recentOpt[0]
+	}
 	systemPrompt += webSearchRoutingPrompt()
 	routingRules := strings.Join([]string{
 		fmt.Sprintf("In this app, plain search/find/query defaults to local search unless web_search_routing applies. If local_matches is none and the user appears to ask for search/find/query, do not answer from general knowledge; output %s%s<query>%s%s so the local-search tool can report no local result and ask whether to use web search.", "\u641c\u5c0b", actionchain.Separator, actionchain.Separator, "\u6587\u4ef6"),
 		"只能輸出以下格式之一，不可輸出其他文字：",
 		"閒聊ㄌ<回答>",
 		"操作ㄌ<候選tag/名稱/關鍵詞>ㄌ待命",
+		"程式ㄌ<程式名稱>ㄌ輸出",
 		"查詢ㄌ<關鍵詞>ㄌ操作",
 		"搜尋ㄌ<關鍵詞>ㄌ文件",
 		"網路ㄌ<搜尋關鍵字>ㄌ待命",
+		"提問ㄌ<問題>ㄌ待命",
 		"需要工具",
 		"判斷：",
 		"- 需要工具：需要其他工具，或候選不足但不像閒聊。",
 		"- 網路路由：凡需網路搜尋才能判斷的變動資料，如網路、即時、今天、今日、最新、現在等關鍵字，輸出：網路ㄌ<搜尋關鍵字>ㄌ待命。",
 		"- 操作：明確要求重現、回放、照做、執行、開始已保存操作，且 saved_operations 明確；只有 recent_operations 不算明確。",
+		"- 程式：需要製作或使用一個尚未確定存在的小程式來處理資料、比較、轉換、計算或產生結論時，輸出：程式ㄌ<短程式名稱>ㄌ輸出。",
+		"- 程式作者預設且唯一語言是 Go；使用者說「做/建立/製作 skill」且提到 JSON、表格、CSV、XLSX、資料處理、判斷或輸出建議時，也必須輸出：程式ㄌ<短程式名稱>ㄌ輸出。",
 		"- 查詢：找、列出、查詢已保存操作，或操作候選不明。",
 		"- 搜尋：找本機資料、文件、skill、記憶、對話、trace、專案內容。",
+		"- 提問：無法判斷要找「本機資料」還是「上網查」，或缺必要資訊（如地點）且 H 也補不出來時，輸出：提問ㄌ你是要找本機文件，還是上網查？ㄌ待命。",
+		"- 上下文補全：本輪缺地點/主詞但 H 上一輪有提到，請補上後再判斷（例：上一輪台中天氣、本輪查溫度 → 視為查台中溫度）。",
 		"- 閒聊：明顯聊天且候選無關。",
 	}, "\n")
 	return conversation.Synthesize(conversation.SynthesisConfig{
 		SystemPrompt: systemPrompt + lookupContext + "\n\n" + routingRules,
+		RawSentences: recent, // 帶最近對話歷史，讓 judge 能用上下文判斷（如沿用上一輪地點）
 		CurrentInput: userText,
 		SanitizeLLM:  true,
 	})
@@ -2822,6 +3038,105 @@ func normalizeToolRoutingDecision(decision toolRoutingDecision, userText string,
 	return decision
 }
 
+func shouldRepairToolRoutingDecision(userText string, decision toolRoutingDecision) bool {
+	if _, ok := inferGoProgramAuthoringRequest(userText); !ok {
+		return false
+	}
+	if decision.Kind == toolRoutingDecisionAction && strings.TrimSpace(decision.Action) == "程式" {
+		return false
+	}
+	if decision.Kind == toolRoutingDecisionChat {
+		return true
+	}
+	if decision.Kind == toolRoutingDecisionNeedTool {
+		return true
+	}
+	return false
+}
+
+func buildToolRoutingRepairPrompt(basePrompt, previousOutput, userText string) string {
+	programName, _ := inferGoProgramAuthoringRequest(userText)
+	if programName == "" {
+		programName = "資料處理程式"
+	}
+	var b strings.Builder
+	b.WriteString(basePrompt)
+	b.WriteString("\n\n[系統修正]\n")
+	b.WriteString("上一輪輸出不符合本 app 的工具路由語意，請重新輸出，仍然只能輸出允許格式之一。\n")
+	b.WriteString("使用者是在要求建立/製作一個資料處理 skill；本 app 內建受控 Go 小程式製作器，不使用 Gemini CLI skill.yaml，不要說無法寫檔，不要嘗試 activate_skill/write_file/invoke_agent，不要產 Python。\n")
+	b.WriteString("若判斷需要製作小程式，請輸出：程式ㄌ")
+	b.WriteString(programName)
+	b.WriteString("ㄌ輸出\n")
+	b.WriteString("上一輪輸出:\n")
+	b.WriteString(previousOutput)
+	b.WriteString("\n[/系統修正]")
+	return b.String()
+}
+
+func inferGoProgramAuthoringRequest(userText string) (string, bool) {
+	text := strings.TrimSpace(userText)
+	if text == "" {
+		return "", false
+	}
+	lower := strings.ToLower(text)
+	if !containsAny(lower, []string{"skill", "小程式", "程式", "program"}) {
+		return "", false
+	}
+	if !containsAny(text, []string{"做", "建立", "製作", "產生", "生成", "新增", "幫我做", "幫我建立", "幫我製作"}) {
+		return "", false
+	}
+	if !containsAny(lower, []string{"json", "表格", "csv", "xlsx", "資料", "data", "輸出", "輸入", "建議", "判斷", "比較", "轉換", "計算", "處理", "table", "report"}) &&
+		!containsAny(text, []string{"表", "料表", "欄位", "欄", "格式", "清單", "報表"}) {
+		return "", false
+	}
+	name := extractGoProgramName(text)
+	if name == "" {
+		name = "資料處理程式"
+	}
+	return name, true
+}
+
+func extractGoProgramName(text string) string {
+	cleaned := strings.TrimSpace(text)
+	replacer := strings.NewReplacer("「", "", "」", "", "『", "", "』", "", "\"", "", "'", "")
+	cleaned = replacer.Replace(cleaned)
+	for _, prefix := range []string{"請幫我", "幫我", "請", "我要", "我想要"} {
+		cleaned = strings.TrimPrefix(strings.TrimSpace(cleaned), prefix)
+	}
+	for _, verb := range []string{"做一個", "建立一個", "製作一個", "產生一個", "生成一個", "新增一個", "做", "建立", "製作", "產生", "生成", "新增"} {
+		if strings.HasPrefix(cleaned, verb) {
+			cleaned = strings.TrimSpace(strings.TrimPrefix(cleaned, verb))
+			break
+		}
+	}
+	for {
+		before := cleaned
+		for _, prefix := range []string{"skill", "Skill", "小程式", "程式", "program", "Program", "輸入"} {
+			cleaned = strings.TrimSpace(strings.TrimPrefix(cleaned, prefix))
+		}
+		cleaned = strings.Trim(cleaned, " :-_／/")
+		if cleaned == before {
+			break
+		}
+	}
+	cutAt := len(cleaned)
+	for _, marker := range []string{"，", ",", "。", "\n", "依照", "根據", "用", "來", "可以", "能", "會", "輸出"} {
+		if idx := strings.Index(cleaned, marker); idx >= 0 && idx < cutAt {
+			cutAt = idx
+		}
+	}
+	cleaned = strings.TrimSpace(cleaned[:cutAt])
+	for _, suffix := range []string{"skill", "Skill", "小程式", "程式", "program", "Program"} {
+		cleaned = strings.TrimSpace(strings.TrimSuffix(cleaned, suffix))
+	}
+	cleaned = strings.Trim(cleaned, " -_／/")
+	if len([]rune(cleaned)) > 24 {
+		r := []rune(cleaned)
+		cleaned = string(r[:24])
+	}
+	return strings.TrimSpace(cleaned)
+}
+
 func shouldPromoteDecisionToWebSearch(decision toolRoutingDecision) bool {
 	if decision.Kind == toolRoutingDecisionNeedTool {
 		return true
@@ -2873,7 +3188,11 @@ func isLearningOperationExecutionRequest(text string) bool {
 	})
 }
 
-func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sessionID, traceID string) (bool, skill_step.CLIResponse) {
+func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sessionID, traceID string, userTextOpt ...string) (bool, skill_step.CLIResponse) {
+	userText := strings.TrimSpace(decision.Raw)
+	if len(userTextOpt) > 0 && strings.TrimSpace(userTextOpt[0]) != "" {
+		userText = strings.TrimSpace(userTextOpt[0])
+	}
 	switch decision.Kind {
 	case toolRoutingDecisionChat:
 		return true, skill_step.CLIResponse{Text: strings.TrimSpace(decision.Text)}
@@ -2881,10 +3200,22 @@ func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sess
 		if strings.TrimSpace(decision.Target) == "" {
 			return false, skill_step.CLIResponse{}
 		}
+		// judge 主動提問（模糊：本機還是網路 / 缺必要資訊）→ 直接把問題回給使用者。
+		if strings.TrimSpace(decision.Action) == "提問" {
+			return true, skill_step.CLIResponse{
+				Text:   setQuestionFloatingCandidates(questionPayload(decision.Target, decision.Next), traceID),
+				Action: decision.Action,
+				Target: decision.Target,
+				Next:   decision.Next,
+			}
+		}
 		if resp, handled := a.maybeHandleResourceGate(strings.TrimSpace(decision.Action+" "+decision.Target), sessionID, traceID); handled {
 			return true, *resp
 		}
-		if handled, resp := a.maybeAskForToolReadiness(sessionID, decision, traceID); handled {
+		if handled, resp := a.maybeAskForToolReadiness(sessionID, decision, userText, traceID); handled {
+			return true, resp
+		}
+		if handled, resp := a.maybeHandleGoProgramAuthoring(decision, sessionID, traceID, userText); handled {
 			return true, resp
 		}
 		next := strings.TrimSpace(decision.Next)
@@ -2920,7 +3251,7 @@ func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sess
 
 func buildToolRoutingJudgePrompt(systemPrompt string, userText string) string {
 	return conversation.Synthesize(conversation.SynthesisConfig{
-		SystemPrompt: systemPrompt + "\n\n工具判斷規則：只能輸出兩種格式之一：\n1. 需要工具\n2. 閒聊ㄌ<回答>\n若需要搜尋本機文件、讀取資料、開啟/寫入/匯出、排程、已保存螢幕操作、DAG/自動流程或任何系統工具，只輸出「需要工具」。\nReplay / 重現 / 操作 / 開啟 / 關閉 / 點擊 / 已保存示範相關請求必須輸出「需要工具」。\n不要輸出動作清單，不要猜工具名稱，不要直接輸出無前綴自然語言。",
+		SystemPrompt: systemPrompt + "\n\n工具判斷規則：只能輸出兩種格式之一：\n1. 需要工具\n2. 閒聊ㄌ<回答>\n若需要搜尋本機文件、讀取資料、開啟/寫入/匯出、排程、製作或使用小程式、已保存螢幕操作、DAG/自動流程或任何系統工具，只輸出「需要工具」。\nReplay / 重現 / 操作 / 開啟 / 關閉 / 點擊 / 已保存示範相關請求必須輸出「需要工具」。\n不要輸出動作清單，不要猜工具名稱，不要直接輸出無前綴自然語言。",
 		CurrentInput: userText,
 		SanitizeLLM:  true,
 	})
@@ -2944,7 +3275,7 @@ func errorString(err error) string {
 func buildLocalModelPrompt(systemPrompt string, actionTags []string, userText string) string {
 	tagList := strings.Join(conversation.PromptActionTags(actionTags), "、")
 	return fmt.Sprintf(
-		"%s\n回答規則：用三行回答，每行一個欄位，但不要寫欄位名稱（不要寫 動作:、內容:、下一步:）。\n第一行寫動作（從候選中選：%s）\n動作定義：已知答案、一般聊天、寒暄、情緒回應用 輸出；需要系統查資料用 搜尋；操作=只代表執行或重現已保存的螢幕 replay 操作，不是一般的處理/回答；讀取=取得內容並回報；開啟=用外部應用程式呈現；寫入=新增或修改檔案；匯出=產生檔案；提問=只有缺少必要資訊時才補問；選項=只有使用者明確要求選擇時才顯示選項卡。\n第二行直接寫要顯示給使用者的內容，不要加 內容:；若第一行是選項且沒有問題文字，必須用 ㄤ 開頭，例如 ㄤ紅色ㄤ綠色ㄤ藍色；若有問題文字，寫 問題ㄤ選項一ㄤ選項二。\n第三行只寫 待命、輸出、選項 其中之一；通常寫 待命。\n沒有明確重現、回放、照做、執行已保存操作的意思時，不要選 操作。\n範例：\n輸出\n你好啊\n待命\n\nQ: %s\n",
+		"%s\n回答規則：用三行回答，每行一個欄位，但不要寫欄位名稱（不要寫 動作:、內容:、下一步:）。\n第一行寫動作（從候選中選：%s）\n動作定義：已知答案、一般聊天、寒暄、情緒回應用 輸出；需要系統查資料用 搜尋；需要製作或使用資料處理小程式用 程式；操作=只代表執行或重現已保存的螢幕 replay 操作，不是一般的處理/回答；讀取=取得內容並回報；開啟=用外部應用程式呈現；寫入=新增或修改檔案；匯出=產生檔案；提問=只有缺少必要資訊時才補問；選項=只有使用者明確要求選擇時才顯示選項卡。\n第二行直接寫要顯示給使用者的內容，不要加 內容:；若第一行是選項且沒有問題文字，必須用 ㄤ 開頭，例如 ㄤ紅色ㄤ綠色ㄤ藍色；若有問題文字，寫 問題ㄤ選項一ㄤ選項二。\n第三行只寫 待命、輸出、選項 其中之一；程式通常寫 輸出，其他通常寫 待命。\n沒有明確重現、回放、照做、執行已保存操作的意思時，不要選 操作。\n範例：\n輸出\n你好啊\n待命\n\nQ: %s\n",
 		systemPrompt, tagList, userText,
 	)
 }
@@ -3063,7 +3394,11 @@ func (a *App) resolveActionChainResponse(rawText string, actionTags []string, tr
 		})
 	}
 	decision := toolRoutingDecision{Kind: toolRoutingDecisionAction, Action: chain.Action, Target: chain.Target, Next: chain.Next}
-	if handled, resp := a.maybeAskForToolReadiness(sessionID, decision, traceID); handled {
+	// 此路徑無原始輸入變數，用 rawText（含 ㄌ 鏈，可能帶地點）做地點線索檢查。
+	if handled, resp := a.maybeAskForToolReadiness(sessionID, decision, rawText, traceID); handled {
+		return resp
+	}
+	if handled, resp := a.maybeHandleGoProgramAuthoring(decision, sessionID, traceID, rawText); handled {
 		return resp
 	}
 	target := chain.Target
@@ -5649,7 +5984,12 @@ func (a *App) ExecuteNativeLearningReplayStep(payload string) (interface{}, erro
 	if err := json.Unmarshal([]byte(payload), &step); err != nil {
 		return nil, fmt.Errorf("native replay step: invalid payload: %w", err)
 	}
+	invocationID := a.hookGeneInvocationID("", "learning-replay")
+	const replayGeneSkillID = "learning_replay"
+	a.emitHookGeneDataEntered(replayGeneSkillID, invocationID)
+	defer a.emitHookGeneCompleted(replayGeneSkillID, invocationID)
 	if relocated, ok := a.relocateNativeReplayStep(step); ok {
+		a.emitHookGeneDataProcessed(replayGeneSkillID, invocationID)
 		if relocated.NeedsConfirmation && canAutoConfirmBrowserReplay(step, relocated) {
 			relocated.NeedsConfirmation = false
 			relocated.OK = true
@@ -5667,6 +6007,7 @@ func (a *App) ExecuteNativeLearningReplayStep(payload string) (interface{}, erro
 					previewError = strings.TrimSpace(previewError + "; preview move failed: " + preview.Error)
 				}
 			}
+			a.emitHookGenePaused(replayGeneSkillID, invocationID)
 			return frontendDTO(visual_learning.NativeReplayResult{
 				OK:                   false,
 				Skipped:              true,
@@ -5692,6 +6033,7 @@ func (a *App) ExecuteNativeLearningReplayStep(payload string) (interface{}, erro
 		step.X = relocated.ExecutionPoint.X
 		step.Y = relocated.ExecutionPoint.Y
 		result := a.nativeInput.Click(step)
+		a.emitHookGeneDataLeft(replayGeneSkillID, invocationID, true)
 		result.OriginalX = relocated.OriginalPoint.X
 		result.OriginalY = relocated.OriginalPoint.Y
 		result.Relocated = true
@@ -5703,6 +6045,7 @@ func (a *App) ExecuteNativeLearningReplayStep(payload string) (interface{}, erro
 		return frontendDTO(result), nil
 	}
 	result := a.nativeInput.Click(step)
+	a.emitHookGeneDataLeft(replayGeneSkillID, invocationID, true)
 	return frontendDTO(result), nil
 }
 

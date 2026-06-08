@@ -26,12 +26,13 @@ const (
 )
 
 type pendingToolQuestion struct {
-	SessionID      string
-	Action         string
-	Target         string
-	MissingContext string
-	Question       string
-	CreatedAt      time.Time
+	SessionID        string
+	Action           string
+	Target           string
+	MissingContext   string
+	Question         string
+	OriginalUserText string
+	CreatedAt        time.Time
 }
 
 type toolBackgroundAnswer struct {
@@ -82,14 +83,27 @@ func (a *App) consumePendingToolAnswer(sessionID, userText, traceID string) (too
 		Action: pending.Action,
 		Target: pending.Target,
 		Next:   actionchain.StandbyNext,
+		Raw:    mergePendingToolQuestionContext(pending.OriginalUserText, pending.Question, answer),
 	}, true
 }
 
-func (a *App) maybeAskForToolReadiness(sessionID string, decision toolRoutingDecision, traceID string) (bool, skill_step.CLIResponse) {
+func mergePendingToolQuestionContext(original, question, answer string) string {
+	original = strings.TrimSpace(original)
+	answer = strings.TrimSpace(answer)
+	if original == "" {
+		return answer
+	}
+	if answer == "" {
+		return original
+	}
+	return original + "\n\n使用者補充:\n" + strings.TrimSpace(question) + "\n" + answer
+}
+
+func (a *App) maybeAskForToolReadiness(sessionID string, decision toolRoutingDecision, userText string, traceID string) (bool, skill_step.CLIResponse) {
 	if a == nil || decision.Kind != toolRoutingDecisionAction || !isReadinessAction(decision.Action) {
 		return false, skill_step.CLIResponse{}
 	}
-	question, needQuestion := a.assessToolReadiness(sessionID, decision)
+	question, needQuestion := a.assessToolReadiness(sessionID, decision, userText)
 	if !needQuestion {
 		return false, skill_step.CLIResponse{}
 	}
@@ -98,12 +112,13 @@ func (a *App) maybeAskForToolReadiness(sessionID string, decision toolRoutingDec
 		a.pendingToolQuestions = make(map[string]pendingToolQuestion)
 	}
 	a.pendingToolQuestions[sessionID] = pendingToolQuestion{
-		SessionID:      sessionID,
-		Action:         decision.Action,
-		Target:         decision.Target,
-		MissingContext: question.MissingContext,
-		Question:       question.Question,
-		CreatedAt:      time.Now(),
+		SessionID:        sessionID,
+		Action:           decision.Action,
+		Target:           decision.Target,
+		MissingContext:   question.MissingContext,
+		Question:         question.Question,
+		OriginalUserText: userText,
+		CreatedAt:        time.Now(),
 	}
 	a.toolReadinessMu.Unlock()
 
@@ -122,13 +137,14 @@ func (a *App) maybeAskForToolReadiness(sessionID string, decision toolRoutingDec
 	}
 }
 
-func (a *App) assessToolReadiness(sessionID string, decision toolRoutingDecision) (toolReadinessQuestion, bool) {
+func (a *App) assessToolReadiness(sessionID string, decision toolRoutingDecision, userText string) (toolReadinessQuestion, bool) {
 	action := strings.TrimSpace(decision.Action)
 	target := strings.TrimSpace(decision.Target)
 	if actionchain.IsQuestionNext(decision.Next) {
 		return inferredQuestionForAction(action, target), true
 	}
-	if action == "網路" && isContextSensitiveWebQuery(target) && !a.hasBackgroundContext(sessionID, "地點") && !containsLocationHint(target) {
+	// 使用者本輪明確打了地點（即使抽詞掉了）也不該再問。
+	if action == "網路" && isContextSensitiveWebQuery(target) && !a.hasBackgroundContext(sessionID, "地點") && !containsLocationHint(target) && !containsLocationHint(userText) {
 		return toolReadinessQuestion{MissingContext: "地點", Question: "你想查哪個地點？"}, true
 	}
 	return toolReadinessQuestion{}, false

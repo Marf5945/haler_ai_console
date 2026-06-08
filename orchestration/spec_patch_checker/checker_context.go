@@ -15,9 +15,9 @@ import (
 // §9.9 + §21：Lightweight Card 僅限同 scope 續期，不得藉此擴展權限。
 func CheckLightweightCardNotUsedForScopeExpansion(cardJSON string) error {
 	var card struct {
-		CardType       string   `json:"card_type"`
-		OldScope       []string `json:"old_scope"`
-		NewScope       []string `json:"new_scope"`
+		CardType string   `json:"card_type"`
+		OldScope []string `json:"old_scope"`
+		NewScope []string `json:"new_scope"`
 	}
 	if err := json.Unmarshal([]byte(cardJSON), &card); err != nil {
 		return nil
@@ -82,7 +82,7 @@ func CheckLLMContextGovernanceNotBypassed(payloadJSON string) error {
 // §7.5：專案 purge 不得影響全域設定、記憶、工具定義。
 func CheckGlobalAssetNotPurgedByProjectPurge(purgeJSON string) error {
 	var purge struct {
-		Scope       string   `json:"scope"`   // "project" or "global"
+		Scope       string   `json:"scope"` // "project" or "global"
 		TargetPaths []string `json:"target_paths"`
 	}
 	if err := json.Unmarshal([]byte(purgeJSON), &purge); err != nil {

@@ -10,12 +10,12 @@ import (
 func TestAddCard(t *testing.T) {
 	svc := NewService()
 	card := svc.AddCard(CardParams{
-		RiskClass:   risk.UserOwnedAssetDestructive,
-		Operation:   "delete_project",
-		Target:      "project:demo",
-		Reason:      "刪除使用者專案資產",
-		AcceptLabel: "刪除",
-		RejectLabel: "取消",
+		RiskClass:    risk.UserOwnedAssetDestructive,
+		Operation:    "delete_project",
+		Target:       "project:demo",
+		Reason:       "刪除使用者專案資產",
+		AcceptLabel:  "刪除",
+		RejectLabel:  "取消",
 		AcceptEffect: "專案資料夾將被移除",
 		RejectEffect: "不做任何變更",
 	})
@@ -34,12 +34,12 @@ func TestAddCard(t *testing.T) {
 func TestCardDualStepAutoSet(t *testing.T) {
 	svc := NewService()
 	card := svc.AddCard(CardParams{
-		RiskClass:   risk.SecurityBoundaryRewrite,
-		Operation:   "modify_risk_policy",
-		Target:      "risk_policy:main",
-		Reason:      "修改風險策略",
-		AcceptLabel: "我了解，繼續",
-		RejectLabel: "取消",
+		RiskClass:    risk.SecurityBoundaryRewrite,
+		Operation:    "modify_risk_policy",
+		Target:       "risk_policy:main",
+		Reason:       "修改風險策略",
+		AcceptLabel:  "我了解，繼續",
+		RejectLabel:  "取消",
 		AcceptEffect: "風險策略將被修改",
 		RejectEffect: "不做任何變更",
 	})

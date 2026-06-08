@@ -20,15 +20,15 @@ import (
 
 // MemoryOp 一筆記憶操作日誌記錄。
 type MemoryOp struct {
-	OpID                string   `json:"op_id"`                  // 唯一操作 ID（UUID）
-	Op                  string   `json:"op"`                     // 操作類型（summarize / delete / move / rotate ...）
-	From                string   `json:"from"`                   // 來源狀態描述
-	To                  string   `json:"to"`                     // 目標狀態描述
-	AffectedSentenceIDs []string `json:"affected_sentence_ids"`  // 受影響的句子 ID 清單
-	BeforeHash          string   `json:"before_hash"`            // 操作前內容 SHA-256
-	AfterHash           string   `json:"after_hash"`             // 操作後內容 SHA-256
-	Reason              string   `json:"reason"`                 // 操作原因說明
-	CreatedAt           string   `json:"created_at"`             // RFC3339 時間戳
+	OpID                string   `json:"op_id"`                 // 唯一操作 ID（UUID）
+	Op                  string   `json:"op"`                    // 操作類型（summarize / delete / move / rotate ...）
+	From                string   `json:"from"`                  // 來源狀態描述
+	To                  string   `json:"to"`                    // 目標狀態描述
+	AffectedSentenceIDs []string `json:"affected_sentence_ids"` // 受影響的句子 ID 清單
+	BeforeHash          string   `json:"before_hash"`           // 操作前內容 SHA-256
+	AfterHash           string   `json:"after_hash"`            // 操作後內容 SHA-256
+	Reason              string   `json:"reason"`                // 操作原因說明
+	CreatedAt           string   `json:"created_at"`            // RFC3339 時間戳
 }
 
 // ──────────────────────────────────────────────

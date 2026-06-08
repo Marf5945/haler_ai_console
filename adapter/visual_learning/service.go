@@ -16,10 +16,10 @@ import (
 type AssetType string
 
 const (
-	AssetScreenshot AssetType = "screenshot"     // 螢幕截圖片段
-	AssetDiagram    AssetType = "diagram"        // 流程圖 / 架構圖
-	AssetAnnotation AssetType = "annotation"     // 標註疊加層
-	AssetComparison AssetType = "before_after"   // 前後對比
+	AssetScreenshot AssetType = "screenshot"   // 螢幕截圖片段
+	AssetDiagram    AssetType = "diagram"      // 流程圖 / 架構圖
+	AssetAnnotation AssetType = "annotation"   // 標註疊加層
+	AssetComparison AssetType = "before_after" // 前後對比
 )
 
 // ──────────────────────────────────────────────
@@ -30,17 +30,17 @@ const (
 type Asset struct {
 	ID          string    `json:"id"`
 	Type        AssetType `json:"type"`
-	FilePath    string    `json:"file_path"`     // 相對於 visual_learning/ 的路徑
-	Description string    `json:"description"`   // 中文描述
-	StepIndex   int       `json:"step_index"`    // 對應 DAG 步驟索引（-1 表示獨立）
+	FilePath    string    `json:"file_path"`   // 相對於 visual_learning/ 的路徑
+	Description string    `json:"description"` // 中文描述
+	StepIndex   int       `json:"step_index"`  // 對應 DAG 步驟索引（-1 表示獨立）
 	CreatedAt   string    `json:"created_at"`
 }
 
 // Service 管理視覺學習資源。
 type Service struct {
-	mu       sync.Mutex
-	rootDir  string            // visual_learning/ 根目錄
-	assets   map[string]*Asset // ID → Asset
+	mu      sync.Mutex
+	rootDir string            // visual_learning/ 根目錄
+	assets  map[string]*Asset // ID → Asset
 }
 
 // ──────────────────────────────────────────────

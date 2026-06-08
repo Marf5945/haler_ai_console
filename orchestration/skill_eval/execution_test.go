@@ -14,10 +14,10 @@ func TestDecideExecution(t *testing.T) {
 	pending := &skill_step.Lifecycle{Status: skill_step.LifecyclePending, AutoExecute: false}
 
 	cases := []struct {
-		status  skill_step.ResolveStatus
-		lc      *skill_step.Lifecycle
-		grant   bool
-		want    ExecDecision
+		status skill_step.ResolveStatus
+		lc     *skill_step.Lifecycle
+		grant  bool
+		want   ExecDecision
 	}{
 		{skill_step.StatusAutoSelected, enabledAuto, false, ExecAuto},
 		{skill_step.StatusAutoSelected, pending, false, ExecNeedConfirm}, // pending 第一次要確認

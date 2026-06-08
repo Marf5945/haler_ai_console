@@ -206,9 +206,12 @@ func ResolveBuiltIn(chain ActionChain) BuiltInDecision {
 	case "版控":
 		decision.Handled = true
 		decision.DisplayText = chain.Target // 實際結果由 App 層覆寫
+	// 註：查詢→操作（saved operations）的路由區分在 App 層 normalizeToolRoutingDecision
+	// 就先處理掉了；能走到這裡的「查詢」是未被升級成操作的查找意圖，故與搜尋同組，
+	// 僅作 DisplayText fallback。實際搜尋與結果由 App 層覆寫，不回灌 LLM。
 	case "本機搜尋", "搜尋", "查找", "查詢", "search", "find", "query":
 		decision.Handled = true
-		decision.DisplayText = chain.Target // 實際搜尋由 App 層覆寫，結果不回灌 LLM
+		decision.DisplayText = chain.Target
 	default:
 		return BuiltInDecision{Chain: chain}
 	}

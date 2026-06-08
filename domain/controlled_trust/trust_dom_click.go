@@ -32,11 +32,11 @@ import (
 //
 // Corresponds to schema #54 in TASKS_1_2.md.
 type TrustDomClickPreference struct {
-	Enabled              bool      `json:"enabled"`
-	UpdatedAt            time.Time `json:"updated_at"`
-	VisualConfidenceMin  float64   `json:"visual_confidence_min"`  // 0.60
-	FinalConfidenceMin   float64   `json:"final_confidence_min"`   // 0.78
-	RiskLevelMax         string    `json:"risk_level_max"`         // "medium"
+	Enabled             bool      `json:"enabled"`
+	UpdatedAt           time.Time `json:"updated_at"`
+	VisualConfidenceMin float64   `json:"visual_confidence_min"` // 0.60
+	FinalConfidenceMin  float64   `json:"final_confidence_min"`  // 0.78
+	RiskLevelMax        string    `json:"risk_level_max"`        // "medium"
 }
 
 // stopConditions is the set of events that must immediately halt Trust DOM & Click.

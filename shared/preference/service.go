@@ -2,8 +2,9 @@
 // resolution contract.
 //
 // Priority order (highest → lowest):
-//   explicit sub preference > current workflow main preference >
-//   global user preference > routing score
+//
+//	explicit sub preference > current workflow main preference >
+//	global user preference > routing score
 //
 // 此套件只管「排序 / rank」——工具可用性（Available / NeedsReauth）
 // 由 adapter_registry / tools 套件統一管理。
@@ -25,10 +26,10 @@ type PreferenceRank int
 type PreferenceScope string
 
 const (
-	ScopeSub      PreferenceScope = "sub"      // sub-workflow explicit
-	ScopeMain     PreferenceScope = "main"      // current workflow / DAG revision
-	ScopeGlobal   PreferenceScope = "global"    // global user preference
-	ScopeRouting  PreferenceScope = "routing"   // routing score (automatic)
+	ScopeSub     PreferenceScope = "sub"     // sub-workflow explicit
+	ScopeMain    PreferenceScope = "main"    // current workflow / DAG revision
+	ScopeGlobal  PreferenceScope = "global"  // global user preference
+	ScopeRouting PreferenceScope = "routing" // routing score (automatic)
 )
 
 // ToolPreferenceEntry records a user's preferred position for one tool.

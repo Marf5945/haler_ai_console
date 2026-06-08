@@ -46,12 +46,12 @@ func UserFriendlyLabel(l SourceTrustLabel) string {
 type DomainClass string
 
 const (
-	DomainOfficialGov          DomainClass = "official_gov_domain"
-	DomainOfficialEdu          DomainClass = "official_edu_domain"
+	DomainOfficialGov            DomainClass = "official_gov_domain"
+	DomainOfficialEdu            DomainClass = "official_edu_domain"
 	DomainInstitutionalSubdomain DomainClass = "institutional_subdomain"
-	DomainUserGeneratedSubpath DomainClass = "user_generated_subpath"
-	DomainUnknown              DomainClass = "unknown_domain"
-	DomainSuspicious           DomainClass = "suspicious_domain"
+	DomainUserGeneratedSubpath   DomainClass = "user_generated_subpath"
+	DomainUnknown                DomainClass = "unknown_domain"
+	DomainSuspicious             DomainClass = "suspicious_domain"
 )
 
 // ──────────────────────────────────────────────

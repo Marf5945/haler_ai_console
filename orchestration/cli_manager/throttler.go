@@ -4,10 +4,10 @@
 // 確保最多每 150ms 才向 Wails 前端 emit 一次，避免 React 渲染卡頓。
 //
 // 運作原理：
-//   1. Enqueue(event, payload) 被呼叫時，覆寫該 event 的最新 payload
-//   2. 如果 150ms 計時器尚未啟動，則啟動一個
-//   3. 計時器觸發時，將所有累積的事件一次性 flush 給 emitter
-//   4. 若 flush 後無新事件進入，計時器停止（不空轉）
+//  1. Enqueue(event, payload) 被呼叫時，覆寫該 event 的最新 payload
+//  2. 如果 150ms 計時器尚未啟動，則啟動一個
+//  3. 計時器觸發時，將所有累積的事件一次性 flush 給 emitter
+//  4. 若 flush 後無新事件進入，計時器停止（不空轉）
 package cli_manager
 
 import (

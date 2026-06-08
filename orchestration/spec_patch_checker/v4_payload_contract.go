@@ -31,9 +31,9 @@ const ContractVersion = "v4.0-memory-guard-1"
 // Consumer: CheckTalkFullWriteHasMemoryOps, CheckMemoryOpsAppendOnly
 type MemoryWriteEvent struct {
 	SchemaVersion      string `json:"schema_version"`
-	EventType          string `json:"event_type"`            // "memory_write_event"
-	Target             string `json:"target"`                // "memory/talk_full.md"
-	Operation          string `json:"operation"`             // "append" | "rotate" | "delete_sentences"
+	EventType          string `json:"event_type"` // "memory_write_event"
+	Target             string `json:"target"`     // "memory/talk_full.md"
+	Operation          string `json:"operation"`  // "append" | "rotate" | "delete_sentences"
 	MemoryOpsWritten   bool   `json:"memory_ops_written"`
 	TalkFullHashBefore string `json:"talk_full_hash_before"` // 寫入前 SHA-256
 	TalkFullHashAfter  string `json:"talk_full_hash_after"`  // 寫入後 SHA-256
@@ -67,10 +67,10 @@ type MainStorageManifest struct {
 // Consumer: CheckSubDoesNotAccessFullToolDB, CheckSubDoesNotMutateGlobalRegistry, CheckSubReportsUnrecordedToolUse
 type SubToolAccessEvent struct {
 	SchemaVersion    string `json:"schema_version"`
-	EventType        string `json:"event_type"`         // "sub_tool_access"
+	EventType        string `json:"event_type"` // "sub_tool_access"
 	SubID            string `json:"sub_id"`
-	AccessScope      string `json:"access_scope"`       // "scoped" | "full_tool_database"
-	MutationTarget   string `json:"mutation_target"`    // "" | "global_tool_registry" | "global_risk_policy"
+	AccessScope      string `json:"access_scope"`    // "scoped" | "full_tool_database"
+	MutationTarget   string `json:"mutation_target"` // "" | "global_tool_registry" | "global_risk_policy"
 	ToolNotInHistory bool   `json:"tool_not_in_history"`
 	ReportedToMain   bool   `json:"reported_to_main"`
 }
@@ -80,7 +80,7 @@ type SubToolAccessEvent struct {
 // Consumer: Rules 8-11, 15-17
 type SummarizationEvent struct {
 	SchemaVersion          string `json:"schema_version"`
-	EventType              string `json:"event_type"`                    // "summarization_event"
+	EventType              string `json:"event_type"` // "summarization_event"
 	WriteRedactionApplied  bool   `json:"write_redaction_applied"`
 	IncludesSystemPrompt   bool   `json:"includes_system_prompt_chars"`
 	SystemPromptSummarized bool   `json:"system_prompt_summarized"`
@@ -88,8 +88,8 @@ type SummarizationEvent struct {
 	MessageSentToCLI       bool   `json:"message_sent_to_cli"`
 	SummarizationFailed    bool   `json:"summarization_failed"`
 	OldContextSentSilently bool   `json:"old_context_sent_silently"`
-	OutputTarget           string `json:"output_target"`                 // "memory/summaries.md" 正確；"memory/talk_full.md" 違規
-	OutputOperation        string `json:"output_operation"`              // "append" | "overwrite"
+	OutputTarget           string `json:"output_target"`    // "memory/summaries.md" 正確；"memory/talk_full.md" 違規
+	OutputOperation        string `json:"output_operation"` // "append" | "overwrite"
 }
 
 // SummarizationOutput — 摘要產出內容的 metadata。
@@ -115,8 +115,8 @@ type DAGResumeConfig struct {
 // Consumer: CheckActionRoutingUsesProgramTag
 type RoutingDecision struct {
 	SchemaVersion   string `json:"schema_version"`
-	EventType       string `json:"event_type"`        // "routing_decision"
-	RoutingMethod   string `json:"routing_method"`    // "program_tag_match" | "llm_only"
+	EventType       string `json:"event_type"`     // "routing_decision"
+	RoutingMethod   string `json:"routing_method"` // "program_tag_match" | "llm_only"
 	ProgramTagMatch bool   `json:"program_tag_match"`
 }
 
@@ -125,7 +125,7 @@ type RoutingDecision struct {
 // Consumer: CheckNoToolDBInjectedIntoPrompt
 type PromptComposition struct {
 	SchemaVersion        string `json:"schema_version"`
-	EventType            string `json:"event_type"`            // "prompt_composition"
+	EventType            string `json:"event_type"` // "prompt_composition"
 	SubRegistryInPrompt  bool   `json:"sub_registry_in_prompt"`
 	ToolDatabaseInPrompt bool   `json:"tool_database_in_prompt"`
 }
@@ -135,8 +135,8 @@ type PromptComposition struct {
 // Consumer: Rules 18-20
 type ModelSelectionEvent struct {
 	SchemaVersion            string `json:"schema_version"`
-	EventType                string `json:"event_type"`                  // "model_selection"
-	ModelSource              string `json:"model_source"`                // "configured" | "constant"（後者違規）
+	EventType                string `json:"event_type"`   // "model_selection"
+	ModelSource              string `json:"model_source"` // "configured" | "constant"（後者違規）
 	HardcodedModel           bool   `json:"hardcoded_model"`
 	ModelRemoved             bool   `json:"model_removed"`
 	UserReselectionTriggered bool   `json:"user_reselection_triggered"`
@@ -159,7 +159,7 @@ type LogOperation struct {
 // Consumer: CheckSubNotCreatedWithoutConfirmation
 type SubCreationEvent struct {
 	SchemaVersion string `json:"schema_version"`
-	EventType     string `json:"event_type"`     // "sub_creation"
+	EventType     string `json:"event_type"` // "sub_creation"
 	SubID         string `json:"sub_id"`
 	AutoCreated   bool   `json:"auto_created"`
 	UserConfirmed bool   `json:"user_confirmed"`

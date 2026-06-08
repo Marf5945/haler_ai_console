@@ -14,9 +14,9 @@ import (
 
 // ValidationResult 驗證結果。
 type ValidationResult struct {
-	Valid     bool   `json:"valid"`
-	Status   string `json:"status"`    // ok, pending_review, rejected
-	Reason   string `json:"reason"`    // 拒絕/待審原因
+	Valid  bool   `json:"valid"`
+	Status string `json:"status"` // ok, pending_review, rejected
+	Reason string `json:"reason"` // 拒絕/待審原因
 }
 
 // ──────────────────────────────────────────────
@@ -94,7 +94,7 @@ var suspiciousRulePatterns = []string{
 	"security test",
 	"滲透測試",
 	"cli self-description",
-	"confirmed_rule",  // 不允許內容自稱為 confirmed_rule
+	"confirmed_rule", // 不允許內容自稱為 confirmed_rule
 	"system prompt",
 	"系統提示詞",
 }

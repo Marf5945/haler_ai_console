@@ -13,17 +13,17 @@ import (
 type DeviationType string
 
 const (
-	DeviationMergedSteps      DeviationType = "merged_steps"
-	DeviationSplitStep        DeviationType = "split_step"
-	DeviationSkippedStep      DeviationType = "skipped_step"
-	DeviationInsertedStep     DeviationType = "inserted_step"
-	DeviationToolTypeChanged  DeviationType = "tool_type_changed"
-	DeviationSchemaImproved   DeviationType = "schema_improved"
-	DeviationLatencyImproved  DeviationType = "latency_improved"
-	DeviationTokenImproved    DeviationType = "token_improved"
-	DeviationRiskIncreased    DeviationType = "risk_increased"
-	DeviationRiskDecreased    DeviationType = "risk_decreased"
-	DeviationResultMismatch   DeviationType = "result_mismatch"
+	DeviationMergedSteps     DeviationType = "merged_steps"
+	DeviationSplitStep       DeviationType = "split_step"
+	DeviationSkippedStep     DeviationType = "skipped_step"
+	DeviationInsertedStep    DeviationType = "inserted_step"
+	DeviationToolTypeChanged DeviationType = "tool_type_changed"
+	DeviationSchemaImproved  DeviationType = "schema_improved"
+	DeviationLatencyImproved DeviationType = "latency_improved"
+	DeviationTokenImproved   DeviationType = "token_improved"
+	DeviationRiskIncreased   DeviationType = "risk_increased"
+	DeviationRiskDecreased   DeviationType = "risk_decreased"
+	DeviationResultMismatch  DeviationType = "result_mismatch"
 )
 
 // PatchType classifies what kind of patch a deviation suggests.
@@ -39,13 +39,13 @@ const (
 // Deviation records a single observed difference between outline and actual.
 // Corresponds to schema #51 in TASKS_1_2.md.
 type Deviation struct {
-	Type              DeviationType `json:"type"`
-	OutlineStepID     string        `json:"outline_step_id"`
-	ActualStepID      string        `json:"actual_step_id"`
-	Confidence        float64       `json:"confidence"`
-	Reason            string        `json:"reason"`
-	RiskDelta         float64       `json:"risk_delta"` // positive = risk increased
-	SuggestedPatchType PatchType    `json:"suggested_patch_type"`
+	Type               DeviationType `json:"type"`
+	OutlineStepID      string        `json:"outline_step_id"`
+	ActualStepID       string        `json:"actual_step_id"`
+	Confidence         float64       `json:"confidence"`
+	Reason             string        `json:"reason"`
+	RiskDelta          float64       `json:"risk_delta"` // positive = risk increased
+	SuggestedPatchType PatchType     `json:"suggested_patch_type"`
 }
 
 // OutlineStep is the shared type used by both execution_hook and step_outline.

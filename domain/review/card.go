@@ -74,11 +74,11 @@ type DualStepState struct {
 	Step2ExecutedAt string `json:"step2_executed_at,omitempty"`
 
 	// 驗證用的 hash（controller 在 Step 2 時比對）
-	ReviewIDAtStep1    string `json:"review_id_at_step1,omitempty"`
-	ScopeHashAtStep1   string `json:"scope_hash_at_step1,omitempty"`
-	RiskPolicyHash     string `json:"risk_policy_hash,omitempty"`
-	ToolRegistryHash   string `json:"tool_registry_hash,omitempty"`
-	TargetHashSet      string `json:"target_hash_set,omitempty"`
+	ReviewIDAtStep1  string `json:"review_id_at_step1,omitempty"`
+	ScopeHashAtStep1 string `json:"scope_hash_at_step1,omitempty"`
+	RiskPolicyHash   string `json:"risk_policy_hash,omitempty"`
+	ToolRegistryHash string `json:"tool_registry_hash,omitempty"`
+	TargetHashSet    string `json:"target_hash_set,omitempty"`
 
 	// 是否已失效（hash 不一致時設為 true）
 	Invalidated bool `json:"invalidated,omitempty"`

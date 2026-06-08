@@ -247,8 +247,8 @@ func CheckScopeFingerprintIncludesAllowedFor(fingerprintJSON string) error {
 // CheckScopeFingerprintPreservesHumanReadable 驗證 ScopeFingerprint 保留人類可讀欄位。
 func CheckScopeFingerprintPreservesHumanReadable(fingerprintJSON string) error {
 	var fp struct {
-		Hostname  string `json:"hostname"`
-		AddedBy   string `json:"added_by"`
+		Hostname string `json:"hostname"`
+		AddedBy  string `json:"added_by"`
 	}
 	if err := json.Unmarshal([]byte(fingerprintJSON), &fp); err != nil {
 		return nil

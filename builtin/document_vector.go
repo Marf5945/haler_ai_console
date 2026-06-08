@@ -144,12 +144,12 @@ func BuildAndSaveVectorIndexToDir(vectorsDir, docID, content string, vec Vectori
 // BuildDocumentChunks 用「段落 hybrid」策略拆 chunk 並向量化。
 //
 // 策略：
-//   1. 先依「空行或 markdown heading」切段落。
-//   2. 段落 rune 數 ≤ chunkMaxRunes 直接整段當一個 chunk；
-//      多個小段落會被攢起來，直到「加下一段就超 chunkMaxRunes」才 flush。
-//   3. 單一段落超 chunkMaxRunes 時，依中英句末標點（。！？.!?）切，
-//      再 group 到不超過 chunkMaxRunes。
-//   4. ChunkerVersion 被 bump 時所有舊索引視為過期。
+//  1. 先依「空行或 markdown heading」切段落。
+//  2. 段落 rune 數 ≤ chunkMaxRunes 直接整段當一個 chunk；
+//     多個小段落會被攢起來，直到「加下一段就超 chunkMaxRunes」才 flush。
+//  3. 單一段落超 chunkMaxRunes 時，依中英句末標點（。！？.!?）切，
+//     再 group 到不超過 chunkMaxRunes。
+//  4. ChunkerVersion 被 bump 時所有舊索引視為過期。
 //
 // 為什麼不直接用 LLM 判斷最長句？M1 先 deterministic 穩定；之後 M3 可選擇性升級。
 func BuildDocumentChunks(docID, content string, vec Vectorizer) ([]DocumentChunk, error) {
@@ -498,7 +498,6 @@ func snippet(text string) string {
 	return string(runes[:180]) + "..."
 }
 
-
 // sha256Hex 回 hex(SHA256(s))。用於 content hash diff。
 func sha256Hex(s string) string {
 	sum := sha256.Sum256([]byte(s))
@@ -507,7 +506,8 @@ func sha256Hex(s string) string {
 
 // indexMetaCompatible 在 search loop 內快速判斷一個 index 是否值得繼續算 cosine。
 // 規則：Type 必須相同；dense 額外要求 ModelID + Dimension 對得上；
-//      legacy / 缺 Type 的舊索引一律當 sparse 處理（兼容 v1）。
+//
+//	legacy / 缺 Type 的舊索引一律當 sparse 處理（兼容 v1）。
 func indexMetaCompatible(queryMeta, indexMeta VectorMetadata) bool {
 	qt := queryMeta.Type
 	it := indexMeta.Type

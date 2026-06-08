@@ -19,11 +19,11 @@ import (
 // FORBIDDEN exports: full screenshots, readable text patches, form content,
 // accounts, email, tokens, API keys, passwords, payment info, any sensitive screen content.
 type SafeExportManifest struct {
-	ExportedAt      time.Time `json:"exported_at"`
-	IncludedSections []string `json:"included_sections"`
-	ExcludedSections []string `json:"excluded_sections"`
-	RedactionSummary string   `json:"redaction_summary"`
-	ManifestHash     string   `json:"manifest_hash"`
+	ExportedAt       time.Time `json:"exported_at"`
+	IncludedSections []string  `json:"included_sections"`
+	ExcludedSections []string  `json:"excluded_sections"`
+	RedactionSummary string    `json:"redaction_summary"`
+	ManifestHash     string    `json:"manifest_hash"`
 }
 
 // allowedSections lists what Safe Export may include.

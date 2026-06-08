@@ -16,8 +16,8 @@ import (
 
 // TargetEntry 描述一個操作目標（用於 hash 計算）。
 type TargetEntry struct {
-	Operation    string `json:"operation"`
-	Target       string `json:"target"`
+	Operation     string `json:"operation"`
+	Target        string `json:"target"`
 	AffectedScope string `json:"affected_scope"`
 }
 

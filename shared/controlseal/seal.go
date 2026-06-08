@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -50,13 +51,15 @@ func GenerateSeal() string {
 }
 
 func secureIndex(max int) int {
-	n, err := rand.Int(rand.Reader, big.NewInt(int64(max)))
-	if err != nil {
-		// Crypto randomness should be available; fallback keeps the function
-		// total for tests and degraded local environments.
-		return 0
+	// 重試 crypto/rand；連續失敗（極罕見）才退化。
+	for attempt := 0; attempt < 3; attempt++ {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(max)))
+		if err == nil {
+			return int(n.Int64())
+		}
 	}
-	return int(n.Int64())
+	// 退化路徑：用時間派生的變動值，避免固定回 0 讓印可預測（fail-closed 精神）。
+	return int(time.Now().UnixNano() % int64(max))
 }
 
 // IsAllowedConsonant reports whether r can appear in a control seal.

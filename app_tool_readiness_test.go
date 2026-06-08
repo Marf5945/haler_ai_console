@@ -27,7 +27,7 @@ func TestToolReadinessAsksForWeatherLocation(t *testing.T) {
 	app := newToolReadinessTestApp()
 	decision := toolRoutingDecision{Kind: toolRoutingDecisionAction, Action: "網路", Target: "今天會下雨嗎", Next: actionchain.StandbyNext}
 
-	handled, resp := app.maybeAskForToolReadiness("s1", decision, "trace-test")
+	handled, resp := app.maybeAskForToolReadiness("s1", decision, "今天會下雨嗎", "trace-test")
 	if !handled {
 		t.Fatal("expected readiness gate to ask for missing location")
 	}
@@ -43,7 +43,7 @@ func TestToolReadinessAcceptsLocationHint(t *testing.T) {
 	app := newToolReadinessTestApp()
 	decision := toolRoutingDecision{Kind: toolRoutingDecisionAction, Action: "網路", Target: "台北今天會下雨嗎", Next: actionchain.StandbyNext}
 
-	handled, _ := app.maybeAskForToolReadiness("s1", decision, "trace-test")
+	handled, _ := app.maybeAskForToolReadiness("s1", decision, "台北今天會下雨嗎", "trace-test")
 	if handled {
 		t.Fatal("location hint in target should be enough for first pass")
 	}
@@ -52,7 +52,7 @@ func TestToolReadinessAcceptsLocationHint(t *testing.T) {
 func TestToolReadinessConsumesClarificationAndRerunsAction(t *testing.T) {
 	app := newToolReadinessTestApp()
 	decision := toolRoutingDecision{Kind: toolRoutingDecisionAction, Action: "網路", Target: "今天會下雨嗎", Next: actionchain.StandbyNext}
-	if handled, _ := app.maybeAskForToolReadiness("s1", decision, "trace-test"); !handled {
+	if handled, _ := app.maybeAskForToolReadiness("s1", decision, "今天會下雨嗎", "trace-test"); !handled {
 		t.Fatal("expected initial question")
 	}
 
@@ -73,7 +73,7 @@ func TestToolReadinessQuestionNextDoesNotRequireQuestionAction(t *testing.T) {
 	app := newToolReadinessTestApp()
 	decision := toolRoutingDecision{Kind: toolRoutingDecisionAction, Action: "讀取", Target: "那個檔案", Next: actionchain.QuestionNext}
 
-	handled, resp := app.maybeAskForToolReadiness("s1", decision, "trace-test")
+	handled, resp := app.maybeAskForToolReadiness("s1", decision, "讀取那個檔案", "trace-test")
 	if !handled {
 		t.Fatal("next=提問 should ask without using 提問 as action")
 	}

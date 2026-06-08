@@ -102,7 +102,7 @@ func (a *App) maybeHandleWebSearch(userText, sessionID, traceID string) (*skill_
 		return nil, false
 	}
 	decision := toolRoutingDecision{Kind: toolRoutingDecisionAction, Action: "網路", Target: req.Query, Next: actionchain.StandbyNext}
-	if handled, resp := a.maybeAskForToolReadiness(sessionID, decision, traceID); handled {
+	if handled, resp := a.maybeAskForToolReadiness(sessionID, decision, userText, traceID); handled {
 		return &resp, true
 	}
 	req.Query = a.targetWithBackground(sessionID, req.Query)
@@ -111,6 +111,7 @@ func (a *App) maybeHandleWebSearch(userText, sessionID, traceID string) (*skill_
 }
 
 func (a *App) executeWebSearch(req websearch.SearchRequest, traceID string) skill_step.CLIResponse {
+	a.pushActionStatus("網路", req.Query) // status rail：正在用網路搜尋「…」…
 	debugtrace.Record("web_search.enter", traceID, map[string]interface{}{
 		"query": req.Query,
 		"limit": req.Limit,

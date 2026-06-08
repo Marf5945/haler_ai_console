@@ -78,6 +78,7 @@ export namespace dag {
 	    parallel_root?: boolean;
 	    block_reason: string;
 	    error: string;
+	    failure_category?: string;
 	    started_at: string;
 	    completed_at: string;
 	    review_id?: string;
@@ -110,6 +111,7 @@ export namespace dag {
 	        this.parallel_root = source["parallel_root"];
 	        this.block_reason = source["block_reason"];
 	        this.error = source["error"];
+	        this.failure_category = source["failure_category"];
 	        this.started_at = source["started_at"];
 	        this.completed_at = source["completed_at"];
 	        this.review_id = source["review_id"];
@@ -121,6 +123,26 @@ export namespace dag {
 	        this.approved_by = source["approved_by"];
 	        this.approved_at = source["approved_at"];
 	        this.app_session_id = source["app_session_id"];
+	    }
+	}
+	export class GoalContract {
+	    goal_summary: string;
+	    output_type?: string;
+	    output_predicate?: string;
+	    scope?: string;
+	    immutable_conditions?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new GoalContract(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.goal_summary = source["goal_summary"];
+	        this.output_type = source["output_type"];
+	        this.output_predicate = source["output_predicate"];
+	        this.scope = source["scope"];
+	        this.immutable_conditions = source["immutable_conditions"];
 	    }
 	}
 	export class TaskPlanNode {
@@ -242,6 +264,9 @@ export namespace dag {
 	    interrupt_reason?: string;
 	    planner?: PlannerMetadata;
 	    schema?: string;
+	    revision?: number;
+	    goal_contract?: GoalContract;
+	    replan_activity?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new DAGRun(source);
@@ -263,6 +288,9 @@ export namespace dag {
 	        this.interrupt_reason = source["interrupt_reason"];
 	        this.planner = this.convertValues(source["planner"], PlannerMetadata);
 	        this.schema = source["schema"];
+	        this.revision = source["revision"];
+	        this.goal_contract = this.convertValues(source["goal_contract"], GoalContract);
+	        this.replan_activity = source["replan_activity"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -311,6 +339,7 @@ export namespace dag {
 	        this.error_summary = source["error_summary"];
 	    }
 	}
+	
 	export class GuardCheckResult {
 	    safe: boolean;
 	    changed_fields: string[];
@@ -356,6 +385,171 @@ export namespace debugtrace {
 	        this.last_error = source["last_error"];
 	    }
 	}
+
+}
+
+export namespace go_program {
+	
+	export class Toolchain {
+	    go_binary: string;
+	    version: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Toolchain(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.go_binary = source["go_binary"];
+	        this.version = source["version"];
+	    }
+	}
+	export class DataSource {
+	    kind: string;
+	    name: string;
+	    path?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DataSource(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.name = source["name"];
+	        this.path = source["path"];
+	    }
+	}
+	export class ObjectSchema {
+	    required?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ObjectSchema(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.required = source["required"];
+	    }
+	}
+	export class Permissions {
+	    read_app_data: boolean;
+	    read_outputs: boolean;
+	    write_outputs_scratch: boolean;
+	    read_mounted_paths?: string[];
+	    read_db_as_json: boolean;
+	    network: boolean;
+	    shell_subprocess: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Permissions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.read_app_data = source["read_app_data"];
+	        this.read_outputs = source["read_outputs"];
+	        this.write_outputs_scratch = source["write_outputs_scratch"];
+	        this.read_mounted_paths = source["read_mounted_paths"];
+	        this.read_db_as_json = source["read_db_as_json"];
+	        this.network = source["network"];
+	        this.shell_subprocess = source["shell_subprocess"];
+	    }
+	}
+	export class Manifest {
+	    program_id: string;
+	    display_name: string;
+	    purpose: string;
+	    source_dir: string;
+	    permissions: Permissions;
+	    input_schema: ObjectSchema;
+	    output_schema: ObjectSchema;
+	    vendor_allowlist?: string[];
+	    data_sources?: DataSource[];
+	    metadata?: Record<string, string>;
+	
+	    static createFrom(source: any = {}) {
+	        return new Manifest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.program_id = source["program_id"];
+	        this.display_name = source["display_name"];
+	        this.purpose = source["purpose"];
+	        this.source_dir = source["source_dir"];
+	        this.permissions = this.convertValues(source["permissions"], Permissions);
+	        this.input_schema = this.convertValues(source["input_schema"], ObjectSchema);
+	        this.output_schema = this.convertValues(source["output_schema"], ObjectSchema);
+	        this.vendor_allowlist = source["vendor_allowlist"];
+	        this.data_sources = this.convertValues(source["data_sources"], DataSource);
+	        this.metadata = source["metadata"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class AttemptRecord {
+	    attempt: number;
+	    hash: string;
+	    error_signature?: string;
+	    files: string[];
+	    manifest: Manifest;
+	    toolchain: Toolchain;
+	    metadata?: Record<string, string>;
+	
+	    static createFrom(source: any = {}) {
+	        return new AttemptRecord(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.attempt = source["attempt"];
+	        this.hash = source["hash"];
+	        this.error_signature = source["error_signature"];
+	        this.files = source["files"];
+	        this.manifest = this.convertValues(source["manifest"], Manifest);
+	        this.toolchain = this.convertValues(source["toolchain"], Toolchain);
+	        this.metadata = source["metadata"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
+	
+	
 
 }
 
@@ -678,6 +872,176 @@ export namespace main {
 	        this.draft = source["draft"];
 	    }
 	}
+	export class GoProgramAuthoringCatalogItem {
+	    run_id: string;
+	    program_id: string;
+	    program_name: string;
+	    status: string;
+	    purpose?: string;
+	    workspace_dir: string;
+	    attempt_count: number;
+	    latest_attempt_hash?: string;
+	    pending_skill_id?: string;
+	    created_at: string;
+	    updated_at: string;
+	    message?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GoProgramAuthoringCatalogItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.run_id = source["run_id"];
+	        this.program_id = source["program_id"];
+	        this.program_name = source["program_name"];
+	        this.status = source["status"];
+	        this.purpose = source["purpose"];
+	        this.workspace_dir = source["workspace_dir"];
+	        this.attempt_count = source["attempt_count"];
+	        this.latest_attempt_hash = source["latest_attempt_hash"];
+	        this.pending_skill_id = source["pending_skill_id"];
+	        this.created_at = source["created_at"];
+	        this.updated_at = source["updated_at"];
+	        this.message = source["message"];
+	    }
+	}
+	export class GoProgramAuthoringDetail {
+	    run_id: string;
+	    program_id: string;
+	    program_name: string;
+	    status: string;
+	    purpose?: string;
+	    workspace_dir: string;
+	    attempt_count: number;
+	    latest_attempt_hash?: string;
+	    pending_skill_id?: string;
+	    created_at: string;
+	    updated_at: string;
+	    message?: string;
+	    authoring_prompt?: string;
+	    control_steps?: string[];
+	    manifest?: go_program.Manifest;
+	    attempts?: go_program.AttemptRecord[];
+	    exportable: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new GoProgramAuthoringDetail(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.run_id = source["run_id"];
+	        this.program_id = source["program_id"];
+	        this.program_name = source["program_name"];
+	        this.status = source["status"];
+	        this.purpose = source["purpose"];
+	        this.workspace_dir = source["workspace_dir"];
+	        this.attempt_count = source["attempt_count"];
+	        this.latest_attempt_hash = source["latest_attempt_hash"];
+	        this.pending_skill_id = source["pending_skill_id"];
+	        this.created_at = source["created_at"];
+	        this.updated_at = source["updated_at"];
+	        this.message = source["message"];
+	        this.authoring_prompt = source["authoring_prompt"];
+	        this.control_steps = source["control_steps"];
+	        this.manifest = this.convertValues(source["manifest"], go_program.Manifest);
+	        this.attempts = this.convertValues(source["attempts"], go_program.AttemptRecord);
+	        this.exportable = source["exportable"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class GoProgramAuthoringResult {
+	    status: string;
+	    program_name: string;
+	    program_id: string;
+	    workspace_dir?: string;
+	    authoring_prompt?: string;
+	    control_steps?: string[];
+	    manifest?: go_program.Manifest;
+	    review_card?: review.Card;
+	    attempts?: go_program.AttemptRecord[];
+	    pending_skill_id?: string;
+	    final_text?: string;
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GoProgramAuthoringResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.status = source["status"];
+	        this.program_name = source["program_name"];
+	        this.program_id = source["program_id"];
+	        this.workspace_dir = source["workspace_dir"];
+	        this.authoring_prompt = source["authoring_prompt"];
+	        this.control_steps = source["control_steps"];
+	        this.manifest = this.convertValues(source["manifest"], go_program.Manifest);
+	        this.review_card = this.convertValues(source["review_card"], review.Card);
+	        this.attempts = this.convertValues(source["attempts"], go_program.AttemptRecord);
+	        this.pending_skill_id = source["pending_skill_id"];
+	        this.final_text = source["final_text"];
+	        this.message = source["message"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class HookGeneReviewSummary {
+	    skill_id: string;
+	    complete_samples: number;
+	    bloat_ratio: number;
+	    hook_complexity: number;
+	    review_suggested: boolean;
+	    incomplete_count: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new HookGeneReviewSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.skill_id = source["skill_id"];
+	        this.complete_samples = source["complete_samples"];
+	        this.bloat_ratio = source["bloat_ratio"];
+	        this.hook_complexity = source["hook_complexity"];
+	        this.review_suggested = source["review_suggested"];
+	        this.incomplete_count = source["incomplete_count"];
+	    }
+	}
 	export class ImportSubResult {
 	    new_system_code: string;
 	    sub_dir: string;
@@ -713,6 +1077,38 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class NativeGoProgramDragExportResult {
+	    status: string;
+	    export_dir: string;
+	    landed_path: string;
+	    platform: string;
+	    fallback_required: boolean;
+	    message: string;
+	    run_id: string;
+	    program_id: string;
+	    program_name: string;
+	    drop_target_kind: string;
+	    drop_target_dir: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new NativeGoProgramDragExportResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.status = source["status"];
+	        this.export_dir = source["export_dir"];
+	        this.landed_path = source["landed_path"];
+	        this.platform = source["platform"];
+	        this.fallback_required = source["fallback_required"];
+	        this.message = source["message"];
+	        this.run_id = source["run_id"];
+	        this.program_id = source["program_id"];
+	        this.program_name = source["program_name"];
+	        this.drop_target_kind = source["drop_target_kind"];
+	        this.drop_target_dir = source["drop_target_dir"];
+	    }
 	}
 	export class NativePersonaDragExportResult {
 	    status: string;

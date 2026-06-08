@@ -16,11 +16,11 @@ import (
 
 // MemoryManifest 記憶管線的元資料。
 type MemoryManifest struct {
-	CurrentHash  string   `json:"current_hash"`   // 當前 hash chain 的最新值
-	PreviousHash string   `json:"previous_hash"`  // 上一筆 hash
-	EntryCount   int      `json:"entry_count"`     // 累計寫入筆數
-	LastRotation string   `json:"last_rotation"`   // 最近一次輪轉時間
-	ArchiveFiles []string `json:"archive_files"`   // 歸檔檔案清單
+	CurrentHash  string   `json:"current_hash"`  // 當前 hash chain 的最新值
+	PreviousHash string   `json:"previous_hash"` // 上一筆 hash
+	EntryCount   int      `json:"entry_count"`   // 累計寫入筆數
+	LastRotation string   `json:"last_rotation"` // 最近一次輪轉時間
+	ArchiveFiles []string `json:"archive_files"` // 歸檔檔案清單
 }
 
 // NewManifest 建立空的 manifest。

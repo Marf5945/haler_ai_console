@@ -16,9 +16,9 @@ const SubCreationThreshold = 0.40
 // ActionRecord 單筆動作記錄。
 // Type：sub_delegated（委派給 sub）或 main_direct（主代理直接執行）。
 type ActionRecord struct {
-	Type      string `json:"type"`       // "sub_delegated" | "main_direct"
-	ToolID    string `json:"tool_id"`    // 使用的工具 ID
-	Timestamp string `json:"timestamp"`  // RFC3339 時間戳
+	Type      string `json:"type"`      // "sub_delegated" | "main_direct"
+	ToolID    string `json:"tool_id"`   // 使用的工具 ID
+	Timestamp string `json:"timestamp"` // RFC3339 時間戳
 }
 
 // AnalysisResult 動作統計分析結果。

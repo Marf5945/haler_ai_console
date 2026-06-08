@@ -21,17 +21,17 @@ import (
 //
 // SchemaVersion 固定為 "skill_relation.v1"。
 type SkillRelation struct {
-	SchemaVersion   string   `json:"schema_version"`    // 固定 "skill_relation.v1"
-	SkillID         string   `json:"skill_id"`          // 所屬 skill 的 ID
-	ResourceID      string   `json:"resource_id"`       // 本資源的唯一 ID
-	ResourceType    string   `json:"resource_type"`     // "example" | "program" | "cli_md"
-	DescriptionDoc  string   `json:"description_doc"`   // 指向說明文件的相對路徑，例如 "../../README.md"
-	Tags            []string `json:"tags"`              // 繼承自 manifest 的標籤，用於搜尋
-	RelatedExamples []string `json:"related_examples"`  // 此資源依賴的 example ID
-	RelatedPrograms []string `json:"related_programs"`  // 此資源依賴的 program ID
-	RelatedCLIMd    []string `json:"related_cli_md"`    // 此資源依賴的 cli_md ID
-	Notes           string   `json:"notes"`             // 給維護人員的自由文字備註
-	Hash            string   `json:"hash"`              // 關聯內容的 SHA-256
+	SchemaVersion   string   `json:"schema_version"`   // 固定 "skill_relation.v1"
+	SkillID         string   `json:"skill_id"`         // 所屬 skill 的 ID
+	ResourceID      string   `json:"resource_id"`      // 本資源的唯一 ID
+	ResourceType    string   `json:"resource_type"`    // "example" | "program" | "cli_md"
+	DescriptionDoc  string   `json:"description_doc"`  // 指向說明文件的相對路徑，例如 "../../README.md"
+	Tags            []string `json:"tags"`             // 繼承自 manifest 的標籤，用於搜尋
+	RelatedExamples []string `json:"related_examples"` // 此資源依賴的 example ID
+	RelatedPrograms []string `json:"related_programs"` // 此資源依賴的 program ID
+	RelatedCLIMd    []string `json:"related_cli_md"`   // 此資源依賴的 cli_md ID
+	Notes           string   `json:"notes"`            // 給維護人員的自由文字備註
+	Hash            string   `json:"hash"`             // 關聯內容的 SHA-256
 }
 
 // LoadRelation 從指定路徑讀取並解析 .skill_rel.json。

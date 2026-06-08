@@ -3,9 +3,9 @@
  * i18n Verification Script — verify-i18n.js
  * Checks:
  *  1. JSON format validity
- *  2. Key completeness (zh-TW ↔ en parity)
+ *  2. Key completeness (zh-TW ↔ target parity)
  *  3. Interpolation variable matching ({var} in both files)
- *  4. String length warnings (en > 2× zh-TW length)
+ *  4. String length warnings (target > 2× zh-TW length)
  *
  * Usage: node verify-i18n.js
  * Exit code: 0 = pass, 1 = errors found
@@ -16,7 +16,7 @@ const path = require('path');
 
 const LOCALES_DIR = __dirname;
 const SOURCE_FILE = 'zh-TW.json';
-const TARGET_FILES = ['en.json'];
+const TARGET_FILES = ['en.json', 'ja.json'];
 
 let errors = 0;
 let warnings = 0;
@@ -117,14 +117,14 @@ for (const [tf, data] of Object.entries(targets)) {
   }
 
   // 4. Length warnings
-  console.log(`\n[4] Length Warnings (en > 2× zh-TW):`);
+  console.log(`\n[4] Length Warnings (${tf} > 2× ${SOURCE_FILE}):`);
   let lengthWarnings = 0;
   for (const key of Object.keys(sourceKeys)) {
     if (!(key in targetKeys)) continue;
     const srcLen = sourceKeys[key].length;
     const tgtLen = targetKeys[key].length;
     if (srcLen > 0 && tgtLen > srcLen * 2.5) {
-      console.warn(`  ⚠ ${key}: zh-TW=${srcLen}ch, en=${tgtLen}ch (${(tgtLen/srcLen).toFixed(1)}×)`);
+      console.warn(`  ⚠ ${key}: ${SOURCE_FILE}=${srcLen}ch, ${tf}=${tgtLen}ch (${(tgtLen/srcLen).toFixed(1)}×)`);
       lengthWarnings++;
     }
   }

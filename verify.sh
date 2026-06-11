@@ -3,8 +3,8 @@
 # 用法（從任何地方都可執行）： ./verify.sh   或   bash verify.sh
 set -uo pipefail
 
-# 專案根目錄（寫死絕對路徑，雙擊或從別處執行都不會跑錯位置）。
-PROJECT_DIR="/Users/tester/Desktop/AI攜帶型助手/實作/ui_console/ui_console_wails_v_3.1"
+# 專案根目錄（以腳本所在位置自動推導，雙擊或從別處執行都不會跑錯位置）。
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR" || { echo "❌ 找不到專案目錄：$PROJECT_DIR"; exit 1; }
 
 # 確保 go 在 PATH（macOS 常見安裝位置：官方 pkg / Homebrew / GOPATH bin）。

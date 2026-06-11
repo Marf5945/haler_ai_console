@@ -1,8 +1,8 @@
 #!/bin/zsh
 set -euo pipefail
 
-PROJECT="/Users/tester/Desktop/AI攜帶型助手/實作/ui_console/ui_console_wails_v_3.1"
-WAILS="/Users/tester/go/bin/wails"
+PROJECT="$(cd "$(dirname "$0")/.." && pwd)"
+WAILS="${WAILS:-$HOME/go/bin/wails}"
 APP="$PROJECT/build/bin/ai-console.app"
 LOG_DIR="$PROJECT/build/logs"
 LOG_FILE="$LOG_DIR/package-latest-$(date '+%Y%m%d-%H%M%S').log"
@@ -31,7 +31,7 @@ finish() {
 }
 trap finish EXIT
 
-echo "Packaging AI Console v3.1"
+echo "Packaging AI Console"
 echo "Project: $PROJECT"
 echo "Started: $(date '+%Y-%m-%d %H:%M:%S')"
 echo

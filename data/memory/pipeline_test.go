@@ -26,9 +26,10 @@ func TestNewPipeline(t *testing.T) {
 func TestAppendTalkEntryWithRedaction(t *testing.T) {
 	tmpDir := t.TempDir()
 	p := NewPipeline(tmpDir)
+	key := "sk-" + "abc123def456ghi789jkl012mno345pqr678"
 
 	// 寫入含 API key 的內容
-	records, err := p.AppendTalkEntry("user", "My key is " + "sk-" + "abc123def456ghi789jkl012mno345pqr678")
+	records, err := p.AppendTalkEntry("user", "My key is "+key)
 	if err != nil {
 		t.Fatalf("append failed: %v", err)
 	}

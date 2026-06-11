@@ -32,10 +32,11 @@ func TestSearchFindsContentAndPath(t *testing.T) {
 }
 
 func TestSearchRedactsSnippet(t *testing.T) {
+	secret := "sk-" + "abcdefghijklmnopqrstuvwxyz123456"
 	svc := NewService(nil, []Item{{
 		Source:  "document", // 預設會搜的本機檔案來源（記憶搜尋另有專測）
 		Title:   "secret",
-		Content: "token " + "sk-" + "abcdefghijklmnopqrstuvwxyz123456" + " should not show",
+		Content: "token " + secret + " should not show",
 	}})
 	results, err := svc.Search(SearchRequest{Query: "token"})
 	if err != nil {

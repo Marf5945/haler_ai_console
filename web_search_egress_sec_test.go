@@ -11,11 +11,12 @@ import (
 )
 
 func TestEgressDetectsAPIKeyInQuery(t *testing.T) {
-	masked, records := memory.RedactBeforeWrite("幫我查 " + "sk-" + "abcdefghijklmnopqrstuvwxyz123456" + " 是哪家的金鑰")
+	secret := "sk-" + "abcdefghijklmnopqrstuvwxyz123456"
+	masked, records := memory.RedactBeforeWrite("幫我查 " + secret + " 是哪家的金鑰")
 	if len(records) == 0 {
 		t.Fatal("API 金鑰應被偵測")
 	}
-	if strings.Contains(masked, "sk-" + "abcdefghijklmnopqrstuvwxyz123456") {
+	if strings.Contains(masked, secret) {
 		t.Fatal("遮蔽版不應殘留原始金鑰")
 	}
 	if !strings.Contains(masked, "[REDACTED:") {

@@ -211,14 +211,23 @@ func (a *App) SaveMainAsSub(subName string) (string, error) {
 		os.WriteFile(filepath.Join(subMemDir, "summaries.md"), data, 0o600)
 	}
 
-	// 寫入 sub metadata
+	// 帶入 main 累積的 skill 使用紀錄（tool_history.jsonl）：
+	// 只帶「skill ID 或顯示名稱出現在這段對話全文」的紀錄，避免把 main
+	// 其他對話用過的 skill 一併搬進來。這一步是匯出 sub 時 tools/ 能自動
+	// 打包相依 skill 的前提（resolvePortableSubExportTools 會掃這個檔）。
+	copiedUsage, usedIdents := copySkillUsageRecords(projectRoot, subDir, string(talkData))
+	if copiedUsage > 0 {
+		log.Printf("session_close: 帶入 %d 筆 skill 使用紀錄到 sub %s", copiedUsage, subID)
+	}
+
+	// 寫入 sub metadata（tools_used 直接填上帶入的 skill 識別字，不再永遠空陣列）
 	meta := map[string]interface{}{
 		"id":           subID,
 		"name":         subName,
 		"created_at":   time.Now().Format(time.RFC3339),
 		"created_from": "session_close",
 		"triggers":     []string{},
-		"tools_used":   []string{},
+		"tools_used":   uniqueNonEmptyStrings(usedIdents),
 		"action_tags":  []string{},
 	}
 	metaJSON, _ := json.MarshalIndent(meta, "", "  ")

@@ -279,7 +279,11 @@
     "sending": "送信中… ({current}/{total})",
     "voiceHold": "長押しで話す",
     "summary": "要約",
-    "delete": "削除"
+    "delete": "削除",
+    "insertImage": "画像を挿入",
+    "removeImage": "画像を削除",
+    "imagePreview": "画像プレビュー",
+    "imageTooLarge": "画像が大きすぎます（上限 {max}）"
   },
   "system": {
     "sidecarFail": "[System] Sidecar の起動に失敗しました。Node.js がローカルにインストールされているか確認するか、ログを確認してください。",
@@ -324,9 +328,9 @@
   "settings": {
     "panelSettings": "パネル設定",
     "panelLanguage": "パネル言語",
-    "langZhTW": "中",
-    "langEn": "en",
-    "langJa": "ja",
+    "langZhTW": "中文",
+    "langEn": "English",
+    "langJa": "日文",
     "roleLanguage": "キャラクター言語",
     "roleLangAuto": "自動",
     "fontPreset": "フォントプリセット",
@@ -385,9 +389,9 @@
     "voiceManualSpecify": "手動",
     "voiceAutoDetect": "自動検出",
     "localModelDefault": "ローカルモデル",
-    "langPt": "pt",
-    "langEs": "es",
-    "langTh": "th"
+    "langPt": "Português",
+    "langEs": "Español",
+    "langTh": "ไทย"
   },
   "onboarding": {
     "fillNamePath": "名前とパスを入力してください",

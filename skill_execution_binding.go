@@ -6,6 +6,8 @@ package main
 import (
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"ui_console/adapter/debugtrace"
 	"ui_console/domain/review"
@@ -141,6 +143,10 @@ func (a *App) ExecuteSkillMessage(adapterID, sessionID, userText, traceID string
 		}
 		out.Executed = true
 		out.Response = resp
+		// skill 使用紀錄 producer：auto 路徑執行成功後記一筆到當前 agent 的
+		// tool_history.jsonl，供「拉出 sub / 匯出 sub」自動關聯用過的 skill。
+		// displayName 留空，由歸檔以 SkillID 反查補齊。
+		a.recordSkillUsage(out.SkillID, "", sessionID, traceID)
 		if geneSkillID != "" {
 			a.emitHookGeneDataLeft(geneSkillID, invocationID, true)
 		}
@@ -221,6 +227,8 @@ func (a *App) ConfirmAndExecuteSkillExecution(resolveID, sessionID, choice, adap
 	}
 	out.Executed = true
 	out.Response = resp
+	// skill 使用紀錄 producer：need_confirm → 使用者授權後執行成功，同樣要記。
+	a.recordSkillUsage(out.SkillID, "", sessionID, traceID)
 	if geneSkillID != "" {
 		a.emitHookGeneDataLeft(geneSkillID, invocationID, true)
 	}
@@ -364,4 +372,274 @@ func (a *App) createBlockedSkillDriftReview(actionTarget, skillID, sessionID, ra
 	})
 	a.eventBus.Emit(eventbus.EventReviewCardAdded, card)
 	return &card
+}
+
+// --- need_confirm 待確認狀態（修 skill 權限確認迴圈）---------------------------
+// 舊流程：need_confirm 只回一句純文字「要允許嗎？」，使用者回「要」又被丟回三段式
+// 路由 → 又判 need_confirm → 無限迴圈，永遠到不了 ConfirmAndExecuteSkillExecution。
+// 新流程：need_confirm 時把 resolveID 記在 session，下一句肯定/否定改由
+// maybeHandlePendingSkillConfirm 在 LLM 路由前直接接手。
+
+type pendingSkillConfirm struct {
+	ResolveID    string
+	SkillID      string
+	Target       string
+	ActionChain  string
+	AdapterID    string
+	OriginalText string
+	ExpiresAt    time.Time
+}
+
+var (
+	pendingSkillConfirmMu sync.Mutex
+	pendingSkillConfirms  = map[string]pendingSkillConfirm{} // sessionID → pending
+)
+
+func rememberPendingSkillConfirm(sessionID string, p pendingSkillConfirm) {
+	p.ExpiresAt = time.Now().Add(10 * time.Minute)
+	pendingSkillConfirmMu.Lock()
+	pendingSkillConfirms[sessionID] = p
+	pendingSkillConfirmMu.Unlock()
+}
+
+func clearPendingSkillConfirm(sessionID string) {
+	pendingSkillConfirmMu.Lock()
+	delete(pendingSkillConfirms, sessionID)
+	pendingSkillConfirmMu.Unlock()
+}
+
+// skillConfirmPrompt 組 need_confirm 的提示文字：點名 skill，並列出目前已載入、
+// 會被當輸入的引用檔；沒有任何引用檔時提醒先載入資料（修「沒跟我要資料」）。
+func (a *App) skillConfirmPrompt(target string) string {
+	var b strings.Builder
+	b.WriteString("要用 skill「" + target + "」執行這次任務嗎？回覆「要」開始，或「取消」放棄。")
+	refs := a.recentReferenceFilesForRouting(6)
+	if len(refs) == 0 {
+		b.WriteString("\n（目前沒有偵測到已載入的資料檔。若這個 skill 需要表格，請先拖入或引用檔案再確認。）")
+		return b.String()
+	}
+	names := make([]string, 0, len(refs))
+	for _, r := range refs {
+		names = append(names, r.Name)
+	}
+	b.WriteString("\n將使用這些已載入檔案作為輸入：" + strings.Join(names, "、") + "。")
+	return b.String()
+}
+
+// maybeHandlePendingSkillConfirm 在 LLM 路由前攔截「使用者正在回應上一輪 skill 權限確認」。
+// 肯定（confirmRe）→ 直接 allow_once 並執行原任務；否定（isDeclineText）→ 取消清狀態；
+// 其他 → 不攔截（回 false），讓正常路由處理，pending 保留至過期或下一句確認。
+func (a *App) maybeHandlePendingSkillConfirm(userText, sessionID, traceID string) (*skill_step.CLIResponse, bool) {
+	pendingSkillConfirmMu.Lock()
+	pending, has := pendingSkillConfirms[sessionID]
+	if has && time.Now().After(pending.ExpiresAt) {
+		delete(pendingSkillConfirms, sessionID)
+		has = false
+	}
+	pendingSkillConfirmMu.Unlock()
+	if !has {
+		return nil, false
+	}
+	lower := strings.ToLower(strings.TrimSpace(userText))
+
+	if isDeclineText(lower) {
+		clearPendingSkillConfirm(sessionID)
+		clearConfirmQuestion(sessionID)
+		debugtrace.Record("go.skillConfirm.cancelled", traceID, map[string]interface{}{
+			"target":     pending.Target,
+			"resolve_id": pending.ResolveID,
+		})
+		return &skill_step.CLIResponse{Text: "好，已取消。需要時再說一次就行。"}, true
+	}
+
+	if confirmRe.MatchString(lower) {
+		clearPendingSkillConfirm(sessionID)
+		clearConfirmQuestion(sessionID)
+		adapterID := pending.AdapterID
+		if strings.TrimSpace(adapterID) == "" {
+			adapterID = a.defaultSkillExecutionAdapterID()
+		}
+		debugtrace.Record("go.skillConfirm.granted", traceID, map[string]interface{}{
+			"target":     pending.Target,
+			"resolve_id": pending.ResolveID,
+		})
+		outputsSince := time.Now()
+		out, err := a.ConfirmAndExecuteSkillExecution(pending.ResolveID, sessionID, "allow_once", adapterID, pending.OriginalText, traceID)
+		if err != nil {
+			return &skill_step.CLIResponse{
+				Error:  err.Error(),
+				Action: "流程",
+				Target: pending.Target,
+			}, true
+		}
+		a.harvestSkillOutputs(pending.Target, outputsSince)
+		if out != nil && out.Response != nil {
+			resp := *out.Response
+			resp.Action = "流程"
+			resp.Target = pending.Target
+			if strings.TrimSpace(resp.Next) == "" {
+				resp.Next = actionchain.NormalizeNext("輸出")
+			}
+			return &resp, true
+		}
+		msg := "已允許並執行 skill「" + pending.Target + "」。"
+		if out != nil && strings.TrimSpace(out.Message) != "" {
+			msg = strings.TrimSpace(out.Message)
+		}
+		return &skill_step.CLIResponse{Text: msg, Action: "流程", Target: pending.Target}, true
+	}
+
+	// 既非肯定也非否定：不攔截，交回正常路由；pending 保留待過期或下一句確認。
+	return nil, false
+}
+
+// maybeHandleSkillFlow 處理「流程」路由：使用既有/已安裝 skill。
+// 與「程式」（製作獨立 .go 程式）區隔：流程＝把工作交給既有 skill。
+// 用 skill 自身 manifest 標籤組出可被 skillRouter 高分命中的 action-chain，
+// 交給 ExecuteSkillMessage（做風險判定、必要時注入 SKILL.md 並送出）。
+// decision.Target 不是既有 skill 時回 false，讓後續路由（程式/搜尋等）接手。
+func (a *App) maybeHandleSkillFlow(decision toolRoutingDecision, sessionID, traceID, userText string) (bool, skill_step.CLIResponse) {
+	if strings.TrimSpace(decision.Action) != "流程" {
+		return false, skill_step.CLIResponse{}
+	}
+	actionChain := a.existingSkillActionChain(decision.Target)
+	if actionChain == "" {
+		debugtrace.Record("go.skillFlow.no_match", traceID, map[string]interface{}{
+			"target": decision.Target,
+		})
+		return false, skill_step.CLIResponse{}
+	}
+	// 產出電料Bom：走專屬互動收集流程（手動逐項電料→review→輸出），
+	// 不進通用閘 / need_confirm。
+	if isDianliaoBomTarget(decision.Target) {
+		return true, a.startDianliaoBomFlow(sessionID, traceID)
+	}
+	// 通用必填輸入閘（data-driven）：執行前先用該 skill 自宣告的 InputSchema.Required
+	// 比對「使用者訊息 + 已載入檔案」，缺欄位直接回「提問」，不進 need_confirm。
+	// 讀 manifest 推導，對所有 skill 生效，不為任何單一 skill 寫死。
+	if required, ok := a.skillRequiredInputs(decision.Target); ok {
+		refs := a.recentReferenceFilesForRouting(6)
+		refNames := make([]string, 0, len(refs))
+		for _, r := range refs {
+			refNames = append(refNames, r.Name)
+		}
+		if missing := missingRequiredInputs(required, userText, refNames); len(missing) > 0 {
+			question := skillMissingInputQuestion(decision.Target, missing)
+			debugtrace.Record("go.skillFlow.missing_required_input", traceID, map[string]interface{}{
+				"target":  decision.Target,
+				"missing": missing,
+			})
+			return true, skill_step.CLIResponse{
+				Text:   setQuestionFloatingCandidates(question, traceID),
+				Action: "提問",
+				Target: question,
+				Next:   actionchain.StandbyNext,
+			}
+		}
+	}
+	adapterID := a.defaultSkillExecutionAdapterID()
+	debugtrace.Record("go.skillFlow.execute", traceID, map[string]interface{}{
+		"target":       decision.Target,
+		"action_chain": actionChain,
+	})
+	// 通用產出收集：記錄執行前時間，auto 成功後掃 outputs 把新產出落位上架。
+	outputsSince := time.Now()
+	out, err := a.ExecuteSkillMessage(adapterID, sessionID, actionChain, traceID)
+	if err != nil {
+		return true, skill_step.CLIResponse{
+			Error:  err.Error(),
+			Action: decision.Action,
+			Target: decision.Target,
+			Next:   actionchain.NormalizeNext(decision.Next),
+		}
+	}
+	// auto 執行成功 → 回 skill 的實際輸出。
+	if out != nil && out.Response != nil {
+		resp := *out.Response
+		resp.Action = decision.Action
+		resp.Target = decision.Target
+		if strings.TrimSpace(resp.Next) == "" {
+			resp.Next = actionchain.NormalizeNext(decision.Next)
+		}
+		// 把這個 skill 本回合在 outputs 新產生的檔案，依類型落位並上架到右側引用面板。
+		a.harvestSkillOutputs(decision.Target, outputsSince)
+		return true, resp
+	}
+	// need_confirm：把確認狀態記在 session，讓使用者下一句「要/取消」直接被
+	// maybeHandlePendingSkillConfirm 接手（修 need_confirm 迴圈），不再回三段式路由。
+	if out != nil && skill_eval.ExecDecision(out.Decision) == skill_eval.ExecNeedConfirm && strings.TrimSpace(out.ResolveID) != "" {
+		rememberPendingSkillConfirm(sessionID, pendingSkillConfirm{
+			ResolveID:    out.ResolveID,
+			SkillID:      out.SkillID,
+			Target:       decision.Target,
+			ActionChain:  actionChain,
+			AdapterID:    adapterID,
+			OriginalText: actionChain,
+		})
+		msg := a.skillConfirmPrompt(decision.Target)
+		rememberConfirmQuestion(sessionID, msg)
+		debugtrace.Record("go.skillFlow.need_confirm", traceID, map[string]interface{}{
+			"target":     decision.Target,
+			"resolve_id": out.ResolveID,
+		})
+		return true, skill_step.CLIResponse{
+			Text:      msg,
+			Action:    decision.Action,
+			Target:    decision.Target,
+			Next:      actionchain.NormalizeNext(decision.Next),
+			NeedsUser: true,
+		}
+	}
+	// review / 其他沒有 Response：回 skill 的提示訊息。
+	msg := "已路由到既有 skill「" + decision.Target + "」。"
+	if out != nil && strings.TrimSpace(out.Message) != "" {
+		msg = strings.TrimSpace(out.Message)
+	}
+	return true, skill_step.CLIResponse{
+		Text:      msg,
+		Action:    decision.Action,
+		Target:    decision.Target,
+		Next:      actionchain.NormalizeNext(decision.Next),
+		NeedsUser: true, // need_confirm/review：在等使用者，chat_route 節點據此暫停 DAG
+	}
+}
+
+// existingSkillActionChain 用既有 skill 的 manifest 標籤組出可被 skillRouter
+// 高分命中的 action-chain（動作取 action_tag[0]、目標取 target_aliases[0]），
+// 避免用分類動詞（如「流程」）導致動作維度 0 分、整體掉到 0.70 而無法自動命中。
+// 找不到對應 skill 時回傳空字串。
+func (a *App) existingSkillActionChain(name string) string {
+	if a == nil || a.skillArchive == nil {
+		return ""
+	}
+	want := normalizeGoProgramLookup(name)
+	if want == "" {
+		return ""
+	}
+	manifests, err := a.skillArchive.ListArchived()
+	if err != nil {
+		return ""
+	}
+	for _, m := range manifests {
+		if normalizeGoProgramLookup(m.DisplayName) != want && normalizeGoProgramLookup(m.SkillID) != want {
+			continue
+		}
+		action := firstNonEmpty(firstListItem(m.Tags.ActionTag), firstListItem(m.Routing.ActionPatterns))
+		target := firstNonEmpty(firstListItem(m.Routing.TargetAliases), firstListItem(m.Tags.DomainTag), firstNonEmpty(m.DisplayName, m.SkillID))
+		if action == "" || target == "" {
+			return ""
+		}
+		return action + actionchain.Separator + target
+	}
+	return ""
+}
+
+// firstListItem 回傳清單中第一個非空白字串，皆空回 ""。
+func firstListItem(items []string) string {
+	for _, s := range items {
+		if strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
 }

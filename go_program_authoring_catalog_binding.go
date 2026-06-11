@@ -95,6 +95,17 @@ func (a *App) ListGoProgramAuthoringCatalog(limit int) ([]GoProgramAuthoringCata
 	if err != nil {
 		return nil, err
 	}
+	// 已長出 skill 的小程式統一以 skill（✦）顯示，這裡濾掉，避免同一能力在工具列出現兩組。
+	if archived := a.archivedSkillIDSet(); len(archived) > 0 {
+		kept := entries[:0]
+		for _, entry := range entries {
+			if entry.PendingSkillID != "" && archived[entry.PendingSkillID] {
+				continue
+			}
+			kept = append(kept, entry)
+		}
+		entries = kept
+	}
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].UpdatedAt > entries[j].UpdatedAt
 	})
@@ -219,6 +230,78 @@ func (a *App) writeGoProgramAuthoringRun(result *GoProgramAuthoringResult) error
 		wailsruntime.EventsEmit(a.ctx, "goprogram:authoring_updated", meta)
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// #44 後續：拖入 go-program「匯出資料夾」的辨識與安裝（restore / 分享回灌）。
+// 匯出包結構：go_program_export_manifest.json + README.md + workspace/ + source/。
+// 安裝作法：把 workspace/（內含 program_manifest.json / authoring_run.json…）複製進
+// catalog run 目錄，使其出現在「工具 > 自動流程」。
+// ---------------------------------------------------------------------------
+
+// GoProgramExportPreview 是拖入匯出資料夾時回傳給前端的辨識結果。
+type GoProgramExportPreview struct {
+	ExportType     string `json:"export_type"`
+	ProgramID      string `json:"program_id"`
+	ProgramName    string `json:"program_name"`
+	RunID          string `json:"run_id"`
+	Status         string `json:"status"`
+	PendingSkillID string `json:"pending_skill_id,omitempty"`
+}
+
+// PreviewGoProgramExport 檢查 path 是否為合法的 go_program_authoring 匯出資料夾。
+// 是 → 回傳預覽；否 → 回傳 error（呼叫端據此判斷「不是這個型別」，再去試別種）。
+func (a *App) PreviewGoProgramExport(path string) (*GoProgramExportPreview, error) {
+	if err := validateGoProgramAuthoringExport(path, ""); err != nil {
+		return nil, err
+	}
+	var manifest GoProgramAuthoringExportManifest
+	if err := readJSONFile(filepath.Join(filepath.Clean(path), goProgramExportManifestFile), &manifest); err != nil {
+		return nil, err
+	}
+	return &GoProgramExportPreview{
+		ExportType:     manifest.ExportType,
+		ProgramID:      manifest.ProgramID,
+		ProgramName:    manifest.ProgramName,
+		RunID:          manifest.RunID,
+		Status:         manifest.Status,
+		PendingSkillID: manifest.PendingSkillID,
+	}, nil
+}
+
+// ImportGoProgramExport 把匯出資料夾安裝進 catalog，使其顯示於「工具 > 自動流程」。
+// 同名 programID 採覆蓋（restore 語意）。回傳安裝後的 catalog 項目。
+func (a *App) ImportGoProgramExport(path string) (*GoProgramAuthoringCatalogItem, error) {
+	if err := validateGoProgramAuthoringExport(path, ""); err != nil {
+		return nil, err
+	}
+	clean := filepath.Clean(path)
+	var manifest GoProgramAuthoringExportManifest
+	if err := readJSONFile(filepath.Join(clean, goProgramExportManifestFile), &manifest); err != nil {
+		return nil, err
+	}
+	src := filepath.Join(clean, "workspace")
+	if _, err := os.Stat(filepath.Join(src, "program_manifest.json")); err != nil {
+		return nil, fmt.Errorf("go program export: 匯出包缺少 workspace/program_manifest.json，無法安裝")
+	}
+	programID := firstNonEmpty(manifest.ProgramID, normalizeGoProgramID(manifest.ProgramName), "go-program")
+	dest := filepath.Join(goProgramAuthoringRoot(), programID)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+		return nil, err
+	}
+	_ = os.RemoveAll(dest) // 同名覆蓋
+	if err := copySubExportDirectory(src, dest); err != nil {
+		return nil, fmt.Errorf("go program export: 複製失敗: %w", err)
+	}
+	detail, err := buildGoProgramAuthoringDetail(dest)
+	if err != nil {
+		return nil, fmt.Errorf("go program export: 安裝後讀取失敗: %w", err)
+	}
+	if a.eventBus != nil {
+		a.eventBus.Emit("goprogram:authoring_updated", nil)
+	}
+	item := detail.GoProgramAuthoringCatalogItem
+	return &item, nil
 }
 
 func goProgramAuthoringRoot() string {

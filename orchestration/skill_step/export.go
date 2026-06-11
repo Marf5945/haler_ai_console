@@ -15,10 +15,9 @@ import (
 // 包含哪些檔案被匯出（IncludedFiles），以及哪些 .skill_rel.json 被刻意排除（RemovedRelFiles）。
 //
 // 安全說明：
-// 匯出的套件只包含 skill_manifest.json 與 README.md。
-// 所有 programs/、examples/ 內容、可讀文字片段、表單資料、帳號、
-// email、token、API key 及 .skill_rel.json 均不得匯出。
-// 這樣設計是為了防止敏感資料透過 skill 匯出流出。
+// 匯出的套件保留 skill package 內容，讓接收端能重新匯入同一個 skill。
+// 但 .skill_rel.json 是本機關聯索引，必須排除並記錄在 RemovedRelFiles，
+// 讓接收端在自己的 Console 重建關聯。
 type ExportManifest struct {
 	ExportedAt      time.Time `json:"exported_at"`       // 匯出時間
 	SkillID         string    `json:"skill_id"`          // 匯出的 skill ID
@@ -28,17 +27,15 @@ type ExportManifest struct {
 }
 
 // ExportSkill 將 skillDir 中的 skill 安全匯出到 destDir。
-// 只複製 skill_manifest.json 與 README.md；
-// .skill_rel.json 會被列入 RemovedRelFiles 但不複製，
+// 會複製 skill_manifest.json、README.md、examples/、programs/、cli_md/
+// 等 package 內容；.skill_rel.json 會被列入 RemovedRelFiles 但不複製。
 // 最後在 destDir 寫入一份 export_manifest.json 作為本次匯出的記錄。
 //
 // 呼叫端責任：
 //   - 確保 skillDir 是合法的已歸檔 skill 目錄（含 skill_manifest.json）
 //   - 確保 destDir 已由使用者選擇，且路徑通過邊界檢查
 //
-// 這個函式不會：
-//   - 複製 programs/ 或 examples/ 的實際內容
-//   - 複製任何可執行指令、原始文字片段、截圖或敏感資訊
+// 這個函式不會複製 .skill_rel.json 或目錄外的 symlink 目標。
 func ExportSkill(skillDir string, destDir string) (*ExportManifest, error) {
 	if err := os.MkdirAll(destDir, 0o700); err != nil {
 		return nil, fmt.Errorf("skill_step: export mkdir: %w", err)
@@ -56,39 +53,74 @@ func ExportSkill(skillDir string, destDir string) (*ExportManifest, error) {
 	}
 	em.SkillID = m.SkillID
 
-	// 複製 skill_manifest.json——這是匯出的核心，接收端用它來識別 skill
-	manifestDst := filepath.Join(destDir, "skill_manifest.json")
-	if err := copyFile(manifestSrc, manifestDst); err != nil {
-		return nil, fmt.Errorf("skill_step: export copy manifest: %w", err)
-	}
-	em.IncludedFiles = append(em.IncludedFiles, "skill_manifest.json")
-
-	// 若有 README.md 則一起複製——作為人類可讀說明
-	readmeSrc := filepath.Join(skillDir, "README.md")
-	if _, err := os.Stat(readmeSrc); err == nil {
-		readmeDst := filepath.Join(destDir, "README.md")
-		if err := copyFile(readmeSrc, readmeDst); err != nil {
-			return nil, fmt.Errorf("skill_step: export copy README: %w", err)
-		}
-		em.IncludedFiles = append(em.IncludedFiles, "README.md")
-	}
-
-	// 走訪整個 skillDir，找出所有 .skill_rel.json 記錄到 RemovedRelFiles。
-	// 這些檔案「刻意不複製」——讓接收端知道關聯資訊需要在自己的 Console 重建。
 	walkErr := filepath.Walk(skillDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // 忽略不可讀的條目，不中止整個 walk
 		}
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".skill_rel.json") {
-			rel, relErr := filepath.Rel(skillDir, path)
-			if relErr == nil {
-				em.RemovedRelFiles = append(em.RemovedRelFiles, rel)
-			}
+		if path == skillDir {
+			return nil
 		}
+		rel, relErr := filepath.Rel(skillDir, path)
+		if relErr != nil {
+			return nil
+		}
+		if strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+			return nil
+		}
+		if info.IsDir() {
+			if strings.HasPrefix(info.Name(), ".") {
+				return filepath.SkipDir
+			}
+			if err := os.MkdirAll(filepath.Join(destDir, rel), 0o700); err != nil {
+				return fmt.Errorf("skill_step: export mkdir resource: %w", err)
+			}
+			return nil
+		}
+		if strings.HasSuffix(info.Name(), ".skill_rel.json") {
+			em.RemovedRelFiles = append(em.RemovedRelFiles, rel)
+			return nil
+		}
+		if strings.HasPrefix(info.Name(), ".") || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return nil
+		}
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(destDir, rel)), 0o700); err != nil {
+			return fmt.Errorf("skill_step: export mkdir parent: %w", err)
+		}
+		if err := copyFile(path, filepath.Join(destDir, rel)); err != nil {
+			return fmt.Errorf("skill_step: export copy %s: %w", rel, err)
+		}
+		em.IncludedFiles = append(em.IncludedFiles, rel)
 		return nil
 	})
 	if walkErr != nil {
 		return nil, fmt.Errorf("skill_step: export walk: %w", walkErr)
+	}
+
+	// 走訪整個 skillDir，找出所有 .skill_rel.json 記錄到 RemovedRelFiles。
+	// 這些檔案「刻意不複製」——讓接收端知道關聯資訊需要在自己的 Console 重建。
+	if len(em.RemovedRelFiles) == 0 {
+		walkErr = filepath.Walk(skillDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			if !info.IsDir() && strings.HasSuffix(info.Name(), ".skill_rel.json") {
+				rel, relErr := filepath.Rel(skillDir, path)
+				if relErr == nil {
+					em.RemovedRelFiles = append(em.RemovedRelFiles, rel)
+				}
+			}
+			return nil
+		})
+		if walkErr != nil {
+			return nil, fmt.Errorf("skill_step: export rel walk: %w", walkErr)
+		}
+	}
+	if len(em.IncludedFiles) == 0 {
+		// Extremely defensive: a valid skill must at least export its manifest.
+		if err := copyFile(manifestSrc, filepath.Join(destDir, "skill_manifest.json")); err != nil {
+			return nil, fmt.Errorf("skill_step: export copy manifest: %w", err)
+		}
+		em.IncludedFiles = append(em.IncludedFiles, "skill_manifest.json")
 	}
 
 	// 計算 export hash：以 skill_id + RFC3339 時間戳 雜湊，讓每次匯出都有唯一指紋

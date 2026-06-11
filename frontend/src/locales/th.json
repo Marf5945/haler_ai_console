@@ -279,7 +279,11 @@
     "sending": "กำลังส่ง… ({current}/{total})",
     "voiceHold": "กดค้างเพื่อพูด",
     "summary": "สรุป",
-    "delete": "ลบ"
+    "delete": "ลบ",
+    "insertImage": "แทรกรูปภาพ",
+    "removeImage": "ลบรูปภาพ",
+    "imagePreview": "ตัวอย่างรูปภาพ",
+    "imageTooLarge": "รูปภาพใหญ่เกินไป (สูงสุด {max})"
   },
   "system": {
     "sidecarFail": "[ระบบ] เริ่ม Sidecar ไม่สำเร็จ — โปรดตรวจสอบว่าติดตั้ง Node.js ในเครื่องแล้ว หรือดูบันทึกเพื่อรายละเอียด",
@@ -324,9 +328,9 @@
   "settings": {
     "panelSettings": "การตั้งค่าแผง",
     "panelLanguage": "ภาษาแผง",
-    "langZhTW": "中",
-    "langEn": "en",
-    "langJa": "ja",
+    "langZhTW": "中文",
+    "langEn": "English",
+    "langJa": "日文",
     "roleLanguage": "ภาษาตัวละคร",
     "roleLangAuto": "อัตโนมัติ",
     "fontPreset": "ชุดฟอนต์",
@@ -385,9 +389,9 @@
     "voiceManualSpecify": "กำหนดเอง",
     "voiceAutoDetect": "ตรวจจับอัตโนมัติ",
     "localModelDefault": "โมเดลในเครื่อง",
-    "langPt": "pt",
-    "langEs": "es",
-    "langTh": "th"
+    "langPt": "Português",
+    "langEs": "Español",
+    "langTh": "ไทย"
   },
   "onboarding": {
     "fillNamePath": "โปรดกรอกชื่อและพาธ",

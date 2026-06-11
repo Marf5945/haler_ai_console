@@ -15,13 +15,15 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"ui_console/builtin"
 )
 
 const (
 	DefaultLimit           = 5
-	defaultMaxFileSize     = 1024 * 1024
+	defaultMaxFileSize     = 16 * 1024 * 1024
 	defaultMaxFiles        = 2000
-	defaultMaxBytesScanned = 8 * 1024 * 1024
+	defaultMaxBytesScanned = 32 * 1024 * 1024
 	defaultCacheTTL        = 60 * time.Second
 	maxSnippetRunes        = 100
 	maxResponseRunes       = 3600
@@ -51,6 +53,9 @@ type SearchRequest struct {
 	Query string   `json:"query"`
 	Scope []string `json:"scope,omitempty"`
 	Limit int      `json:"limit,omitempty"`
+	// AuxTerms 是「用法/做法」這類問法詞：不計入比對門檻、也不能單獨讓 item
+	// 成立，只在主要關鍵詞已命中時微幅加分，協助排序。
+	AuxTerms []string `json:"aux_terms,omitempty"`
 }
 
 type SearchOutcome struct {
@@ -79,6 +84,10 @@ type Item struct {
 	Title   string
 	Path    string
 	Content string
+	// Keywords 只參與比對，不會出現在回傳給使用者的 Snippet。
+	// 用來塞同義詞／別名（如「剛剛 拖進來 已載入」）讓查詢命中，
+	// 但不污染顯示內容。
+	Keywords string
 }
 
 type Service struct {
@@ -130,11 +139,11 @@ func (s *Service) SearchWithContext(ctx context.Context, req SearchRequest) (Sea
 		if !scopeAllows(scope, item.Source) {
 			continue
 		}
-		if result, ok := matchItem(req.Query, item); ok {
+		if result, ok := matchItem(req.Query, req.AuxTerms, item); ok {
 			candidates = append(candidates, result)
 		}
 	}
-	fileOutcome, err := s.searchRoots(ctx, req.Query, scope)
+	fileOutcome, err := s.searchRoots(ctx, req.Query, req.AuxTerms, scope)
 	if err != nil {
 		return SearchOutcome{}, err
 	}
@@ -152,7 +161,7 @@ func (s *Service) SearchWithContext(ctx context.Context, req SearchRequest) (Sea
 	return fileOutcome, nil
 }
 
-func (s *Service) searchRoots(ctx context.Context, query string, scope map[string]bool) (SearchOutcome, error) {
+func (s *Service) searchRoots(ctx context.Context, query string, auxTerms []string, scope map[string]bool) (SearchOutcome, error) {
 	outcome := SearchOutcome{}
 	for _, root := range s.roots {
 		cleanRoot, err := secureRoot(root.Path)
@@ -163,7 +172,7 @@ func (s *Service) searchRoots(ctx context.Context, query string, scope map[strin
 		if source == "" {
 			source = sourceFromPath(cleanRoot)
 		}
-		if !scopeAllows(scope, source) {
+		if !scopeAllows(scope, source) && !scopeMayAllowFileCategory(scope) {
 			continue
 		}
 		index, err := s.indexRoot(ctx, cleanRoot, source)
@@ -185,7 +194,7 @@ func (s *Service) searchRoots(ctx context.Context, query string, scope map[strin
 			if !scopeAllows(scope, item.Source) {
 				continue
 			}
-			if result, ok := matchItem(query, item); ok {
+			if result, ok := matchItem(query, auxTerms, item); ok {
 				outcome.Results = append(outcome.Results, result)
 			}
 		}
@@ -232,7 +241,7 @@ func (s *Service) indexRoot(ctx context.Context, cleanRoot, source string) (cach
 		if err != nil {
 			return nil
 		}
-		if info.Mode()&os.ModeSymlink != 0 || info.Size() > s.maxFileSize || !isTextSearchable(path) {
+		if info.Mode()&os.ModeSymlink != 0 || info.Size() > s.maxFileSize || !isIndexableFile(path) {
 			return nil
 		}
 		if index.filesScanned >= s.maxFiles || index.bytesScanned+info.Size() > s.maxBytesScanned {
@@ -245,17 +254,18 @@ func (s *Service) indexRoot(ctx context.Context, cleanRoot, source string) (cach
 			// Keep searches inside AI Console data roots.
 			return ErrOutsideSearchRoot
 		}
-		data, err := os.ReadFile(path)
 		index.filesScanned++
 		index.bytesScanned += info.Size()
-		if err != nil || !utf8.Valid(data) {
+		source := sourceForFile(path, source)
+		content, err := searchableContentForFile(path, source, info)
+		if err != nil || strings.TrimSpace(content) == "" || !utf8.ValidString(content) {
 			return nil
 		}
 		index.items = append(index.items, Item{
-			Source:  sourceFromPathWithFallback(path, source),
+			Source:  source,
 			Title:   filepath.Base(path),
 			Path:    path,
-			Content: string(data),
+			Content: content,
 		})
 		return nil
 	})
@@ -271,17 +281,45 @@ func (s *Service) indexRoot(ctx context.Context, cleanRoot, source string) (cach
 	return index, nil
 }
 
-func matchItem(query string, item Item) (SearchResult, bool) {
+// titleTermHit 判斷查詢中是否有「夠長」的詞（≥2 runes，已過濾停用詞）直接出現在
+// 標題。標題命中是高訊號，可作為 need 門檻之外的後備命中條件，避免描述性雜訊詞
+// 把整筆結果擋掉。單一詞查詢由 queryMatchScore 的整串比對處理，這裡只補多詞情境。
+func titleTermHit(q, titleLower string) bool {
+	if titleLower == "" {
+		return false
+	}
+	terms := queryTerms(q)
+	if len(terms) == 0 {
+		// 單詞查詢：queryTerms 回 nil，直接比對整串。
+		return utf8.RuneCountInString(q) >= 2 && strings.Contains(titleLower, q)
+	}
+	for _, term := range terms {
+		if utf8.RuneCountInString(term) >= 2 && strings.Contains(titleLower, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchItem(query string, auxTerms []string, item Item) (SearchResult, bool) {
 	q := strings.ToLower(strings.TrimSpace(query))
 	if q == "" {
 		return SearchResult{}, false
 	}
-	haystack := strings.ToLower(item.Title + "\n" + item.Path + "\n" + item.Content)
-	if !strings.Contains(haystack, q) {
+	haystack := strings.ToLower(item.Title + "\n" + item.Path + "\n" + item.Content + "\n" + item.Keywords)
+	titleLower := strings.ToLower(item.Title)
+	queryScore, matched := queryMatchScore(q, haystack, auxTerms)
+	if !matched && titleTermHit(q, titleLower) {
+		// 後備命中：只要有「夠長」的查詢詞直接命中標題，就視為命中，避免 judge
+		// 附加的描述性雜訊詞（如「使用方式」）把 need 門檻卡死——明明標題就是該
+		// skill／檔名，卻因為多了一個沒命中的詞而搜不到。
+		queryScore = 30 + auxBonus(haystack, auxTerms)
+		matched = true
+	}
+	if !matched {
 		return SearchResult{}, false
 	}
-	score := 10
-	titleLower := strings.ToLower(item.Title)
+	score := 10 + queryScore
 	pathLower := strings.ToLower(item.Path)
 	if strings.Contains(titleLower, q) {
 		// Prefer title/path hits because users often remember filenames.
@@ -308,6 +346,106 @@ func matchItem(query string, item Item) (SearchResult, bool) {
 	}, true
 }
 
+func queryMatchScore(q, haystack string, auxTerms []string) (int, bool) {
+	if strings.Contains(haystack, q) {
+		return 60 + auxBonus(haystack, auxTerms), true
+	}
+	terms := queryTerms(q)
+	if len(terms) == 0 {
+		return 0, false
+	}
+	hits := 0
+	for _, term := range terms {
+		if strings.Contains(haystack, term) {
+			hits++
+		}
+	}
+	need := len(terms)
+	if need > 2 {
+		need = 2
+	}
+	if hits < need {
+		return 0, false
+	}
+	return hits*12 + auxBonus(haystack, auxTerms), true
+}
+
+// auxBonus 計算輔助詞（用法/做法等）的加權。只有在主要關鍵詞已成立、呼叫到
+// 這裡時才會疊加：每命中一個 +4，總和上限 12。因此輔助詞永遠無法單獨讓一筆
+// item 成立，只能在已命中的結果之間微調排序。
+func auxBonus(haystack string, auxTerms []string) int {
+	bonus := 0
+	for _, aux := range auxTerms {
+		aux = strings.ToLower(strings.TrimSpace(aux))
+		if aux == "" {
+			continue
+		}
+		if strings.Contains(haystack, aux) {
+			bonus += 4
+			if bonus >= 12 {
+				return 12
+			}
+		}
+	}
+	return bonus
+}
+
+// auxHowToWords 是「用法/做法」這類問法詞。它們不該當主要搜尋關鍵詞（會稀釋
+// 比對、卡住 need 門檻），但使用者原句若提到，仍可作輔助詞協助排序。
+var auxHowToWords = []string{
+	"要怎麼用", "怎麼用", "怎樣用", "如何用",
+	"怎麼做", "如何做", "怎麼操作", "如何操作",
+}
+
+// AuxTermsFromText 從原始輸入挑出出現過的問法詞，回傳去重後的輔助搜尋詞，
+// 供呼叫端塞進 SearchRequest.AuxTerms。
+func AuxTermsFromText(text string) []string {
+	lower := strings.ToLower(text)
+	if lower == "" {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, w := range auxHowToWords {
+		if seen[w] {
+			continue
+		}
+		if strings.Contains(lower, w) {
+			seen[w] = true
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+func queryTerms(q string) []string {
+	raw := strings.Fields(q)
+	if len(raw) <= 1 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, term := range raw {
+		term = strings.Trim(strings.ToLower(term), "。.!！?？,，、:：;；\"'`[]{}()（）")
+		term = strings.TrimSuffix(term, "的")
+		if term == "" || isQueryStopWord(term) || seen[term] {
+			continue
+		}
+		seen[term] = true
+		out = append(out, term)
+	}
+	return out
+}
+
+func isQueryStopWord(term string) bool {
+	switch term {
+	case "我", "你", "他", "她", "它", "我們", "你們", "看到", "看得到", "能", "可以", "有", "嗎", "嗎?", "嗎？", "了", "一下":
+		return true
+	default:
+		return false
+	}
+}
+
 func FormatChatResponse(req SearchRequest, results []SearchResult) string {
 	return FormatSearchOutcome(req, SearchOutcome{Results: results})
 }
@@ -322,6 +460,16 @@ func FormatSearchOutcome(req SearchRequest, outcome SearchOutcome) string {
 	b.WriteString(fmt.Sprintf("本機搜尋「%s」有找到 %d 筆：", query, len(outcome.Results)))
 	for i, result := range outcome.Results {
 		b.WriteString(fmt.Sprintf("\n\n%d. ", i+1))
+		// skill 結果改以「名稱＋功能摘要」呈現，而不是回傳內部檔內容/雜湊。
+		if result.Source == "skill" && strings.TrimSpace(result.Title) != "" {
+			b.WriteString("技能：")
+			b.WriteString(result.Title)
+			if snip := strings.TrimSpace(result.Snippet); snip != "" && snip != result.Title {
+				b.WriteString("\n   摘要：")
+				b.WriteString(snip)
+			}
+			continue
+		}
 		if result.Snippet != "" {
 			b.WriteString("內容：")
 			b.WriteString(result.Snippet)
@@ -395,7 +543,7 @@ func Redact(text string) string {
 func requestFromTarget(target string, allowAll bool) SearchRequest {
 	scopes := scopesFromText(target)
 	query := stripScopeWords(target)
-	if query == "" {
+	if query == "" || isTrivialConnectorQuery(query) {
 		query = target
 	}
 	if allowAll && len(scopes) == 0 {
@@ -437,8 +585,14 @@ func scopesFromText(text string) []string {
 	if strings.Contains(lower, "記憶") || strings.Contains(lower, "memory") || strings.Contains(lower, "聊天") {
 		add("memory")
 	}
-	if strings.Contains(lower, "文件") || strings.Contains(lower, "document") || strings.Contains(lower, "檔案") {
+	if containsAny(lower, "文件", "文檔", "document", "documents", "docx", "xlsx", "pptx", "odt", "ods", "odp", "epub", "csv", "tsv", "md", "txt") {
 		add("document")
+	}
+	if containsAny(lower, "圖片", "照片", "相片", "圖像", "影像", "image", "images", "photo", "photos", "picture", "pictures", "png", "jpg", "jpeg", "webp", "gif") {
+		add("image")
+	}
+	if containsAny(lower, "影片", "視頻", "video", "videos", "movie", "movies", "mp4", "mov", "m4v", "webm", "mkv", "avi", "wmv") {
+		add("video")
 	}
 	if strings.Contains(lower, "紀錄") || strings.Contains(lower, "記錄") || strings.Contains(lower, "trace") || strings.Contains(lower, "監視") {
 		add("trace")
@@ -455,14 +609,26 @@ func scopesFromText(text string) []string {
 func stripScopeWords(text string) string {
 	text = scopeDirectivePattern.ReplaceAllString(text, "")
 	replacer := strings.NewReplacer(
-		"記憶", "", "文件", "", "紀錄", "", "記錄", "", "trace", "", "Trace", "", "TRACE", "",
+		"記憶", "", "文件", "", "文檔", "", "圖片", "", "照片", "", "相片", "", "圖像", "", "影像", "", "影片", "", "視頻", "",
+		"紀錄", "", "記錄", "", "trace", "", "Trace", "", "TRACE", "",
 		"監視", "", "工具", "", "技能", "", "document", "", "Document", "", "memory", "", "Memory", "",
+		"image", "", "Image", "", "photo", "", "Photo", "", "picture", "", "Picture", "", "video", "", "Video", "",
 		"tool", "", "Tool", "", "skill", "", "Skill", "",
 		// NOTE: only strip multi-char locatives ("…中的"/"…裡的"). Never strip bare
 		// "中"/"裡": that corrupts real terms like 台中 / 中壢 (target→query).
 		"裡的", "", "中的", "",
 	)
 	return strings.TrimSpace(replacer.Replace(text))
+}
+
+func isTrivialConnectorQuery(query string) bool {
+	trimmed := strings.TrimSpace(query)
+	switch trimmed {
+	case "", "和", "與", "跟", "及", "或", "and", "or", "/", "&", "+", "and/or":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeScope(scopes []string) map[string]bool {
@@ -499,6 +665,19 @@ func scopeAllows(scopes map[string]bool, source string) bool {
 	}
 	if source == "debug" && scopes["trace"] {
 		return true
+	}
+	return false
+}
+
+func scopeMayAllowFileCategory(scopes map[string]bool) bool {
+	return scopes["image"] || scopes["video"] || scopes["document"]
+}
+
+func containsAny(text string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(text, needle) {
+			return true
+		}
 	}
 	return false
 }
@@ -590,9 +769,74 @@ func shouldSkipDir(name string) bool {
 	}
 }
 
-func isTextSearchable(path string) bool {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".md", ".txt", ".json", ".jsonl", ".log", ".csv", ".yaml", ".yml":
+func isIndexableFile(path string) bool {
+	return builtin.IsSearchableFormat(path) || fileMediaSource(path) != ""
+}
+
+func searchableContentForFile(path, source string, info os.FileInfo) (string, error) {
+	if builtin.IsSearchableFormat(path) {
+		return builtin.ExtractSearchableText(path)
+	}
+	if source == "image" || source == "video" {
+		return mediaMetadataContent(path, source, info), nil
+	}
+	return "", fmt.Errorf("localsearch: unsupported index format %q", filepath.Ext(path))
+}
+
+func mediaMetadataContent(path, source string, info os.FileInfo) string {
+	name := filepath.Base(path)
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
+	labels := "媒體 檔案 資料 本機資料"
+	if source == "image" {
+		labels = "圖片 照片 相片 圖像 影像 image photo picture " + labels
+	} else if source == "video" {
+		labels = "影片 視頻 video movie " + labels
+	}
+	modified := ""
+	size := ""
+	if info != nil {
+		modified = info.ModTime().Format(time.RFC3339)
+		size = fmt.Sprintf("%d", info.Size())
+	}
+	return strings.Join([]string{
+		name,
+		labels,
+		"副檔名 " + ext,
+		"修改時間 " + modified,
+		"大小 " + size,
+	}, "\n")
+}
+
+func sourceForFile(path, fallback string) string {
+	if source := fileMediaSource(path); source != "" {
+		return source
+	}
+	return sourceFromPathWithFallback(path, fallback)
+}
+
+func fileMediaSource(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	if isImageExt(ext) {
+		return "image"
+	}
+	if isVideoExt(ext) {
+		return "video"
+	}
+	return ""
+}
+
+func isImageExt(ext string) bool {
+	switch ext {
+	case ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".heic", ".heif":
+		return true
+	default:
+		return false
+	}
+}
+
+func isVideoExt(ext string) bool {
+	switch ext {
+	case ".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".wmv", ".flv", ".mpg", ".mpeg", ".3gp", ".ogv":
 		return true
 	default:
 		return false
@@ -614,6 +858,10 @@ func sourceFromPath(path string) string {
 		return "memory"
 	case strings.Contains(lower, "/documents/") || strings.Contains(lower, "/references/"):
 		return "document"
+	case strings.Contains(lower, "/images/"):
+		return "image"
+	case strings.Contains(lower, "/videos/"):
+		return "video"
 	case strings.Contains(lower, "/debug/") || strings.Contains(lower, "trace"):
 		return "trace"
 	case strings.Contains(lower, "/tools/"):
@@ -631,6 +879,10 @@ func sourceLabel(source string) string {
 		return "記憶"
 	case "document":
 		return "文件"
+	case "image":
+		return "圖片"
+	case "video":
+		return "影片"
 	case "trace", "debug":
 		return "紀錄"
 	case "tool":

@@ -230,13 +230,16 @@ func ComputeAudioPerceptualHash(filePath string) (string, error) {
 	energies := make([]float64, 64)
 	for i := 0; i < 64; i++ {
 		start := i * windowSize
+		if start >= len(samples) {
+			continue
+		}
 		end := start + windowSize
 		if end > len(samples) {
 			end = len(samples)
 		}
 		sum := 0.0
 		for j := start; j < end; j++ {
-			sum += samples[j] * samples[j]
+			sum += sampleEnergy(samples[j])
 		}
 		energies[i] = sum / float64(end-start)
 	}
@@ -252,8 +255,14 @@ func ComputeAudioPerceptualHash(filePath string) (string, error) {
 	return fmt.Sprintf("ahash:%016x", hash), nil
 }
 
+func sampleEnergy(sample int16) float64 {
+	v := float64(sample) / 32768.0
+	return v * v
+}
+
 // readWAVSamples 讀取 WAV 檔案的 PCM 樣本（Go-native，支援 16-bit PCM）。
-func readWAVSamples(filePath string) ([]float64, int, error) {
+// 保留 int16 原始量化值，避免短暫展開成 4 倍大小的 []float64。
+func readWAVSamples(filePath string) ([]int16, int, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, 0, err
@@ -286,19 +295,19 @@ func readWAVSamples(filePath string) ([]float64, int, error) {
 	n, _ := io.ReadFull(f, data)
 	data = data[:n]
 
-	// 轉換為 float64 樣本（取第一聲道）
+	// 取第一聲道，保留原生 16-bit PCM。
 	bytesPerSample := bitsPerSample / 8
 	frameSize := channels * bytesPerSample
 	numFrames := len(data) / frameSize
 
-	samples := make([]float64, numFrames)
+	samples := make([]int16, numFrames)
 	for i := 0; i < numFrames; i++ {
 		offset := i * frameSize
 		if offset+1 >= len(data) {
 			break
 		}
 		raw := int16(binary.LittleEndian.Uint16(data[offset : offset+2]))
-		samples[i] = float64(raw) / 32768.0
+		samples[i] = raw
 	}
 
 	return samples, sampleRate, nil

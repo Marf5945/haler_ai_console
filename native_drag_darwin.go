@@ -102,15 +102,20 @@ static int AIConsoleStartFilePromiseDrag(const char *cpath, char *message, int m
             NSRect frame = NSMakeRect(mouse.x - 24, mouse.y - 24, 64, 64);
             [dragItem setDraggingFrame:frame contents:icon];
 
-            NSEvent *event = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDragged
-                                                location:[window mouseLocationOutsideOfEventStream]
-                                           modifierFlags:0
-                                               timestamp:[[NSProcessInfo processInfo] systemUptime]
-                                            windowNumber:window.windowNumber
-                                                 context:nil
-                                             eventNumber:0
-                                              clickCount:1
-                                                pressure:1.0];
+            // 優先用真實滑鼠事件（WebKit dragstart 當下通常有 LeftMouseDragged/Down）；
+            // 合成事件缺少真實 drag session，部分 macOS 版本會讓 beginDraggingSession 回 nil。
+            NSEvent *event = [NSApp currentEvent];
+            if (event == nil || (event.type != NSEventTypeLeftMouseDragged && event.type != NSEventTypeLeftMouseDown)) {
+                event = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDragged
+                                           location:[window mouseLocationOutsideOfEventStream]
+                                      modifierFlags:0
+                                          timestamp:[[NSProcessInfo processInfo] systemUptime]
+                                       windowNumber:window.windowNumber
+                                            context:nil
+                                        eventNumber:0
+                                         clickCount:1
+                                           pressure:1.0];
+            }
             if (event == nil) {
                 detail = @"unable to create drag event";
                 dispatch_semaphore_signal(source.done);

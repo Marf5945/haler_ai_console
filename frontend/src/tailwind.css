@@ -331,17 +331,17 @@
   }
   .adapter-btn, .command-btn {
     display: flex;
-    min-height: 40px;
+    min-height: 22px;
     width: 100%;
     min-width: calc(var(--spacing) * 0);
     align-items: center;
-    gap: calc(var(--spacing) * 3);
+    gap: calc(var(--spacing) * 2);
     overflow: hidden;
     border-radius: 6px;
     border-style: var(--tw-border-style);
     border-width: 1px;
-    padding-inline: calc(var(--spacing) * 3);
-    font-size: 14px;
+    padding-inline: calc(var(--spacing) * 2);
+    font-size: 12px;
     --tw-leading: 1;
     line-height: 1;
     --tw-font-weight: var(--font-weight-black);
@@ -357,11 +357,11 @@
   }
   .adapter-icon, .command-btn > span:first-child {
     display: grid;
-    height: calc(var(--spacing) * 8);
-    width: calc(var(--spacing) * 8);
+    height: calc(var(--spacing) * 5);
+    width: calc(var(--spacing) * 5);
     flex-shrink: 0;
     place-items: center;
-    border-radius: 6px;
+    border-radius: 5px;
     border-style: var(--tw-border-style);
     border-width: 1px;
     border-color: color-mix(in srgb, #fff 12%, transparent);
@@ -371,7 +371,7 @@
     --tw-font-weight: var(--font-weight-black);
     font-weight: var(--font-weight-black);
     background: rgba(0,0,0,.18);
-    font-size: clamp(16px, 1.25vw, 24px);
+    font-size: clamp(11px, .9vw, 16px);
   }
   .adapter-cli {
     border-color: color-mix(in oklab, #8fb51a 70%, transparent);
@@ -411,11 +411,9 @@
     font-weight: var(--font-weight-medium);
     --tw-tracking: var(--tracking-wide);
     letter-spacing: var(--tracking-wide);
-    color: color-mix(in srgb, #fff 45%, transparent);
-    @supports (color: color-mix(in lab, red, red)) {
-      color: color-mix(in oklab, var(--color-white) 45%, transparent);
-    }
     letter-spacing: .08em;
+    color: inherit;
+    opacity: .62;
   }
   .adapter-active {
     border-color: rgba(255,255,255,.85) !important;
@@ -1710,12 +1708,12 @@
     box-shadow: 0 4px 16px rgba(225,138,24,.5);
   }
   .command-btn {
-    min-height: 42px;
+    min-height: 22px;
     border-color: color-mix(in srgb, #fff 30%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
       border-color: color-mix(in oklab, var(--color-white) 30%, transparent);
     }
-    font-size: 15px;
+    font-size: 12px;
     background: linear-gradient(180deg, rgba(17,17,16,.95), rgba(3,3,3,.98));
   }
   .command-primary {
@@ -1727,7 +1725,7 @@
     display: grid;
     min-height: calc(var(--spacing) * 0);
     gap: calc(var(--spacing) * 3);
-    grid-template-rows: 282px minmax(0, 1fr);
+    grid-template-rows: 262px minmax(0, 1fr);
   }
   .top-console {
     position: relative;
@@ -1737,7 +1735,7 @@
     overflow: visible;
     padding: 12px;
     grid-template-columns: 96px minmax(0, 1fr);
-    grid-template-rows: 50px 58px 1fr;
+    grid-template-rows: 50px 40px 1fr;
   }
   .persona-block {
     position: relative;
@@ -2355,9 +2353,10 @@
     border-style: var(--tw-border-style);
     border-width: 1px;
     border-color: color-mix(in oklab, #ffba55 65%, transparent);
-    padding: calc(var(--spacing) * 2);
-    grid-template-rows: 48px;
-    min-height: 68px;
+    padding-inline: calc(var(--spacing) * 2);
+    padding-block: 6px;
+    grid-template-rows: 34px;
+    min-height: 48px;
     background: linear-gradient(180deg, #ec8904, #c56f08);
     box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 14px 34px rgba(0,0,0,.28);
   }
@@ -2384,7 +2383,7 @@
   .haora-card {
     position: relative;
     display: grid;
-    min-height: 40px;
+    min-height: 34px;
     place-items: center;
     border-radius: 6px;
     border-style: var(--tw-border-style);
@@ -2505,9 +2504,10 @@
     z-index: 10;
     display: grid;
     min-height: calc(var(--spacing) * 0);
-    gap: calc(var(--spacing) * 3);
+    gap: calc(var(--spacing) * 1.5);
     padding: calc(var(--spacing) * 3);
     grid-template-rows: minmax(0, 1fr) auto;
+    padding-bottom: 4px;
   }
   .system-stack {
     display: grid;
@@ -3279,12 +3279,18 @@
     --tw-font-weight: var(--font-weight-black);
     font-weight: var(--font-weight-black);
     background: linear-gradient(180deg, #181a1c, #070808);
+    color: #fff;
     display: none;
     align-self: start;
     opacity: 0;
     pointer-events: none;
     transform: translateX(6px);
     transition: opacity .16s ease, transform .16s ease;
+  }
+  .message-row .message-delete-action {
+    border-color: rgba(255,255,255,.42);
+    background: linear-gradient(180deg, #181a1c, #070808);
+    color: #fff;
   }
   .message-row-active button {
     display: block;
@@ -3422,8 +3428,8 @@
   }
   .composer {
     display: grid;
-    gap: calc(var(--spacing) * 2);
-    grid-template-columns: 36px 36px minmax(0, 1fr);
+    gap: calc(var(--spacing) * 1.5);
+    grid-template-columns: 28px 28px 28px minmax(0, 1fr);
   }
   .composer-risk {
     grid-template-columns: 72px 72px minmax(0, 1fr);
@@ -3483,15 +3489,15 @@
     outline-style: none;
   }
   .attach-btn {
-    min-height: 44px;
-    border-radius: 8px;
+    min-height: 32px;
+    border-radius: 6px;
     border-style: var(--tw-border-style);
     border-width: 1px;
     border-color: color-mix(in srgb, #fff 30%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
       border-color: color-mix(in oklab, var(--color-white) 30%, transparent);
     }
-    font-size: 18px;
+    font-size: 13px;
     --tw-font-weight: var(--font-weight-black);
     font-weight: var(--font-weight-black);
     background: linear-gradient(180deg, rgba(17,17,16,.95), rgba(3,3,3,.98));
@@ -3515,9 +3521,9 @@
   }
   .voice-btn {
     display: grid;
-    min-height: 44px;
+    min-height: 32px;
     place-items: center;
-    border-radius: 8px;
+    border-radius: 6px;
     border-style: var(--tw-border-style);
     border-width: 1px;
     border-color: color-mix(in srgb, #fff 30%, transparent);
@@ -3535,9 +3541,32 @@
     border-color: color-mix(in oklab, #ff4b83 80%, transparent);
     box-shadow: 0 0 0 3px rgba(255,75,131,.16), inset 0 0 18px rgba(255,75,131,.18);
   }
+  .image-insert-btn {
+    display: grid;
+    min-height: 32px;
+    place-items: center;
+    border-radius: 6px;
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: color-mix(in srgb, #fff 30%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-white) 30%, transparent);
+    }
+    font-size: 14px;
+    --tw-font-weight: var(--font-weight-black);
+    font-weight: var(--font-weight-black);
+    color: color-mix(in srgb, #fff 86%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      color: color-mix(in oklab, var(--color-white) 86%, transparent);
+    }
+    background: linear-gradient(180deg, rgba(18,18,17,.97), rgba(4,4,4,.98));
+  }
+  .composer-image-file {
+    display: none;
+  }
   .mic-icon {
-    height: calc(var(--spacing) * 5);
-    width: calc(var(--spacing) * 5);
+    height: calc(var(--spacing) * 4);
+    width: calc(var(--spacing) * 4);
     fill: none;
     stroke: currentColor;
     stroke-width: 1.9;
@@ -3546,14 +3575,17 @@
   }
   .input-wrap {
     position: relative;
-    min-height: 44px;
+    min-height: 32px;
+  }
+  .input-wrap-has-image {
+    min-height: 58px;
   }
   .input-wrap textarea {
     height: 100%;
-    min-height: 44px;
+    min-height: 32px;
     width: 100%;
     resize: none;
-    border-radius: 7px;
+    border-radius: 6px;
     border-style: var(--tw-border-style);
     border-width: 1px;
     border-color: color-mix(in srgb, #fff 35%, transparent);
@@ -3561,16 +3593,143 @@
       border-color: color-mix(in oklab, var(--color-white) 35%, transparent);
     }
     background-color: #090909;
-    padding-block: calc(var(--spacing) * 3);
-    padding-right: calc(var(--spacing) * 20);
-    padding-left: calc(var(--spacing) * 4);
+    padding-block: calc(var(--spacing) * 2);
+    padding-right: calc(var(--spacing) * 16);
+    padding-left: calc(var(--spacing) * 3);
     font-size: 12px;
+    --tw-leading: var(--leading-tight);
+    line-height: var(--leading-tight);
     --tw-font-weight: var(--font-weight-bold);
     font-weight: var(--font-weight-bold);
     color: var(--color-white);
     --tw-outline-style: none;
     outline-style: none;
     background: linear-gradient(180deg, rgba(20,20,19,.98), rgba(7,7,7,.98));
+  }
+  .input-wrap-has-image textarea {
+    min-height: 58px;
+    padding-left: 74px;
+  }
+  .composer-image-preview {
+    position: absolute;
+    top: calc(1 / 2 * 100%);
+    left: calc(var(--spacing) * 1.5);
+    z-index: 10;
+    height: calc(var(--spacing) * 12);
+    width: calc(var(--spacing) * 14);
+    --tw-translate-y: calc(calc(1 / 2 * 100%) * -1);
+    translate: var(--tw-translate-x) var(--tw-translate-y);
+    overflow: hidden;
+    border-radius: 6px;
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: color-mix(in srgb, #fff 22%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-white) 22%, transparent);
+    }
+    background-color: var(--color-black);
+    box-shadow: 0 8px 18px rgba(0,0,0,.24);
+  }
+  .composer-image-preview img {
+    height: 100%;
+    width: 100%;
+    object-fit: cover;
+  }
+  .composer-image-preview button {
+    position: absolute;
+    top: calc(var(--spacing) * 0.5);
+    right: calc(var(--spacing) * 0.5);
+    display: grid;
+    height: calc(var(--spacing) * 4);
+    width: calc(var(--spacing) * 4);
+    place-items: center;
+    border-radius: calc(infinity * 1px);
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: color-mix(in srgb, #fff 45%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-white) 45%, transparent);
+    }
+    background-color: color-mix(in srgb, #000 70%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-black) 70%, transparent);
+    }
+    font-size: 11px;
+    --tw-leading: 1;
+    line-height: 1;
+    --tw-font-weight: var(--font-weight-black);
+    font-weight: var(--font-weight-black);
+    color: var(--color-white);
+  }
+  .composer-image-strip {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(var(--spacing) * 1.5);
+    padding-bottom: calc(var(--spacing) * 1);
+  }
+  .composer-image-thumb {
+    position: relative;
+    height: calc(var(--spacing) * 12);
+    width: calc(var(--spacing) * 14);
+    overflow: hidden;
+    border-radius: 6px;
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: color-mix(in srgb, #fff 22%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-white) 22%, transparent);
+    }
+    background-color: var(--color-black);
+    box-shadow: 0 8px 18px rgba(0,0,0,.24);
+  }
+  .composer-image-thumb img {
+    height: 100%;
+    width: 100%;
+    object-fit: cover;
+  }
+  .composer-image-thumb button {
+    position: absolute;
+    top: calc(var(--spacing) * 0.5);
+    right: calc(var(--spacing) * 0.5);
+    display: grid;
+    height: calc(var(--spacing) * 4);
+    width: calc(var(--spacing) * 4);
+    place-items: center;
+    border-radius: calc(infinity * 1px);
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: color-mix(in srgb, #fff 45%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-white) 45%, transparent);
+    }
+    background-color: color-mix(in srgb, #000 70%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-black) 70%, transparent);
+    }
+    font-size: 11px;
+    --tw-leading: 1;
+    line-height: 1;
+    --tw-font-weight: var(--font-weight-black);
+    font-weight: var(--font-weight-black);
+    color: var(--color-white);
+  }
+  .composer-image-error {
+    grid-column: 1 / -1;
+    border-radius: 5px;
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: color-mix(in oklab, #ff6b6b 50%, transparent);
+    background-color: color-mix(in srgb, #000 40%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-black) 40%, transparent);
+    }
+    padding-inline: calc(var(--spacing) * 2);
+    padding-block: calc(var(--spacing) * 0.5);
+    font-size: 11px;
+    --tw-font-weight: var(--font-weight-bold);
+    font-weight: var(--font-weight-bold);
+    color: #ff8a8a;
   }
   .input-wrap textarea::placeholder {
     color: color-mix(in srgb, #fff 45%, transparent);
@@ -3581,14 +3740,14 @@
   .send-btn {
     position: absolute;
     top: calc(1 / 2 * 100%);
-    right: calc(var(--spacing) * 2);
-    min-height: 30px;
-    min-width: 66px;
+    right: calc(var(--spacing) * 1.5);
+    min-height: 24px;
+    min-width: 54px;
     --tw-translate-y: calc(calc(1 / 2 * 100%) * -1);
     translate: var(--tw-translate-x) var(--tw-translate-y);
-    border-radius: 6px;
+    border-radius: 5px;
     background-color: var(--color-pink-hot);
-    font-size: 12px;
+    font-size: 11px;
     --tw-font-weight: var(--font-weight-black);
     font-weight: var(--font-weight-black);
     color: var(--color-white);
@@ -3600,9 +3759,9 @@
     rotate: calc(45deg * -1);
   }
   .voice-status {
-    grid-column: span 3 / span 3;
-    margin-top: calc(var(--spacing) * -1);
-    border-radius: 6px;
+    grid-column: span 4 / span 4;
+    margin-top: calc(var(--spacing) * -1.5);
+    border-radius: 5px;
     border-style: var(--tw-border-style);
     border-width: 1px;
     border-color: color-mix(in srgb, #fff 10%, transparent);
@@ -3610,8 +3769,10 @@
       border-color: color-mix(in oklab, var(--color-white) 10%, transparent);
     }
     padding-inline: calc(var(--spacing) * 2);
-    padding-block: calc(var(--spacing) * 1);
-    font-size: 10px;
+    padding-block: calc(var(--spacing) * 0);
+    font-size: 9px;
+    --tw-leading: var(--leading-tight);
+    line-height: var(--leading-tight);
     --tw-font-weight: var(--font-weight-bold);
     font-weight: var(--font-weight-bold);
     color: color-mix(in srgb, #fff 65%, transparent);
@@ -3634,28 +3795,47 @@
   }
   .tool-card, .tool-slot {
     display: grid;
-    min-height: 50px;
+    min-height: 22px;
     width: 100%;
     min-width: calc(var(--spacing) * 0);
     place-items: center;
     overflow: hidden;
-    border-radius: 8px;
+    border-radius: 6px;
     border-style: var(--tw-border-style);
     border-width: 1px;
-    font-size: 14px;
+    font-size: 12px;
+    --tw-leading: 1;
+    line-height: 1;
     --tw-font-weight: var(--font-weight-black);
     font-weight: var(--font-weight-black);
     color: var(--color-white);
     box-shadow: inset 0 1px 0 rgba(255,255,255,.10), 0 12px 24px rgba(0,0,0,.30);
   }
   .tool-card {
-    grid-template-columns: 34px minmax(0,1fr);
+    grid-template-columns: 20px minmax(0,1fr);
     gap: calc(var(--spacing) * 2);
-    padding-inline: calc(var(--spacing) * 3);
+    padding-inline: calc(var(--spacing) * 2);
     text-align: left;
   }
   .tool-card span:first-child {
-    font-size: clamp(18px, 1.45vw, 28px);
+    display: grid;
+    height: calc(var(--spacing) * 5);
+    width: calc(var(--spacing) * 5);
+    flex-shrink: 0;
+    place-items: center;
+    border-radius: 5px;
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: color-mix(in srgb, #fff 12%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-white) 12%, transparent);
+    }
+    background: rgba(0,0,0,.18);
+    font-size: calc(15px * var(--ui-font-scale));
+  }
+  .right-panel .tool-card > span:last-child {
+    font-size: clamp(12px, 1vw, 16px);
+    line-height: 1;
   }
   .tool-amber {
     border-color: color-mix(in oklab, #e18a18 60%, transparent);
@@ -3688,14 +3868,14 @@
   }
   .tool-use-bottom {
     margin-top: auto;
-    min-height: 42px;
+    min-height: 22px;
     border-color: color-mix(in oklab, #ffba55 78%, transparent);
     color: var(--color-white);
     margin-bottom: clamp(36px, 6vh, 72px);
     background: linear-gradient(180deg, #7a420d, #3a1d05);
   }
   .tool-use-bottom > span:last-child {
-    font-size: clamp(13px, 1vw, 20px);
+    font-size: clamp(12px, 1vw, 16px);
   }
   .reference-link-card, .reference-file-card {
     flex-shrink: 0;
@@ -3765,12 +3945,13 @@
     animation: railRecordingBlink .72s steps(2, jump-none) infinite;
   }
   .reference-file-list {
-    --reference-file-row-height: 54px;
+    --reference-file-row-height: 36px;
+    --reference-file-row-gap: 0.25rem;
     display: grid;
-    gap: calc(var(--spacing) * 2);
     overflow-y: auto;
     padding-right: calc(var(--spacing) * 0.5);
-    max-height: calc((var(--reference-file-row-height) * 6) + (0.5rem * 5));
+    gap: var(--reference-file-row-gap);
+    max-height: calc((var(--reference-file-row-height) * 9) + (var(--reference-file-row-gap) * 8));
     grid-auto-rows: var(--reference-file-row-height);
     overscroll-behavior: contain;
     scrollbar-width: none;
@@ -3790,11 +3971,11 @@
     @supports (color: color-mix(in lab, red, red)) {
       border-color: color-mix(in oklab, var(--color-white) 14%, transparent);
     }
-    padding-inline: calc(var(--spacing) * 2.5);
-    padding-block: calc(var(--spacing) * 1.5);
-    font-size: 10px;
-    --tw-leading: var(--leading-snug);
-    line-height: var(--leading-snug);
+    padding-inline: calc(var(--spacing) * 2);
+    padding-block: calc(var(--spacing) * 1);
+    font-size: 9px;
+    --tw-leading: var(--leading-tight);
+    line-height: var(--leading-tight);
     --tw-font-weight: var(--font-weight-black);
     font-weight: var(--font-weight-black);
     color: color-mix(in srgb, #fff 78%, transparent);
@@ -3840,7 +4021,7 @@
     z-index: 1;
     display: grid;
     align-items: center;
-    gap: calc(var(--spacing) * 2);
+    gap: calc(var(--spacing) * 1.5);
     grid-template-columns: minmax(0, 1fr) auto;
   }
   .reference-file-title span {
@@ -3855,7 +4036,7 @@
     border-style: var(--tw-border-style);
     border-width: 1px;
     padding-inline: calc(var(--spacing) * 1.5);
-    padding-block: calc(var(--spacing) * 0.5);
+    padding-block: calc(var(--spacing) * 0);
     font-size: 8px;
     --tw-leading: 1;
     line-height: 1;
@@ -3880,13 +4061,13 @@
   .reference-file-detail {
     position: relative;
     z-index: 1;
-    margin-top: calc(var(--spacing) * 1);
+    margin-top: calc(var(--spacing) * 0.5);
     display: block;
     max-width: 100%;
     overflow: hidden;
-    font-size: 9px;
-    --tw-leading: var(--leading-tight);
-    line-height: var(--leading-tight);
+    font-size: 8px;
+    --tw-leading: 1;
+    line-height: 1;
     --tw-font-weight: var(--font-weight-bold);
     font-weight: var(--font-weight-bold);
     text-overflow: ellipsis;
@@ -3967,15 +4148,27 @@
     border-radius: calc(infinity * 1px);
     border-style: var(--tw-border-style);
     border-width: 1px;
-    font-size: 26px;
+    padding: calc(var(--spacing) * 0);
     --tw-font-weight: var(--font-weight-black);
     font-weight: var(--font-weight-black);
     color: var(--color-white);
+    place-self: center;
     height: clamp(26px, 2.5vw, 34px);
     width: clamp(26px, 2.5vw, 34px);
+    line-height: 1;
     border-color: rgba(255,255,255,.18);
     background: linear-gradient(180deg, rgba(40, 63, 58, .96), rgba(28, 43, 43, .98));
     box-shadow: inset 0 1px 0 rgba(255,255,255,.10), 0 12px 22px rgba(0,0,0,.30);
+  }
+  .tools-popup-search-icon {
+    height: 18px;
+    width: 18px;
+    display: block;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
   .tools-popup-search-active {
     border-color: rgba(122, 255, 232, .86);
@@ -4142,7 +4335,7 @@
     flex-shrink: 0;
   }
   .settings-side-panel .settings-style-block {
-    min-height: 122px;
+    min-height: 84px;
   }
   .settings-side-panel, .tools-side-panel {
     scrollbar-width: thin;
@@ -4167,6 +4360,8 @@
   .settings-side-panel {
     overflow-y: auto;
     padding-right: calc(var(--spacing) * 1);
+    padding-bottom: 28px;
+    scroll-padding-bottom: 36px;
   }
   .settings-side-panel h2 {
     margin: calc(var(--spacing) * 0);
@@ -4206,6 +4401,8 @@
     padding-right: calc(var(--spacing) * 1);
     --tw-shadow: 0 18px 34px var(--tw-shadow-color, rgba(0,0,0,.36));
     box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+    padding-bottom: 28px;
+    scroll-padding-bottom: 36px;
     animation: settingsDrop .18s ease-out both;
     background-image: linear-gradient(180deg, rgba(255,255,255,.05), transparent 30%), linear-gradient(135deg, rgba(255,255,255,.032) 0 1px, transparent 1px 100%);
     background-size: auto, 42px 42px;
@@ -4759,16 +4956,16 @@
   }
   .settings-menu-list {
     display: grid;
-    gap: calc(var(--spacing) * 3);
+    gap: calc(var(--spacing) * 1.5);
     padding-inline: calc(var(--spacing) * 3);
-    padding-block: calc(var(--spacing) * 4);
+    padding-block: calc(var(--spacing) * 2);
   }
   .settings-select-row {
     display: grid;
-    min-height: 66px;
+    min-height: 44px;
     min-width: calc(var(--spacing) * 0);
     align-items: flex-start;
-    gap: calc(var(--spacing) * 2);
+    gap: calc(var(--spacing) * 1);
     grid-template-columns: minmax(0, 1fr);
   }
   .settings-select-label {
@@ -4776,7 +4973,7 @@
     min-width: calc(var(--spacing) * 0);
     align-items: flex-start;
     gap: calc(var(--spacing) * 1.5);
-    font-size: 13px;
+    font-size: 12px;
     --tw-leading: var(--leading-tight);
     line-height: var(--leading-tight);
     --tw-font-weight: var(--font-weight-black);
@@ -4791,11 +4988,11 @@
   }
   .settings-select-label i {
     display: grid;
-    height: calc(var(--spacing) * 5);
+    height: calc(var(--spacing) * 4);
     width: calc(var(--spacing) * 5);
     flex-shrink: 0;
     place-items: center;
-    font-size: 15px;
+    font-size: 13px;
     color: color-mix(in srgb, #fff 68%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
       color: color-mix(in oklab, var(--color-white) 68%, transparent);
@@ -4804,7 +5001,7 @@
   }
   .settings-select-row button {
     display: flex;
-    min-height: 35px;
+    min-height: 30px;
     align-items: center;
     justify-content: center;
     gap: calc(var(--spacing) * 1.5);
@@ -4855,16 +5052,16 @@
     font-size: calc(15px * var(--ui-font-scale));
   }
   .settings-style-block {
-    margin-top: calc(var(--spacing) * 1);
+    margin-top: calc(var(--spacing) * 0);
     padding-inline: calc(var(--spacing) * 4);
-    padding-bottom: calc(var(--spacing) * 4);
+    padding-bottom: calc(var(--spacing) * 2);
   }
   .settings-style-label {
-    margin-bottom: calc(var(--spacing) * 4);
+    margin-bottom: calc(var(--spacing) * 2);
     display: flex;
     align-items: center;
     gap: calc(var(--spacing) * 1.5);
-    font-size: 13px;
+    font-size: 12px;
     --tw-leading: 1;
     line-height: 1;
     --tw-font-weight: var(--font-weight-black);
@@ -4877,11 +5074,11 @@
   }
   .settings-style-label span:first-child {
     display: grid;
-    height: calc(var(--spacing) * 5);
+    height: calc(var(--spacing) * 4);
     width: calc(var(--spacing) * 5);
     flex-shrink: 0;
     place-items: center;
-    font-size: 16px;
+    font-size: 13px;
     color: color-mix(in srgb, #fff 65%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
       color: color-mix(in oklab, var(--color-white) 65%, transparent);
@@ -4889,7 +5086,6 @@
   }
   .settings-segments {
     display: grid;
-    justify-content: center;
     gap: calc(var(--spacing) * 0);
     overflow: visible;
     border-radius: 10px;
@@ -4899,13 +5095,11 @@
     @supports (color: color-mix(in lab, red, red)) {
       border-color: color-mix(in oklab, var(--color-white) 18%, transparent);
     }
-    grid-template-columns: repeat(3, max-content);
+    grid-template-columns: 1fr;
   }
   .settings-segments button {
-    min-height: 39px;
-    min-width: 3.8em;
-    border-right-style: var(--tw-border-style);
-    border-right-width: 1px;
+    min-height: 30px;
+    width: 100%;
     border-bottom-style: var(--tw-border-style);
     border-bottom-width: 1px;
     border-color: color-mix(in srgb, #fff 16%, transparent);
@@ -4922,11 +5116,10 @@
       color: color-mix(in oklab, var(--color-white) 68%, transparent);
     }
     background: linear-gradient(180deg, rgba(24,24,24,.94), rgba(7,7,7,.98));
-    inline-size: max-content;
   }
-  .settings-segments button:nth-child(3n) {
-    border-right-style: var(--tw-border-style);
-    border-right-width: 0px;
+  .settings-segments button:last-child {
+    border-bottom-style: var(--tw-border-style);
+    border-bottom-width: 0px;
   }
   .settings-segments .segment-active {
     color: #ffaf2f;
@@ -4965,6 +5158,11 @@
     border-color: #d8d8d8;
     background: linear-gradient(180deg, #ffffff, #f0f0f0);
     color: #202020;
+  }
+  .console-shell[data-theme="white"] .message-row .message-delete-action {
+    border-color: rgba(255,255,255,.42);
+    background: linear-gradient(180deg, #181a1c, #070808);
+    color: #fff;
   }
   .console-shell[data-theme="white"] .haora-band {
     border-color: #d6d6d6;
@@ -8432,6 +8630,7 @@
   color: #fff8ef;
 }
 .dispatch-status-area {
+  grid-column: 1 / -1;
   padding: 3px 8px;
   display: flex;
   gap: 8px;
@@ -9869,20 +10068,59 @@
 }
 .reference-file-ext-badge {
   position: absolute;
-  right: 4px;
-  bottom: 3px;
-  font-size: 9px;
+  right: 3px;
+  bottom: 2px;
+  font-size: 8px;
   line-height: 1;
-  padding: 1px 4px;
+  padding: 0 3px 1px;
   border-radius: 4px;
   background: rgba(60, 60, 60, 0.55);
   color: #fff;
-  letter-spacing: 0.3px;
+  letter-spacing: 0;
   pointer-events: none;
   max-width: 55%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.console-shell .settings-popup-list {
+  background: rgba(20, 13, 7, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  color: #fff8ef;
+}
+.console-shell .settings-popup-list button.settings-popup-option {
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 7px;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+}
+.console-shell .settings-popup-list button.settings-popup-option:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+.console-shell .settings-popup-list button.settings-popup-option.active {
+  background: rgba(255, 255, 255, 0.14);
+}
+.console-shell[data-theme="white"] .settings-popup-list {
+  background: #ffffff;
+  border-color: #e0e0e0;
+  color: #202020;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+}
+.console-shell[data-theme="white"] .settings-popup-list button.settings-popup-option {
+  color: #202020;
+  background: transparent;
+}
+.console-shell[data-theme="white"] .settings-popup-list button.settings-popup-option:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+.console-shell[data-theme="white"] .settings-popup-list button.settings-popup-option.active {
+  background: rgba(0, 0, 0, 0.10);
 }
 @property --tw-rotate-x {
   syntax: "*";

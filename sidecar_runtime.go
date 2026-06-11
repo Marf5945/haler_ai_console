@@ -223,8 +223,8 @@ function publicCLIErrorMessage(err, stdout, stderr) {
     const model = modelMatch ? modelMatch[1] : "目前選用的 Gemini 模型";
     return model + " 目前伺服器容量不足，請稍後重試，或切換到其他可用模型。";
   }
-  if (/rateLimitExceeded|RESOURCE_EXHAUSTED|Too Many Requests|status 429/i.test(combined)) {
-    return "Gemini CLI 目前受到限流，請稍後重試。";
+  if (/rateLimitExceeded|RESOURCE_EXHAUSTED|Too Many Requests|status 429|exhausted your capacity|RetryableQuotaError|quota will reset|quota exceeded|insufficient_quota/i.test(combined)) {
+    return "目前選用的模型配額已用盡或被限流，暫時無法回應。請切換到其他模型後重試。";
   }
   const firstUsefulLine = (stderr || stdout || combined)
     .split(/\r?\n/)
@@ -240,7 +240,7 @@ function publicCLIErrorMessage(err, stdout, stderr) {
 }
 
 function looksLikeVerboseCLIError(text) {
-  return /GaxiosError|GoogleGenerativeAIError|No capacity available for model|rateLimitExceeded|Too Many Requests|status\s+429|v1internal:generateContent|chunk-[A-Z0-9]+\.js|\"systemInstruction\"|\"request\":\{\"contents\"/i.test(text || "");
+  return /GaxiosError|GoogleGenerativeAIError|No capacity available for model|rateLimitExceeded|Too Many Requests|status\s+429|exhausted your capacity|RetryableQuotaError|quota will reset|v1internal:generateContent|chunk-[A-Z0-9]+\.js|\"systemInstruction\"|\"request\":\{\"contents\"/i.test(text || "");
 }
 
 function compactCLIResultText(adapterID, text, stdout, stderr) {

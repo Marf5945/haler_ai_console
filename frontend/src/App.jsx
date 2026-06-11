@@ -57,10 +57,17 @@ import {
   SavePersona,
   FinalizeNativeGoProgramAuthoringExport,
   FinalizeNativePersonaExport,
+  FinalizeNativeSkillExport,
   GetGoProgramAuthoringDetail,
   ListGoProgramAuthoringCatalog,
   NativeDragExportPersonaHandler,
+  ExportProjectBackupHandler,
+  ImportProjectBackupHandler,
+  IsProjectBackupEncryptedHandler,
+  SelectProjectBackupExportDirectory,
+  SelectProjectBackupFile,
   NativeDragExportGoProgramAuthoring,
+  NativeDragExportSkill,
   ScanSkillFolder,
   SetBrowserPreference,
   SetToolPreference,
@@ -146,8 +153,10 @@ import {
   // ── 任務進度 / DAG Runtime v1 接線 ──
   StartTaskProgress,
   CancelActiveTaskProgress,
+  CancelChatMessage,
   ApproveTaskStep,
   GetDAGRunDebug,
+  SubmitTaskLoopInput,
   // ── v3.6 Visual Learning 接線 ──
   StartLearningMode,
   StopLearningMode,
@@ -203,6 +212,7 @@ import {
   ListReferenceFiles,
   ImportVideoFile,
   ListVideoFiles,
+  ListReferenceImages,
   NativeDragExportReferenceFile,
   StopSidecar,
   // ── v3.6.4 Readiness Gate UI Interaction Layer 接線 ──
@@ -227,6 +237,12 @@ import {
   NativeDragExportSubHandler,
   ImportSubHandler,
   PreviewSubPackage,
+  PreviewGoProgramExport,
+  ImportGoProgramExport,
+  NativeDragExportLearningRun,
+  FinalizeNativeLearningRunExport,
+  PreviewLearningRunExport,
+  ImportLearningRunExport,
   ResolveImportToolConflicts,
   GetTabOrder,
   GetSubExportCapabilities,
@@ -815,6 +831,7 @@ function dagStatusLabel(status) {
     completed: _t('dag.completed'),
     blocked: _t('dag.blocked'),
     waiting_review: '待確認',
+    waiting_user: '等你補充',
     cancelled: '已取消',
     interrupted: '已中斷',
     skipped: '已略過',
@@ -1043,12 +1060,14 @@ function App() {
   const [draggedTool, setDraggedTool] = useState(null);
   const [dragActionTool, setDragActionTool] = useState(null);
   const [copyConfirmTool, setCopyConfirmTool] = useState(null);
+  const [skillExportDialog, setSkillExportDialog] = useState(null);
   const [referenceFiles, setReferenceFiles] = useState([]);
   const [referenceExportDialog, setReferenceExportDialog] = useState(null);
   const [referenceLinkOpen, setReferenceLinkOpen] = useState(false);
   const [referenceLinkValue, setReferenceLinkValue] = useState('');
   const referenceInternalDragRef = useRef(false);
   const referenceDropSuppressUntilRef = useRef(0);
+  const referenceImportInFlightRef = useRef(new Set());
   const [settingsState, setSettingsState] = useState(fallbackSettings);
   const [tools, setTools] = useState(getFallbackTools());
   const [toolResult, setToolResult] = useState(null);
@@ -1339,7 +1358,14 @@ function App() {
   const [snoozeHours, setSnoozeHours] = useState(4);
   // I-7: DAG run front-end mirror; backend Hook Run is attached once a task is created.
   const [dagRun, setDagRun] = useState(null);
+  // v3.1.6：task:loop_round 事件 → {nodeId: {iteration, action, target}}；節點卡片顯示「第 N 輪」。
+  const [taskLoopRounds, setTaskLoopRounds] = useState({});
+  const [taskLoopReply, setTaskLoopReply] = useState({});
   const dagRunRef = useRef(null);
+  // 一般對話／skill 送出中的 trace（非 DAG）。讓停止鈕在閒聊/skill 執行時也能中斷。
+  const [activeChatTrace, setActiveChatTrace] = useState(null);
+  const activeChatTraceRef = useRef(null);
+  const cancelledChatTracesRef = useRef(new Set());
   const [pendingTaskReview, setPendingTaskReview] = useState(null);
   // #I-805: Sidecar 狀態追蹤 — 已移至上方（502 行），統一用字串格式。
   // 舊版用 {status, error} object，現在統一為 'unknown' | 'idle' | 'running' | 'crashed' | 'start_failed'。
@@ -1648,6 +1674,12 @@ function App() {
     const offAdapterStatus = EventsOn('adapter:status_changed', () => {
       refreshAvailableAdapters().catch(() => {});
     });
+    // #44 修補：skill / MCP 安裝後後端會 emit，前端重新拉取工具列。
+    const offToolsChanged = EventsOn('tools:list_changed', () => {
+      callWails(ListTools)
+        .then((nextTools) => setTools(normalizeToolList(nextTools)))
+        .catch(() => {});
+    });
 
     // Sidecar 狀態事件：監聽 Node sidecar 的生命週期變化。
     // 當 sidecar 啟動失敗或崩潰時，在主聊天區顯示錯誤提示，
@@ -1737,9 +1769,28 @@ function App() {
       syncTaskEvent(payload);
       refreshReviewCards();
     });
-    const offTaskCompleted = EventsOn('task:progress_completed', syncTaskEvent);
-    const offTaskFailed = EventsOn('task:progress_failed', syncTaskEvent);
-    const offTaskCancelled = EventsOn('task:progress_cancelled', syncTaskEvent);
+    const offTaskCompleted = EventsOn('task:progress_completed', (payload) => {
+      syncTaskEvent(payload);
+      setTaskLoopRounds({});
+    });
+    const offTaskFailed = EventsOn('task:progress_failed', (payload) => {
+      syncTaskEvent(payload);
+      setTaskLoopRounds({});
+    });
+    const offTaskCancelled = EventsOn('task:progress_cancelled', (payload) => {
+      syncTaskEvent(payload);
+      setTaskLoopRounds({});
+    });
+    // v3.1.6：節點內 loop 每輪進度
+    const offTaskLoopRound = EventsOn('task:loop_round', (payload) => {
+      const nodeId = payload?.node_id;
+      if (!nodeId) return;
+      setTaskLoopRounds((prev) => ({...prev, [nodeId]: {
+        iteration: payload?.iteration || 0,
+        action: payload?.action || '',
+        target: payload?.target || '',
+      }}));
+    });
     const offTaskSystemMessage = EventsOn('task:system_message', (payload) => {
       const message = payload?.text;
       if (!message) return;
@@ -1755,6 +1806,15 @@ function App() {
     const offDocImported = EventsOn('document:imported', (data) => {
       setW3aToastMsg(t('system.imported', { name: data?.display_name || t('w3a.defaultDocName') }));
       setTimeout(() => setW3aToastMsg(null), 4000);
+    });
+
+    // skill 產出落位完成 → 立即刷新右側引用面板（5 秒輪詢之外的即時路徑）。
+    const offReferenceImported = EventsOn('reference:imported', (data) => {
+      refreshReferenceFiles().catch(() => {});
+      if (data?.name) {
+        setW3aToastMsg(t('system.imported', { name: data.name }));
+        setTimeout(() => setW3aToastMsg(null), 4000);
+      }
     });
 
     // 上方互動輸出：statusRail 事件只同步 greeting，不寫入下方 messages。
@@ -1924,6 +1984,7 @@ function App() {
     return () => {
       offAdapterChanged();
       offAdapterStatus();
+      offToolsChanged();
       offDagStarted();
       offDagNodeDone();
       offDagCompleted();
@@ -1934,10 +1995,12 @@ function App() {
       offTaskCompleted();
       offTaskFailed();
       offTaskCancelled();
+      offTaskLoopRound();
       offTaskSystemMessage();
       offReviewAdded();
       offReviewResolved();
       offDocImported();
+      offReferenceImported();
       offStatusRail();
       offDegradedEnter();
       offDegradedExit();
@@ -2142,6 +2205,12 @@ function App() {
   }
 
   async function finishComposerExecution({resp, payload, apiAdapter, traceId, conversationId, clearPendingTimers}) {
+    // 使用者已按停止鈕中斷此 trace：丟棄遲到的結果，不覆蓋「已中斷」訊息。
+    if (cancelledChatTracesRef.current.has(traceId)) {
+      cancelledChatTracesRef.current.delete(traceId);
+      clearPendingTimers?.();
+      return;
+    }
     clearPendingTimers?.();
     const cliResp = await applyComposerBuiltInSideEffects(normalizeCLIResponse(resp));
     console.log('[CLI_MONITOR] frontend raw resp -> normalized', {traceId, resp, cliResp});
@@ -2257,6 +2326,12 @@ function App() {
   }
 
   function failComposerExecution({err, payload, apiAdapter, adapter, traceId, conversationId, clearPendingTimers}) {
+    // 使用者已按停止鈕中斷此 trace：吞掉被 kill 的子程序錯誤，不覆蓋「已中斷」訊息。
+    if (cancelledChatTracesRef.current.has(traceId)) {
+      cancelledChatTracesRef.current.delete(traceId);
+      clearPendingTimers?.();
+      return;
+    }
     clearPendingTimers?.();
     postDebugTrace(apiAdapter ? 'ui.composer.SendAPIMessage.error' : 'ui.composer.SendCLIMessage.error', traceId, {error: err?.message || String(err)});
     const rawErrorMsg = err?.message || String(err);
@@ -2782,10 +2857,15 @@ function App() {
         if (referenceInternalDragRef.current || Date.now() < referenceDropSuppressUntilRef.current) return;
         const nativePaths = normalizeReferenceImportPaths(paths);
         if (!nativePaths.length) return;
-        importReferencePaths(nativePaths);
-        if (shouldProbeDroppedInstallPackage(nativePaths)) {
-          detectDroppedInstallPackage(nativePaths[0]);
-        }
+        // 先分類再分流：若是可辨識的安裝包（subagent / skill / go-program 匯出），
+        // 走安裝流程且「不」複製進引用文件；否則才當一般引用文件匯入。
+        (async () => {
+          if (shouldProbeDroppedInstallPackage(nativePaths)) {
+            const recognized = await detectDroppedInstallPackage(nativePaths[0]);
+            if (recognized) return;
+          }
+          importReferencePaths(nativePaths);
+        })();
       }, false);
       return () => OnFileDropOff();
     } catch {
@@ -2800,6 +2880,7 @@ function App() {
     });
   }, [referenceFiles]);
 
+  // 回傳 true 表示已辨識為某種安裝包（已設定 installCandidate）；false 表示不是安裝包。
   async function detectDroppedInstallPackage(path) {
     try {
       const preview = await callWails(() => PreviewSubPackage(path));
@@ -2811,10 +2892,40 @@ function App() {
           path,
           preview,
         });
-        return;
+        return true;
       }
     } catch {
       // 不是 sub 包時繼續試其他安裝類型。
+    }
+    try {
+      const preview = await callWails(() => PreviewGoProgramExport(path));
+      if (preview?.export_type === 'go_program_authoring') {
+        setInstallCandidate({
+          type: 'goprogram',
+          typeLabel: 'go-program',
+          name: preview.program_name || preview.program_id || t('package.unnamedItem'),
+          path,
+          preview,
+        });
+        return true;
+      }
+    } catch {
+      // 不是 go-program 匯出時繼續試 skill。
+    }
+    try {
+      const preview = await callWails(() => PreviewLearningRunExport(path));
+      if (preview?.export_type === 'learning_run') {
+        setInstallCandidate({
+          type: 'learningrun',
+          typeLabel: '錄製',
+          name: preview.title || preview.tag || preview.run_id || t('package.unnamedItem'),
+          path,
+          preview,
+        });
+        return true;
+      }
+    } catch {
+      // 不是錄製匯出時繼續試 skill。
     }
     try {
       const preview = await callWails(() => ScanSkillFolder(path));
@@ -2829,11 +2940,13 @@ function App() {
           path,
           preview,
         });
-        return;
+        return true;
       }
       setToolResult({toolId: 'package-detect', ok: false, message: t('package.unrecognized')});
+      return false;
     } catch {
       setToolResult({toolId: 'package-detect', ok: false, message: t('package.unrecognized')});
+      return false;
     }
   }
 
@@ -2849,6 +2962,26 @@ function App() {
         await refreshAvailableAdapters();
         return;
       }
+      if (installCandidate.type === 'goprogram') {
+        const item = await callWails(() => ImportGoProgramExport(installCandidate.path));
+        setInstallCandidate(null);
+        setToolResult({
+          toolId: 'package-install',
+          ok: true,
+          message: `已安裝小程式：${item?.program_name || item?.program_id || installCandidate.name}（工具 > 自動流程）`,
+        });
+        return;
+      }
+      if (installCandidate.type === 'learningrun') {
+        const item = await callWails(() => ImportLearningRunExport(installCandidate.path));
+        setInstallCandidate(null);
+        setToolResult({
+          toolId: 'package-install',
+          ok: true,
+          message: `已安裝錄製：${item?.title || item?.tag || item?.run_id || installCandidate.name}`,
+        });
+        return;
+      }
       if (installCandidate.type === 'skill') {
         const previewId = installCandidate.preview?.PreviewID || installCandidate.preview?.preview_id;
         if (!previewId) return;
@@ -2856,6 +2989,16 @@ function App() {
         setInstallCandidate(null);
         const skills = await callWails(ListArchivedSkills);
         setArchivedSkills(skills || []);
+        // 安裝完成後不等後端事件，前端直接重拉工具列，讓 ✦ skill 立即出現
+        // （tools:list_changed 事件仍保留，這裡是雙保險）。
+        callWails(ListTools)
+          .then((nextTools) => setTools(normalizeToolList(nextTools)))
+          .catch(() => {});
+        setToolResult({
+          toolId: 'package-install',
+          ok: true,
+          message: `已安裝 skill：${installCandidate.name}（工具 > 自動流程）`,
+        });
         return;
       }
     } catch (err) {
@@ -3330,6 +3473,25 @@ function App() {
     }
   }
 
+  // 停止鈕統一入口：優先中斷正在跑的一般對話／skill（非 DAG），否則回到 DAG 任務取消。
+  async function cancelActiveExecution(reason = 'user_stop') {
+    const chatTrace = activeChatTraceRef.current;
+    if (chatTrace) {
+      cancelledChatTracesRef.current.add(chatTrace);
+      activeChatTraceRef.current = null;
+      setActiveChatTrace(null);
+      const conversationId = activeConversationIdRef.current || 'main';
+      setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, chatTrace, 'Ai:已中斷本次回覆。'));
+      try {
+        await callWails(() => CancelChatMessage(chatTrace));
+      } catch (error) {
+        // best-effort：子程序可能已自行結束。
+      }
+      return;
+    }
+    return cancelActiveTaskProgress(reason);
+  }
+
   // ── v3.6 Source Trust 內部接線 ──
   // 將後端 SourceTrustEvidence 轉為使用者可見的中文提示
   function sourceTrustToHint(evidence) {
@@ -3734,12 +3896,12 @@ function App() {
       });
   }
 
-  async function sendMessage(event) {
+  async function sendMessage(event, images = []) {
     event.preventDefault();
-    submitComposerText(draft);
+    submitComposerText(draft, images);
   }
 
-  async function submitComposerText(rawText) {
+  async function submitComposerText(rawText, images = []) {
     const text = stripInternalControlPrefix(rawText);
     if (!text) return;
     unlockManualGreeting();
@@ -3769,6 +3931,11 @@ function App() {
     const clearPendingTimers = () => {
       window.clearTimeout(pendingMediumTimer);
       window.clearTimeout(pendingVerySlowTimer);
+      // 此回合對話送出已收尾 → 釋放「執行中」狀態，停止鈕回到 disabled。
+      if (activeChatTraceRef.current === traceId) {
+        activeChatTraceRef.current = null;
+        setActiveChatTrace(null);
+      }
     };
     setDraft('');
     try {
@@ -3829,6 +3996,9 @@ function App() {
       startDagForMessage(text, {conversationId, traceId});
       return;
     }
+    // 一般對話／skill 路徑：標記此 trace 為「執行中」，讓停止鈕可中斷正在跑的 CLI 子程序。
+    activeChatTraceRef.current = traceId;
+    setActiveChatTrace(traceId);
     // v3.6: Source Trust — 若訊息含 URL，自動分類來源並顯示提示
     classifySourceInText(text);
     // v3.6: 跳脫外部 token 標記（防止使用者輸入干擾 LLM context 邊界）
@@ -3837,6 +4007,10 @@ function App() {
       .catch(() => text);
     // 透過 CLIAdapter 送出（含 SkillInjection），同時記錄互動
     const sessionId = appSessionId || '';
+    // 送出前把本回合附圖暫存到後端（StageSessionImages）。傳空陣列也會清掉前一則殘留，
+    // 避免圖片外洩到下一則。用 window.go 取用，避開 wails 綁定重新生成前的前端 build 破壞。
+    const stagedImageURLs = (images || []).map((img) => img.src).filter(Boolean);
+    await callWails(() => window.go?.main?.App?.StageSessionImages?.(sessionId, stagedImageURLs)).catch(() => {});
     Promise.resolve(safeText).then((escaped) => {
       const adapter = resolveActiveAdapter();
       const payload = makeCLIInspectorPayload(adapter, sessionId, escaped || text);
@@ -4023,11 +4197,13 @@ function App() {
       [_t('settings.langEs')]: 'es',
       [_t('settings.langTh')]: 'th',
       // fallback hardcoded labels
-      '繁中': 'zh-TW', '英文': 'en', '日文': 'ja',
-      'Traditional Chinese': 'zh-TW', 'English': 'en', 'Japanese': 'ja',
+      '繁中': 'zh-TW', '中文': 'zh-TW', '英文': 'en', '日文': 'ja',
+      'Traditional Chinese': 'zh-TW', 'Chinese': 'zh-TW', 'English': 'en', 'Japanese': 'ja',
       '中': 'zh-TW', 'en': 'en', 'ja': 'ja',
       'pt': 'pt-PT', 'pt-PT': 'pt-PT', 'es': 'es', 'th': 'th',
-      'Português': 'pt-PT', 'Español': 'es', 'ไทย': 'th',
+      'Português': 'pt-PT', '葡萄牙文': 'pt-PT', 'Español': 'es', '西班牙文': 'es', 'ไทย': 'th', '泰文': 'th',
+      // self-heal: raw i18n keys leaked by an older build
+      'settings.langPt': 'pt-PT', 'settings.langEs': 'es', 'settings.langTh': 'th',
     };
     return map[displayLabel] || null;
   }
@@ -4963,6 +5139,74 @@ function App() {
     setDragActionTool(null);
   }
 
+  function formatSkillNativeDropDetail(result) {
+    const landed = result?.landed_path || result?.message || 'Skill 已拖出';
+    if (!result?.drop_target_kind || !result?.drop_target_dir) return landed;
+    return `${landed}\n${result.drop_target_kind}: ${result.drop_target_dir}`;
+  }
+
+  async function startNativeSkillExport(tool, source = 'right') {
+    if (!tool?.target) {
+      setToolResult({toolId: tool?.id || 'skill', ok: false, message: '找不到 skill_id，無法拖出'});
+      return null;
+    }
+    try {
+      const result = await callWails(() => NativeDragExportSkill(tool.target));
+      if (result?.status === 'success' && result?.landed_path) {
+        setSkillExportDialog({
+          skillID: result.skill_id || tool.target,
+          toolID: tool.id,
+          name: result.display_name || tool.title || tool.target,
+          tempExportDir: result.export_dir,
+          landedPath: result.landed_path,
+          landedDetail: formatSkillNativeDropDetail(result),
+        });
+      } else if (result?.status !== 'cancelled') {
+        setToolResult({toolId: tool.id, ok: false, message: result?.message || 'Skill 拖曳失敗'});
+        // 原生拖曳失敗（如 beginDraggingSession returned nil）時退回操作卡，
+        // 讓「解除／複製／取消」功能不因原生層失效而消失。
+        setDragActionTool((current) => current || {tool, source});
+      }
+      return result;
+    } catch (error) {
+      setToolResult({toolId: tool.id, ok: false, message: error?.message || String(error)});
+      setDragActionTool((current) => current || {tool, source});
+      return null;
+    }
+  }
+
+  async function finalizeSkillExport(action) {
+    if (!skillExportDialog) return;
+    const target = skillExportDialog;
+    setSkillExportDialog(null);
+    try {
+      await callWails(() => FinalizeNativeSkillExport(
+        action,
+        target.skillID || '',
+        target.tempExportDir || '',
+        target.landedPath || '',
+      ));
+      if (action === 'remove') {
+        setFavoriteToolIds((current) => current.filter((id) => id !== target.toolID));
+        setHiddenToolIds((current) => current.filter((id) => id !== target.toolID));
+        callWails(ListTools)
+          .then((nextTools) => setTools(normalizeToolList(nextTools)))
+          .catch(() => {});
+      }
+      setToolResult({
+        toolId: target.toolID || `skill:${target.skillID}`,
+        ok: true,
+        message: action === 'cancel'
+          ? '已刪除剛剛拖出的 skill 資料夾'
+          : action === 'remove'
+            ? 'Skill 已複製，並已從本機索引移除'
+            : 'Skill 已複製',
+      });
+    } catch (error) {
+      setToolResult({toolId: target.toolID || `skill:${target.skillID}`, ok: false, message: error?.message || String(error)});
+    }
+  }
+
   function copyTool(toolAction) {
     setDragActionTool(null);
     setCopyConfirmTool(toolAction.tool);
@@ -4987,13 +5231,15 @@ function App() {
 
   async function refreshReferenceFiles() {
     // §3.1.11 影片存 data/videos，與引用庫合併成同一份清單顯示
-    const [files, videos] = await Promise.all([
+    const [files, videos, images] = await Promise.all([
       callWails(ListReferenceFiles).catch(() => []),
       callWails(ListVideoFiles).catch(() => []),
+      callWails(ListReferenceImages).catch(() => []),
     ]);
     const loadedFiles = [
       ...(Array.isArray(files) ? files : []),
       ...(Array.isArray(videos) ? videos : []),
+      ...(Array.isArray(images) ? images : []),
     ];
     setReferenceFiles((current) => mergeReferenceLibraryFiles(current, loadedFiles));
     return loadedFiles;
@@ -5071,60 +5317,71 @@ function App() {
 
   async function importReferencePaths(paths = []) {
     const nativePaths = normalizeReferenceImportPaths(paths);
+    const importPaths = [];
+    const inFlight = referenceImportInFlightRef.current;
     for (const path of nativePaths) {
-      const name = String(path || '').split(/[\/]/).pop() || t('system.unnamedFile');
-      let referencePathForStatus = path;
-      setReferenceFiles((current) => appendUniqueReferenceFile(current, {
-        name,
-        path,
-        source: 'pending',
-        status: 'importing',
-        detail: '正在複製到引用庫',
-      }));
+      if (inFlight.has(path)) continue;
+      inFlight.add(path);
+      importPaths.push(path);
+    }
+    for (const path of importPaths) {
       try {
-        // §3.1.11 影片落獨立資料夾 data/videos，其餘維持引用庫；UI 仍同一份清單
-        const imported = await callWails(() => (isVideoPath(path) ? ImportVideoFile(path) : ImportReferenceFile(path)));
-        const importedFile = {
-          ...imported,
-          status: isW3AMediaPath(path) ? 'checking' : 'ready',
-          detail: isW3AMediaPath(path) ? '正在檢查媒體來源' : '',
-        };
-        referencePathForStatus = importedFile.path || path;
-        setReferenceFiles((current) => appendUniqueReferenceFile(
-          current.filter((file) => file.path !== path),
-          importedFile,
-        ));
-        setToolResult({
-          toolId: 'doc-entrance',
-          ok: true,
-          message: `${isW3AMediaPath(path) ? '已加入引用媒體' : '已加入引用文件'}：${importedFile.name || name}`,
-        });
-      } catch (error) {
-        const message = error?.message || '無法複製，已保留原路徑';
-        setReferenceFiles((current) => appendUniqueReferenceFile(current.filter((file) => file.path !== path), {
+        const name = String(path || '').split(/[\/]/).pop() || t('system.unnamedFile');
+        let referencePathForStatus = path;
+        setReferenceFiles((current) => appendUniqueReferenceFile(current, {
           name,
           path,
-          source: 'memory',
-          status: 'error',
-          detail: message,
+          source: 'pending',
+          status: 'importing',
+          detail: '正在複製到引用庫',
         }));
-        setToolResult({toolId: 'doc-entrance', ok: false, message});
-      }
-      if (isW3AMediaPath(path)) {
         try {
-          await importMediaW3A(path);
-          setReferenceFiles((current) => updateReferenceFileStatus(current, referencePathForStatus, {
-            status: 'ready',
-            detail: '媒體來源檢查完成',
-          }));
+          // §3.1.11 影片落獨立資料夾 data/videos，其餘維持引用庫；UI 仍同一份清單
+          const imported = await callWails(() => (isVideoPath(path) ? ImportVideoFile(path) : ImportReferenceFile(path)));
+          const importedFile = {
+            ...imported,
+            status: isW3AMediaPath(path) ? 'checking' : 'ready',
+            detail: isW3AMediaPath(path) ? '正在檢查媒體來源' : '',
+          };
+          referencePathForStatus = importedFile.path || path;
+          setReferenceFiles((current) => appendUniqueReferenceFile(
+            current.filter((file) => file.path !== path),
+            importedFile,
+          ));
+          setToolResult({
+            toolId: 'doc-entrance',
+            ok: true,
+            message: `${isW3AMediaPath(path) ? '已加入引用媒體' : '已加入引用文件'}：${importedFile.name || name}`,
+          });
         } catch (error) {
-          const message = error?.message || '媒體來源檢查失敗';
-          setReferenceFiles((current) => updateReferenceFileStatus(current, referencePathForStatus, {
+          const message = error?.message || '無法複製，已保留原路徑';
+          setReferenceFiles((current) => appendUniqueReferenceFile(current.filter((file) => file.path !== path), {
+            name,
+            path,
+            source: 'memory',
             status: 'error',
             detail: message,
           }));
           setToolResult({toolId: 'doc-entrance', ok: false, message});
         }
+        if (isW3AMediaPath(path)) {
+          try {
+            await importMediaW3A(path);
+            setReferenceFiles((current) => updateReferenceFileStatus(current, referencePathForStatus, {
+              status: 'ready',
+              detail: '媒體來源檢查完成',
+            }));
+          } catch (error) {
+            const message = error?.message || '媒體來源檢查失敗';
+            setReferenceFiles((current) => updateReferenceFileStatus(current, referencePathForStatus, {
+              status: 'error',
+              detail: message,
+            }));
+            setToolResult({toolId: 'doc-entrance', ok: false, message});
+          }
+        }
+      } finally {
+        referenceImportInFlightRef.current.delete(path);
       }
     }
   }
@@ -6303,8 +6560,8 @@ function App() {
               onVoicePressStart={startVoiceRecording}
               onVoicePressEnd={stopVoiceRecording}
               onVoiceCancel={cancelVoiceRecording}
-              taskActive={isTaskProgressActive(dagRun)}
-              onCancelTask={cancelActiveTaskProgress}
+              taskActive={isTaskProgressActive(dagRun) || !!activeChatTrace}
+              onCancelTask={cancelActiveExecution}
               pendingTaskReview={pendingTaskReview}
               taskReviewDetailsOpen={reviewPopup === 'risk'}
               onConfirmTaskReview={confirmSkillBuild}
@@ -6627,6 +6884,7 @@ function App() {
           onToolActivate={activateTool}
           onToolDragStart={setDraggedTool}
           onToolDragOut={setDragActionTool}
+          onSkillNativeDragStart={startNativeSkillExport}
           onReorder={reorderTool}
         />
       )}
@@ -6645,6 +6903,7 @@ function App() {
           onToolActivate={activateTool}
           onToolDragStart={setDraggedTool}
           onToolDragOut={setDragActionTool}
+          onSkillNativeDragStart={startNativeSkillExport}
           onReorder={reorderTool}
         />
       )}
@@ -6670,6 +6929,19 @@ function App() {
               onClick: () => copyTool(dragActionTool),
             },
             {label: t('common.cancel'), onClick: () => setDragActionTool(null)},
+          ]}
+        />
+      )}
+      {skillExportDialog && (
+        <DragActionModal
+          ariaLabel="Skill export"
+          icon="✦"
+          title={skillExportDialog.name}
+          detail={skillExportDialog.landedDetail || skillExportDialog.landedPath}
+          actions={[
+            {label: t('adapter.remove'), onClick: () => finalizeSkillExport('remove')},
+            {label: t('adapter.copyAction'), onClick: () => finalizeSkillExport('copy')},
+            {label: t('common.cancel'), onClick: () => finalizeSkillExport('cancel')},
           ]}
         />
       )}
@@ -7512,9 +7784,11 @@ function localizeBackendLabel(value, translationKeyMap) {
 // Mapping tables: Chinese label → translation key
 const _panelLangLabelMap = {
   '繁中': 'settings.langZhTW',
+  '中文': 'settings.langZhTW',
   '英文': 'settings.langEn',
   '日文': 'settings.langJa',
   'Traditional Chinese': 'settings.langZhTW',
+  'Chinese': 'settings.langZhTW',
   'English': 'settings.langEn',
   'Japanese': 'settings.langJa',
   '中': 'settings.langZhTW',
@@ -7525,16 +7799,39 @@ const _panelLangLabelMap = {
   'es': 'settings.langEs',
   'th': 'settings.langTh',
   'Português': 'settings.langPt',
+  '葡萄牙文': 'settings.langPt',
   'Español': 'settings.langEs',
+  '西班牙文': 'settings.langEs',
   'ไทย': 'settings.langTh',
+  '泰文': 'settings.langTh',
+  // self-heal: raw i18n keys leaked by an older build
+  'settings.langPt': 'settings.langPt',
+  'settings.langEs': 'settings.langEs',
+  'settings.langTh': 'settings.langTh',
 };
 const _roleLangLabelMap = {
   '自動': 'settings.roleLangAuto',
   '繁中': 'settings.langZhTW',
+  '中文': 'settings.langZhTW',
   '英文': 'settings.langEn',
+  '日文': 'settings.langJa',
   'Auto': 'settings.roleLangAuto',
   'Traditional Chinese': 'settings.langZhTW',
+  'Chinese': 'settings.langZhTW',
   'English': 'settings.langEn',
+  'Japanese': 'settings.langJa',
+  '中': 'settings.langZhTW',
+  'en': 'settings.langEn',
+  'ja': 'settings.langJa',
+  'pt': 'settings.langPt',
+  'es': 'settings.langEs',
+  'th': 'settings.langTh',
+  'Português': 'settings.langPt',
+  '葡萄牙文': 'settings.langPt',
+  'Español': 'settings.langEs',
+  '西班牙文': 'settings.langEs',
+  'ไทย': 'settings.langTh',
+  '泰文': 'settings.langTh',
 };
 const _fontPresetLabelMap = {
   '預設': 'settings.fontDefault',
@@ -8280,7 +8577,9 @@ function PackageInstallDecisionDialog({candidate, onConfirm, onCancel}) {
     ? t('package.systemCodeDesc', { code: preview.source_system_code || 'unknown', toolCount: preview.tool_count || 0 })
     : candidate?.type === 'skill'
       ? t('package.skillIdDesc', { skillId: preview.SkillID || preview.skill_id || 'unknown', resourceCount: (preview.Resources || preview.resources || []).length })
-      : t('package.sourceFrom', { path: candidate?.path || 'unknown' });
+      : candidate?.type === 'goprogram'
+        ? `小程式 ${preview.program_id || preview.program_name || 'unknown'}　→ 工具 > 自動流程`
+        : t('package.sourceFrom', { path: candidate?.path || 'unknown' });
   // i18n: package
   return (
     <div className="export-dialog-overlay">
@@ -8685,29 +8984,82 @@ function RecordingCatalogList() {
   const t = useI18n(s => s.t);
   const [recordings, setRecordings] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [exportDialog, setExportDialog] = useState(null);
+  const [note, setNote] = useState('');
+
+  function loadRecordings() {
+    setLoading(true);
+    callWails(() => ListLearningReplayCatalog(20))
+      .then((data) => setRecordings(Array.isArray(data) ? data : []))
+      .catch(() => setRecordings([]))
+      .finally(() => setLoading(false));
+  }
+
+  // 拖出成功後跳出 移除／複製／取消（與 skill / go-program 一致）。
+  function showExportDialog(result) {
+    if (!result || result.status !== 'success' || !result.landed_path) {
+      if (result?.message) setNote(result.message);
+      return;
+    }
+    setExportDialog({
+      runID: result.run_id,
+      name: result.title || result.run_id || t('recordingCatalog.untitled'),
+      tempExportDir: result.export_dir,
+      landedPath: result.landed_path,
+      detail: result.drop_target_kind && result.drop_target_dir
+        ? `${result.landed_path}\n${result.drop_target_kind}: ${result.drop_target_dir}`
+        : result.landed_path,
+    });
+  }
 
   useEffect(() => {
-    let cancelled = false;
-    const loadRecordings = () => {
-      setLoading(true);
-      callWails(() => ListLearningReplayCatalog(20))
-        .then((data) => {
-          if (!cancelled) setRecordings(Array.isArray(data) ? data : []);
-        })
-        .catch(() => {
-          if (!cancelled) setRecordings([]);
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
-    };
     loadRecordings();
     const offStopped = EventsOn('visual_learning:recording_stopped', loadRecordings);
+    const offCatalog = EventsOn('learningrun:catalog_updated', loadRecordings);
+    const offNative = EventsOn('learningrun:native_completed', showExportDialog);
     return () => {
-      cancelled = true;
       offStopped && offStopped();
+      offCatalog && offCatalog();
+      offNative && offNative();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function startRecordingExport(event, recording) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    try {
+      event?.dataTransfer?.setData?.('application/x-ai-console-learning-run-id', recording?.run_id || '');
+      if (event?.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
+    } catch (_) {}
+    if (!recording?.run_id) return;
+    setNote('');
+    try {
+      const result = await callWails(() => NativeDragExportLearningRun(recording.run_id));
+      showExportDialog(result);
+    } catch (error) {
+      setNote(error?.message || String(error));
+    }
+  }
+
+  async function finalizeRecordingExport(action) {
+    if (!exportDialog) return;
+    const target = exportDialog;
+    setExportDialog(null);
+    try {
+      await callWails(() => FinalizeNativeLearningRunExport(
+        action,
+        target.runID || '',
+        target.tempExportDir || '',
+        target.landedPath || '',
+      ));
+      if (action === 'remove') {
+        setRecordings((current) => current.filter((r) => r.run_id !== target.runID));
+      }
+    } catch (error) {
+      setNote(error?.message || String(error));
+    }
+  }
 
   if (loading || !recordings || recordings.length === 0) return null;
 
@@ -8723,10 +9075,11 @@ function RecordingCatalogList() {
               key={recording.run_id || tag}
               type="button"
               className="tool-menu-item flow-asset-card flow-recording-card"
+              draggable
               data-full-title={title}
+              title="拖出資料夾可打包／移除"
               aria-label={`${tag} ${title}`}
-              aria-disabled="true"
-              onDragStart={(event) => event.preventDefault()}
+              onDragStart={(event) => startRecordingExport(event, recording)}
             >
               {/* Keep recordings framed like tool cards so the flow popup stays visually unified. */}
               <span className="tool-menu-icon">◇</span>
@@ -8738,6 +9091,20 @@ function RecordingCatalogList() {
             </button>
           );
         })}
+        {note && <p className="go-program-flow-note">{note}</p>}
+        {exportDialog && (
+          <DragActionModal
+            ariaLabel="Learning run export"
+            icon="↗"
+            title={exportDialog.name}
+            detail={exportDialog.detail}
+            actions={[
+              {label: t('adapter.remove'), onClick: () => finalizeRecordingExport('remove')},
+              {label: t('adapter.copyAction'), onClick: () => finalizeRecordingExport('copy')},
+              {label: t('common.cancel'), onClick: () => finalizeRecordingExport('cancel')},
+            ]}
+          />
+        )}
     </>
   );
 }
@@ -8985,7 +9352,7 @@ function GoProgramAuthoringCatalogList({showLabel = true}) {
 }
 
 /* i18n: tool popup */
-function ToolPopup({side, tools, activeTab, favoriteToolIds, hiddenToolIds, toolResult, externalServiceLinks, documentationLinks, dagRun, onTabChange, onToolActivate, onToolDragStart, onToolDragOut, onReorder}) {
+function ToolPopup({side, tools, activeTab, favoriteToolIds, hiddenToolIds, toolResult, externalServiceLinks, documentationLinks, dagRun, onTabChange, onToolActivate, onToolDragStart, onToolDragOut, onSkillNativeDragStart, onReorder}) {
   const t = useI18n(s => s.t);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -9021,9 +9388,16 @@ function ToolPopup({side, tools, activeTab, favoriteToolIds, hiddenToolIds, tool
     event.dataTransfer.effectAllowed = 'copyMove';
     event.dataTransfer.setData('application/x-ai-console-tool-id', tool.id);
     onToolDragStart({tool, source: side});
+    if (tool.kind === 'skill') {
+      void onSkillNativeDragStart?.(tool, side);
+    }
   }
 
   function finishToolDrag(event, tool) {
+    if (tool.kind === 'skill') {
+      onToolDragStart(null);
+      return;
+    }
     const leftWindow =
       event.clientX <= 0 ||
       event.clientY <= 0 ||
@@ -9056,7 +9430,10 @@ function ToolPopup({side, tools, activeTab, favoriteToolIds, hiddenToolIds, tool
           aria-label={t('tool.searchLabel')}
           onClick={() => setSearchOpen((open) => !open)}
         >
-          ⌕
+          <svg className="tools-popup-search-icon" viewBox="0 0 20 20" aria-hidden="true">
+            <circle cx="8.4" cy="8.4" r="4.8" />
+            <path d="M12 12l4.2 4.2" />
+          </svg>
         </button>
       </header>
       {searchOpen && (
@@ -9651,6 +10028,86 @@ function SettingsMenu({
   const fontPresetValue = localizeBackendLabel(panel.fontPreset, _fontPresetLabelMap);
   const [orderedStyleOptions, setOrderedStyleOptions] = useState(loadStyleOptionOrder);
   const [draggedStyleOption, setDraggedStyleOption] = useState('');
+
+  // 對話備份／還原（SEC：加密為「可選」，勾了才問密碼）
+  const [backupDialog, setBackupDialog] = useState(null); // {kind:'export'|'import-password'|'import-conflict', ...}
+  const [backupEncrypt, setBackupEncrypt] = useState(false);
+  const [backupRedact, setBackupRedact] = useState(false);
+  const [backupPassword, setBackupPassword] = useState('');
+  const [backupPassword2, setBackupPassword2] = useState('');
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupNotice, setBackupNotice] = useState('');
+
+  function resetBackupForm() {
+    setBackupEncrypt(false);
+    setBackupRedact(false);
+    setBackupPassword('');
+    setBackupPassword2('');
+  }
+
+  async function runBackupExport() {
+    if (backupEncrypt) {
+      if ((backupPassword || '').length < 8) { setBackupNotice('密碼至少 8 個字元'); return; }
+      if (backupPassword !== backupPassword2) { setBackupNotice('兩次密碼不一致'); return; }
+    }
+    setBackupBusy(true);
+    setBackupNotice('');
+    try {
+      const destDir = await callWails(SelectProjectBackupExportDirectory);
+      if (!destDir) { setBackupBusy(false); return; }
+      const res = await callWails(() => ExportProjectBackupHandler(
+        'default', destDir, backupEncrypt ? backupPassword : '', backupRedact, backupEncrypt));
+      if (res?.status === 'ok') {
+        setBackupDialog(null);
+        resetBackupForm();
+        setBackupNotice(`已匯出：${res.bundle_path}`);
+      } else {
+        setBackupNotice(res?.message || '匯出失敗');
+      }
+    } catch (err) {
+      setBackupNotice(String(err?.message || err));
+    }
+    setBackupBusy(false);
+  }
+
+  async function startBackupImport() {
+    setBackupNotice('');
+    try {
+      const path = await callWails(SelectProjectBackupFile);
+      if (!path) return;
+      const probe = await callWails(() => IsProjectBackupEncryptedHandler(path));
+      if (probe?.status !== 'ok') { setBackupNotice(probe?.message || '無法讀取備份檔'); return; }
+      if (probe.encrypted) {
+        setBackupPassword('');
+        setBackupDialog({kind: 'import-password', path});
+        return;
+      }
+      await finishBackupImport(path, '', 'fail_if_exists');
+    } catch (err) {
+      setBackupNotice(String(err?.message || err));
+    }
+  }
+
+  async function finishBackupImport(path, password, mode) {
+    setBackupBusy(true);
+    try {
+      const res = await callWails(() => ImportProjectBackupHandler(path, password, mode));
+      if (res?.status === 'ok') {
+        setBackupDialog(null);
+        resetBackupForm();
+        setBackupNotice(`已還原專案：${res.restored_as}（重新整理或重啟 App 後生效）`);
+      } else if (res?.status === 'conflict') {
+        setBackupDialog({kind: 'import-conflict', path, password});
+      } else {
+        setBackupNotice(res?.message || '匯入失敗');
+        if (res?.status !== 'bad_password') setBackupDialog(null);
+      }
+    } catch (err) {
+      setBackupNotice(String(err?.message || err));
+      setBackupDialog(null);
+    }
+    setBackupBusy(false);
+  }
   const voiceSettings = voiceState?.settings || {languageMode: 'auto', manualLanguage: '', debugMode: false, commandMode: false};
 
   function moveStyleOption(targetOption) {
@@ -9667,29 +10124,33 @@ function SettingsMenu({
     <section className="settings-side-panel" aria-label={t('settings.panelSettings')}>
       <h2>{t('settings.panelSettings')}</h2>
       <div className="settings-menu-list">
-        <SettingSelect
+        <SettingPopupSelect
           icon="◎"
           label={t('settings.panelLanguage')}
           value={panelLanguageValue}
-          onNext={() => onPanelChange({panelLanguage: cycleValue([t('settings.langZhTW'), t('settings.langEn'), t('settings.langJa'), t('settings.langPt'), t('settings.langEs'), t('settings.langTh')], panelLanguageValue)})}
+          options={[t('settings.langZhTW'), t('settings.langEn'), t('settings.langJa'), t('settings.langPt'), t('settings.langEs'), t('settings.langTh')]}
+          onSelect={(lang) => onPanelChange({panelLanguage: lang})}
         />
-        <SettingSelect
+        <SettingPopupSelect
           icon="♙"
           label={t('settings.roleLanguage')}
           value={roleLanguageValue}
-          onNext={() => onPanelChange({roleLanguage: cycleValue([t('settings.roleLangAuto'), t('settings.langZhTW'), t('settings.langEn')], roleLanguageValue)})}
+          options={[t('settings.roleLangAuto'), t('settings.langZhTW'), t('settings.langEn'), t('settings.langJa'), t('settings.langPt'), t('settings.langEs'), t('settings.langTh')]}
+          onSelect={(lang) => onPanelChange({roleLanguage: lang})}
         />
-        <SettingSelect
+        <SettingPopupSelect
           icon="Aa"
           label={t('settings.fontPreset')}
           value={fontPresetValue}
-          onNext={() => onPanelChange({fontPreset: cycleValue([t('settings.fontDefault'), t('settings.fontRound'), t('settings.fontMono')], fontPresetValue)})}
+          options={[t('settings.fontDefault'), t('settings.fontRound'), t('settings.fontMono')]}
+          onSelect={(preset) => onPanelChange({fontPreset: preset})}
         />
-        <SettingSelect
+        <SettingPopupSelect
           icon="Tt"
           label={t('settings.fontSize')}
           value={panel.fontScale}
-          onNext={() => onPanelChange({fontScale: cycleValue(fontScaleOptions, panel.fontScale)})}
+          options={fontScaleOptions}
+          onSelect={(scale) => onPanelChange({fontScale: scale})}
         />
       </div>
       <div className="settings-style-block">
@@ -9754,6 +10215,80 @@ function SettingsMenu({
           </button>
         </div>
       </div>
+      <div className="settings-restore-block">
+        <button className="settings-restore-btn" type="button"
+          onClick={() => { setBackupNotice(''); resetBackupForm(); setBackupDialog({kind: 'export'}); }}>
+          <span>⇪</span>
+          <span>匯出對話備份</span>
+        </button>
+        <button className="settings-restore-btn" type="button" disabled={backupBusy} onClick={startBackupImport}>
+          <span>⇩</span>
+          <span>匯入對話備份</span>
+        </button>
+        {backupNotice && <small className="settings-restore-note">{backupNotice}</small>}
+      </div>
+      {backupDialog?.kind === 'export' && (
+        <div className="export-dialog-overlay">
+          <div className="export-dialog">
+            <p>匯出對話備份</p>
+            <label style={{display: 'flex', gap: '6px', alignItems: 'center'}}>
+              <input type="checkbox" checked={backupEncrypt}
+                onChange={(e) => { setBackupEncrypt(e.target.checked); setBackupNotice(''); }} />
+              <span>加密備份檔</span>
+            </label>
+            {backupEncrypt ? (
+              <>
+                <input type="password" placeholder="設定密碼（至少 8 字元）" value={backupPassword}
+                  onChange={(e) => setBackupPassword(e.target.value)} />
+                <input type="password" placeholder="再輸入一次密碼" value={backupPassword2}
+                  onChange={(e) => setBackupPassword2(e.target.value)} />
+                <small>忘記密碼將無法開啟備份，請妥善保管。</small>
+              </>
+            ) : (
+              <small>未加密：任何拿到檔案的人都能讀取，請勿放公開位置。</small>
+            )}
+            <label style={{display: 'flex', gap: '6px', alignItems: 'center'}}>
+              <input type="checkbox" checked={backupRedact}
+                onChange={(e) => setBackupRedact(e.target.checked)} />
+              <span>遮蔽敏感資料（金鑰等）</span>
+            </label>
+            {backupNotice && <small>{backupNotice}</small>}
+            <div className="export-dialog-actions">
+              <button type="button" onClick={() => { setBackupDialog(null); setBackupNotice(''); }}>取消</button>
+              <button type="button" disabled={backupBusy} onClick={runBackupExport}>選擇位置並匯出</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {backupDialog?.kind === 'import-password' && (
+        <div className="export-dialog-overlay">
+          <div className="export-dialog">
+            <p>這是加密備份檔，請輸入密碼</p>
+            <input type="password" placeholder="備份密碼" value={backupPassword}
+              onChange={(e) => setBackupPassword(e.target.value)} />
+            {backupNotice && <small>{backupNotice}</small>}
+            <div className="export-dialog-actions">
+              <button type="button" onClick={() => { setBackupDialog(null); setBackupNotice(''); }}>取消</button>
+              <button type="button" disabled={backupBusy}
+                onClick={() => finishBackupImport(backupDialog.path, backupPassword, 'fail_if_exists')}>還原</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {backupDialog?.kind === 'import-conflict' && (
+        <div className="export-dialog-overlay">
+          <div className="export-dialog">
+            <p>同名專案已存在，要怎麼處理？</p>
+            <div className="export-dialog-actions">
+              <button type="button" onClick={() => { setBackupDialog(null); setBackupNotice(''); }}>取消</button>
+              <button type="button" disabled={backupBusy}
+                onClick={() => finishBackupImport(backupDialog.path, backupDialog.password, 'copy')}>另存副本</button>
+              <button type="button" disabled={backupBusy}
+                onClick={() => finishBackupImport(backupDialog.path, backupDialog.password, 'overwrite')}>覆蓋現有</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="settings-restore-block">
         <button className="settings-restore-btn" type="button" onClick={onRestoreDefaults}>
           <span>↺</span>
@@ -10759,6 +11294,52 @@ function SettingSelect({icon, label, value, onNext}) {
         <span className="settings-select-value">{value}</span>
         <span className="settings-select-caret">⌄</span>
       </button>
+    </label>
+  );
+}
+
+// Click-to-open popup picker. Used for the panel language where cycling through
+// six options one click at a time is tedious.
+function SettingPopupSelect({icon, label, value, options, onSelect}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDocClick = (e) => { if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDocClick); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+  // 顏色一律交給 style.css 的 .settings-popup-list 依主題決定；這裡只留版面配置。
+  const popupStyle = {
+    position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 60,
+    minWidth: 132, padding: 4, borderRadius: 10,
+    display: 'flex', flexDirection: 'column', gap: 2,
+  };
+  return (
+    <label className="settings-select-row" ref={rootRef} style={{position: 'relative'}}>
+      <span className="settings-select-label"><i>{icon}</i>{label}</span>
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="listbox" aria-expanded={open}>
+        <span className="settings-select-value">{value}</span>
+        <span className="settings-select-caret">⌄</span>
+      </button>
+      {open && (
+        <div role="listbox" className="settings-popup-list" style={popupStyle}>
+          {options.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              role="option"
+              aria-selected={opt === value}
+              className={`settings-popup-option${opt === value ? ' active' : ''}`}
+              onClick={() => { setOpen(false); if (opt !== value) onSelect(opt); }}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      )}
     </label>
   );
 }
@@ -12059,8 +12640,12 @@ function ConversationPanel({
 }) {
   const t = useI18n(s => s.t);
   const [activeMessage, setActiveMessage] = useState(null);
+  const [imagePreviews, setImagePreviews] = useState([]);
+  const [imageError, setImageError] = useState('');
+  const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8MB：擋住整張截圖把記憶體灌爆
   const composerComposingRef = useRef(false);
   const taskReviewCardRef = useRef(null);
+  const imageInputRef = useRef(null);
   const voiceReady = voiceState?.status === 'ready';
   const micAvailable = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
   const voiceDisabled = voiceBusy || !voiceReady || !micAvailable;
@@ -12074,6 +12659,47 @@ function ConversationPanel({
     return 'user';
   };
   const isLocalSearchMessage = (message) => message.startsWith('Ai:本機搜尋');
+
+  function addImageFiles(fileList) {
+    const files = Array.from(fileList || []).filter((file) => file?.type?.startsWith('image/'));
+    if (files.length === 0) return;
+    files.forEach((file) => {
+      if (file.size > MAX_IMAGE_BYTES) {
+        // 大圖直接擋下：避免 base64 在 state 與 DOM 各塞一份把記憶體灌爆、UI 卡頓。
+        setImageError(t('composer.imageTooLarge', { max: '8MB' }));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setImagePreviews((prev) => [...prev, {
+          id: `img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          src: event.target?.result || '',
+          name: file.name || 'image',
+          type: file.type,
+        }]);
+        setImageError('');
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function removeImage(id) {
+    setImagePreviews((prev) => prev.filter((img) => img.id !== id));
+  }
+
+  function handleComposerPaste(event) {
+    const files = Array.from(event.clipboardData?.files || []).filter((file) => file?.type?.startsWith('image/'));
+    if (files.length === 0) return;
+    event.preventDefault();
+    addImageFiles(files);
+  }
+
+  function handleComposerDrop(event) {
+    const files = Array.from(event.dataTransfer?.files || []).filter((file) => file?.type?.startsWith('image/'));
+    if (files.length === 0) return;
+    event.preventDefault();
+    addImageFiles(files);
+  }
 
   useEffect(() => {
     if (!pendingTaskReview?.id) return;
@@ -12097,7 +12723,11 @@ function ConversationPanel({
   }, [messages.length]);
 
   return (
-    <section className="conversation-panel">
+    <section
+      className="conversation-panel"
+      onDragOver={(event) => { if (event.dataTransfer?.types?.includes('Files')) event.preventDefault(); }}
+      onDrop={(event) => { if (event.dataTransfer?.types?.includes('Files')) event.preventDefault(); }}
+    >
       <div className="message-list" ref={messageListRef}>
         {messages.map((message, index) => (
           <article
@@ -12127,6 +12757,7 @@ function ConversationPanel({
             )}
             <button
               type="button"
+              className="message-delete-action"
               onClick={(event) => {
                 event.stopPropagation();
                 onDelete(index);
@@ -12214,7 +12845,29 @@ function ConversationPanel({
       )}
 
       {/* ── 原有 Composer（聊天輸入區）── */}
-      <form className="composer" onSubmit={onSend}>
+      <form
+        className="composer"
+        onSubmit={(event) => {
+          // submitComposerText 對空字串會 return；只有真的有文字送出時才連帶清縮圖，
+          // 純貼圖尚未送出時保留，避免誤刪使用者剛貼上的圖。
+          onSend(event, imagePreviews);
+          if (draft.trim()) {
+            setImagePreviews([]);
+            setImageError('');
+          }
+        }}
+      >
+        {imagePreviews.length > 0 && (
+          <div className="composer-image-strip">
+            {imagePreviews.map((img) => (
+              <div className="composer-image-thumb" key={img.id}>
+                <img src={img.src} alt={img.name || t('composer.imagePreview')} />
+                <button type="button" onClick={() => removeImage(img.id)} aria-label={t('composer.removeImage')}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
+        {imageError && <div className="composer-image-error">{imageError}</div>}
         <button
           className={`attach-btn task-stop-btn ${taskActive ? 'task-stop-active' : ''}`}
           type="button"
@@ -12245,12 +12898,37 @@ function ConversationPanel({
         >
           <MicIcon />
         </button>
-        <div className="input-wrap">
+        <button
+          className="image-insert-btn"
+          type="button"
+          title={t('composer.insertImage')}
+          aria-label={t('composer.insertImage')}
+          onClick={() => imageInputRef.current?.click()}
+        >
+          <span aria-hidden="true">▧</span>
+        </button>
+        <input
+          ref={imageInputRef}
+          className="composer-image-file"
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={(event) => {
+            addImageFiles(event.target.files);
+            event.target.value = '';
+          }}
+        />
+        <div
+          className="input-wrap"
+          onDrop={handleComposerDrop}
+          onDragOver={(event) => event.preventDefault()}
+        >
           <textarea
             value={draft}
             rows={1}
             placeholder={t('composer.placeholder')}
             onChange={(event) => onDraftChange(event.target.value)}
+            onPaste={handleComposerPaste}
             onCompositionStart={() => {
               // 中文/日文 IME 組字期間，Enter 先保留給選字。
               composerComposingRef.current = true;
@@ -12447,6 +13125,33 @@ function ReviewPanel({
                         {node.durationMs != null ? ` · ${(node.durationMs / 1000).toFixed(1)}s` : ''}
                       </small>
                       {node.resultSummary && <small>{node.resultSummary}</small>}
+                      {node.status === 'running' && taskLoopRounds[node.id] && (
+                        <small className="dag-loop-round">
+                          {`第 ${taskLoopRounds[node.id].iteration} 輪：${taskLoopRounds[node.id].action} ${taskLoopRounds[node.id].target}`}
+                        </small>
+                      )}
+                      {node.status === 'waiting_user' && (
+                        <span className="dag-loop-reply">
+                          <input
+                            type="text"
+                            value={taskLoopReply[node.id] || ''}
+                            placeholder="輸入補充資訊後送出"
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setTaskLoopReply((prev) => ({...prev, [node.id]: value}));
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key !== 'Enter') return;
+                              const reply = (taskLoopReply[node.id] || '').trim();
+                              if (!reply) return;
+                              callWails(() => SubmitTaskLoopInput(dagRun.id, node.id, reply))
+                                .then(() => setTaskLoopReply((prev) => ({...prev, [node.id]: ''})))
+                                .catch((error) => setTaskLoopReply((prev) => ({...prev, [node.id]: reply, [`${node.id}:error`]: error?.message || String(error)})));
+                            }}
+                          />
+                          {taskLoopReply[`${node.id}:error`] && <small className="dag-loop-error">{taskLoopReply[`${node.id}:error`]}</small>}
+                        </span>
+                      )}
                     </div>
                     <em>{formatNodeRiskLabel(node)}</em>
                   </div>
@@ -13152,6 +13857,7 @@ function RightRail({
         }
         if (event.dataTransfer.files?.length) {
           event.preventDefault();
+          event.stopPropagation();
           onReferenceFileDrop(Array.from(event.dataTransfer.files));
           return;
         }
@@ -13164,6 +13870,10 @@ function RightRail({
       <button className="tool-card tool-amber reference-link-card" type="button" onClick={onReferenceLinkOpen}>
         <span>▤</span>
         <span>{t('rightRail.citeLink')}</span>
+      </button>
+      <button className="tool-card tool-amber tool-schedule-card" type="button">
+        <span>◴</span>
+        <span>排程</span>
       </button>
       {sourceTrustHint && (
         <div

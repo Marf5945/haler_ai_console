@@ -1,6 +1,36 @@
-# AI Console
+# HaLer for AI Console
 
-AI Console is a Wails desktop app with a Go backend and a React/Vite frontend.
+HaLer for AI Console is a Wails desktop app with a Go backend and a React/Vite frontend.
+
+## 功能概覽（繁中）
+
+HaLer for AI Console 是一個本機優先的 AI 工作台，將多種 LLM 介面、文件資料、任務流程與安全治理集中在同一個桌面應用中。
+
+- **多模型 / 多介面整合**：支援 CLI adapter、API adapter、本機模型與 Ollama 相關流程，並可為不同 adapter 保存模型選擇與健康狀態。
+- **任務 DAG 與自動流程**：可將任務拆成 DAG run、追蹤節點狀態、保留 debug trace，並在高風險步驟前以 review card 暫停等待確認。
+- **Bounded Replan**：執行失敗時可在低風險、同目標、read-only 條件下嘗試重新規劃尚未開始的後續步驟；Go 端負責裁決，並保留 audit log。
+- **Skill 與 Go Program Authoring**：可掃描、建立、保存與執行 skill；也能引導產生受限權限的 Go program，經驗證與 review 後再納入工作流。
+- **文件、引用與搜尋**：支援拖放匯入文件、建立本機文件庫、TF-IDF / Ollama embedding 檢索、Reference prompt context、URL provenance、local search 與可設定的 web search provider。
+- **內建資料工具**：提供 CSV / JSON / Office 文件讀寫能力，並包含零第三方依賴的 xlsx 產生路徑與電料 BOM 產出技能範例。
+- **Visual Learning**：包含螢幕/影像元素偵測、OCR、按鈕候選、元素字典、動作候選與 dry-run 信心計算；YOLOX 模型為選配，缺少時會回退到 OpenCV shape/text 偵測。
+- **Remote Bridge**：可設定 Telegram、Discord、LINE、Teams、QQ 或 custom webhook channel，支援遠端送出、審核回覆、分段 dispatch 與 audit。
+- **安全治理**：包含 OS-backed credential store、source trust allowlist、LLM context 過濾、Controlled Trust、draft sandbox、package import review、W3A media provenance 與模型污染風險檢查。
+- **個人化工作區**：支援 persona / avatar、主對話與 subagent 匯出、排程任務、Status Rail、語音設定與多語系 UI。
+
+## Feature Overview (English)
+
+HaLer for AI Console is a local-first AI workbench that brings LLM adapters, documents, task automation, and safety controls into one desktop app.
+
+- **Multi-model and multi-adapter console**: supports CLI adapters, API adapters, local models, and Ollama-oriented flows, with per-adapter model choices and runtime health state.
+- **Task DAG automation**: breaks work into DAG runs, tracks node status, keeps debug traces, and pauses for review cards before high-risk steps continue.
+- **Bounded Replan**: when execution fails, the app can try to rewrite only the not-yet-started tail of a task under low-risk, same-goal, read-only constraints; Go owns the final decision and writes audit logs.
+- **Skills and Go Program Authoring**: scans, builds, saves, and executes skills; guided Go program generation is validated, permission-scoped, and review-gated before entering workflows.
+- **Documents, references, and search**: imports dropped documents, maintains a local document store, supports TF-IDF / Ollama embedding retrieval, builds reference prompt context, records URL provenance, and offers local search plus configurable web search providers.
+- **Built-in data tools**: includes CSV / JSON / Office document readers and writers, a zero-third-party xlsx generation path, and an electrical-material BOM skill example.
+- **Visual Learning**: provides screen/image element detection, OCR, button candidates, an element dictionary, action candidates, and dry-run confidence scoring; the optional YOLOX model falls back to OpenCV shape/text detection when unavailable.
+- **Remote Bridge**: configures Telegram, Discord, LINE, Teams, QQ, or custom webhook channels for remote submission, review replies, segmented dispatch, and audit trails.
+- **Safety and governance**: includes OS-backed credential storage, source-trust allowlists, LLM context filtering, Controlled Trust, draft sandboxing, package import review, W3A media provenance, and model-pollution risk checks.
+- **Personal workspace**: supports personas and avatars, main-chat and subagent export, scheduled jobs, Status Rail, voice settings, and multilingual UI.
 
 ## For Users
 

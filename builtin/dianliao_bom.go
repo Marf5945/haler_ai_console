@@ -10,7 +10,6 @@
 package builtin
 
 import (
-	"encoding/xml"
 	"fmt"
 	"strconv"
 	"strings"
@@ -69,7 +68,7 @@ type dbRecord struct {
 // loadDianliaoDB 讀取電料編碼紀錄，建立「料號 → 紀錄」索引。
 // 廣達料號與供應商料號都會建索引，使用者輸入任一種都能查到。
 func loadDianliaoDB(dbPath string) (map[string]dbRecord, error) {
-	grid, err := readXlsxSheetGrid(dbPath, dbSheetMaterials)
+	grid, err := ReadXlsxSheetGrid(dbPath, dbSheetMaterials)
 	if err != nil {
 		return nil, err
 	}
@@ -261,167 +260,4 @@ func buildPurchaseSummary(req BOMRequest, title string) XlsxSpec {
 		})
 	}
 	return spec
-}
-
-// ---------- 結構化 xlsx 讀取（依欄名定位需要的能力，補上既有 ExtractXlsxText 只能取扁平文字的缺口）----------
-
-// readXlsxSheetGrid 將指定工作表讀成二維字串表格 grid[列][欄]。
-// sheetName 為空時讀第一個工作表。純標準庫，重用 zipReadFile 與 parseXlsxA1CellRef。
-func readXlsxSheetGrid(path, sheetName string) ([][]string, error) {
-	target, err := resolveSheetTarget(path, sheetName)
-	if err != nil {
-		return nil, err
-	}
-	shared, err := readSharedStrings(path)
-	if err != nil {
-		return nil, err
-	}
-	data, err := zipReadFile(path, target)
-	if err != nil {
-		return nil, fmt.Errorf("dianliao_bom: 讀取 %s: %w", target, err)
-	}
-	if data == nil {
-		return nil, fmt.Errorf("dianliao_bom: 找不到工作表 %s", target)
-	}
-
-	var sheet struct {
-		Rows []struct {
-			Cells []struct {
-				R  string `xml:"r,attr"`
-				T  string `xml:"t,attr"`
-				V  string `xml:"v"`
-				Is struct {
-					T string `xml:"t"`
-				} `xml:"is"`
-			} `xml:"c"`
-		} `xml:"sheetData>row"`
-	}
-	if err := xml.Unmarshal(data, &sheet); err != nil {
-		return nil, fmt.Errorf("dianliao_bom: 解析工作表 XML: %w", err)
-	}
-
-	var grid [][]string
-	for _, row := range sheet.Rows {
-		var rowIdx, maxCol int
-		// 先算出該列的最大欄位（依儲存格 r 屬性）
-		cells := map[int]string{}
-		for _, c := range row.Cells {
-			r, col, err := parseXlsxA1CellRef(c.R)
-			if err != nil {
-				continue
-			}
-			rowIdx = r
-			if col > maxCol {
-				maxCol = col
-			}
-			val := c.V
-			switch c.T {
-			case "s": // shared string
-				if idx, e := strconv.Atoi(strings.TrimSpace(c.V)); e == nil && idx >= 0 && idx < len(shared) {
-					val = shared[idx]
-				}
-			case "inlineStr":
-				val = c.Is.T
-			}
-			cells[col] = val
-		}
-		// 補齊 grid 到 rowIdx
-		for len(grid) <= rowIdx {
-			grid = append(grid, nil)
-		}
-		line := make([]string, maxCol+1)
-		for col, v := range cells {
-			line[col] = v
-		}
-		grid[rowIdx] = line
-	}
-	return grid, nil
-}
-
-// resolveSheetTarget 依工作表名稱解析出對應的 worksheets/sheetN.xml 路徑。
-// 透過 workbook.xml（name → r:id）與 workbook.xml.rels（r:id → target）對照。
-// sheetName 為空、或找不到指定名稱時，回退第一個工作表。
-func resolveSheetTarget(path, sheetName string) (string, error) {
-	wbData, err := zipReadFile(path, "xl/workbook.xml")
-	if err != nil || wbData == nil {
-		return "xl/worksheets/sheet1.xml", nil // 回退
-	}
-	var wb struct {
-		Sheets []struct {
-			Name string `xml:"name,attr"`
-			RID  string `xml:"id,attr"`
-		} `xml:"sheets>sheet"`
-	}
-	if err := xml.Unmarshal(wbData, &wb); err != nil || len(wb.Sheets) == 0 {
-		return "xl/worksheets/sheet1.xml", nil
-	}
-
-	relData, _ := zipReadFile(path, "xl/_rels/workbook.xml.rels")
-	relMap := map[string]string{}
-	if relData != nil {
-		var rels struct {
-			Rel []struct {
-				ID     string `xml:"Id,attr"`
-				Target string `xml:"Target,attr"`
-			} `xml:"Relationship"`
-		}
-		if xml.Unmarshal(relData, &rels) == nil {
-			for _, r := range rels.Rel {
-				relMap[r.ID] = r.Target
-			}
-		}
-	}
-
-	pick := wb.Sheets[0] // 預設第一個
-	if strings.TrimSpace(sheetName) != "" {
-		for _, s := range wb.Sheets {
-			if strings.TrimSpace(s.Name) == strings.TrimSpace(sheetName) {
-				pick = s
-				break
-			}
-		}
-	}
-	target := relMap[pick.RID]
-	if target == "" {
-		return "xl/worksheets/sheet1.xml", nil
-	}
-	if !strings.HasPrefix(target, "xl/") {
-		target = "xl/" + strings.TrimPrefix(target, "/")
-	}
-	return target, nil
-}
-
-// readSharedStrings 讀取 xl/sharedStrings.xml，回傳字串表（支援 rich text runs）。
-func readSharedStrings(path string) ([]string, error) {
-	data, err := zipReadFile(path, "xl/sharedStrings.xml")
-	if err != nil {
-		return nil, err
-	}
-	if data == nil {
-		return nil, nil // 沒有共用字串表（全數字）也可
-	}
-	var sst struct {
-		SI []struct {
-			T string `xml:"t"`
-			R []struct {
-				T string `xml:"t"`
-			} `xml:"r"`
-		} `xml:"si"`
-	}
-	if err := xml.Unmarshal(data, &sst); err != nil {
-		return nil, fmt.Errorf("dianliao_bom: 解析 sharedStrings: %w", err)
-	}
-	out := make([]string, 0, len(sst.SI))
-	for _, si := range sst.SI {
-		if si.T != "" || len(si.R) == 0 {
-			out = append(out, si.T)
-			continue
-		}
-		var b strings.Builder
-		for _, r := range si.R {
-			b.WriteString(r.T)
-		}
-		out = append(out, b.String())
-	}
-	return out, nil
 }

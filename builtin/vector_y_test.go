@@ -27,8 +27,10 @@ func TestVectorValidate(t *testing.T) {
 	}{
 		{"sparse ok", Vector{Sparse: map[string]float64{"a": 1}, Meta: VectorMetadata{Type: "sparse"}}, false},
 		{"dense ok", Vector{Dense: []float64{0.1, 0.2}, Meta: VectorMetadata{Type: "dense"}}, false},
+		{"quantized dense ok", Vector{DenseQ: &QuantizedDense{Values: []int8{127, -127}, Scale: 0.01}, Meta: VectorMetadata{Type: "dense", Dimension: 2}}, false},
 		{"sparse but Sparse nil", Vector{Meta: VectorMetadata{Type: "sparse"}}, true},
 		{"sparse and Dense both set", Vector{Sparse: map[string]float64{"a": 1}, Dense: []float64{0.1}, Meta: VectorMetadata{Type: "sparse"}}, true},
+		{"dense and DenseQ both set", Vector{Dense: []float64{0.1}, DenseQ: &QuantizedDense{Values: []int8{10}, Scale: 0.01}, Meta: VectorMetadata{Type: "dense"}}, true},
 		{"dense length != declared dim", Vector{Dense: []float64{0.1, 0.2}, Meta: VectorMetadata{Type: "dense", Dimension: 5}}, true},
 		{"unknown type", Vector{Meta: VectorMetadata{Type: "weird"}}, true},
 	}
@@ -69,6 +71,22 @@ func TestVectorCosineDenseCompatible(t *testing.T) {
 	}
 	if score < 0.99 {
 		t.Errorf("identical dense should cosine ~1, got %v", score)
+	}
+}
+
+func TestVectorCosineQuantizedDenseCompatible(t *testing.T) {
+	meta := VectorMetadata{Type: "dense", ModelID: "test", Dimension: 3}
+	query := Vector{Dense: []float64{1, 0, -1}, Meta: meta}
+	stored := QuantizeDenseForStorage(Vector{Dense: []float64{1, 0, -1}, Meta: meta})
+	if stored.Dense != nil || stored.DenseQ == nil {
+		t.Fatalf("expected dense_q storage, got %+v", stored)
+	}
+	score, err := query.Cosine(stored)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if score < 0.999 {
+		t.Errorf("quantized dense should cosine ~1, got %v", score)
 	}
 }
 
@@ -166,6 +184,38 @@ func TestVectorUnmarshalDenseRoundTrip(t *testing.T) {
 	}
 }
 
+func TestVectorQuantizedDenseJSONRoundTrip(t *testing.T) {
+	orig := QuantizeDenseForStorage(Vector{
+		Dense: []float64{0.25, -0.5, 1},
+		Meta:  VectorMetadata{Type: "dense", ModelID: "ollama-nomic", Dimension: 3},
+	})
+	data, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	raw := string(data)
+	if strings.Contains(raw, `"dense":`) {
+		t.Fatalf("quantized storage should omit dense floats: %s", raw)
+	}
+	if !strings.Contains(raw, `"dense_q":`) {
+		t.Fatalf("quantized storage missing dense_q: %s", raw)
+	}
+	var back Vector
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if err := back.Validate(); err != nil {
+		t.Fatalf("validate back: %v", err)
+	}
+	score, err := orig.Cosine(back)
+	if err != nil {
+		t.Fatalf("cosine: %v", err)
+	}
+	if score < 0.999 {
+		t.Fatalf("round-trip cosine = %v", score)
+	}
+}
+
 // ─────────────────────────────────────
 // chunkParagraphHybrid
 // ─────────────────────────────────────
@@ -248,6 +298,40 @@ func TestIndexNeedsRebuild(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIndexNeedsRebuildDenseRequiresQuantizedStorage(t *testing.T) {
+	vec := testDenseVectorizer{meta: VectorMetadata{Type: "dense", ModelID: "dense-test", Dimension: 3}}
+	const hash = "dense-hash"
+	unquantized := DocumentVectorIndex{
+		VectorMeta:     vec.Meta(),
+		ContentHash:    hash,
+		ChunkerVersion: ChunkerVersion,
+		Chunks: []DocumentChunk{{
+			Vec: Vector{Dense: []float64{1, 0, -1}, Meta: vec.Meta()},
+		}},
+	}
+	if !IndexNeedsRebuild(unquantized, vec, hash) {
+		t.Fatalf("dense index with float JSON storage should rebuild into dense_q")
+	}
+
+	quantized := unquantized
+	quantized.Chunks[0].Vec = QuantizeDenseForStorage(quantized.Chunks[0].Vec)
+	if IndexNeedsRebuild(quantized, vec, hash) {
+		t.Fatalf("dense_q index should not rebuild when metadata/hash match")
+	}
+}
+
+type testDenseVectorizer struct {
+	meta VectorMetadata
+}
+
+func (v testDenseVectorizer) Vectorize(string) (Vector, error) {
+	return Vector{Dense: []float64{1, 0, -1}, Meta: v.meta}, nil
+}
+
+func (v testDenseVectorizer) Meta() VectorMetadata {
+	return v.meta
 }
 
 // ─────────────────────────────────────

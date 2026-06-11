@@ -88,11 +88,12 @@ const (
 // 這是 Console 用來識別、路由、審查 skill 的唯一來源。
 // SchemaVersion 固定為 "skill_manifest.v1"。
 type SkillManifest struct {
-	SchemaVersion  string           `json:"schema_version"`  // 固定 "skill_manifest.v1"
-	SkillID        string           `json:"skill_id"`        // 唯一識別碼，例如 "weather.lookup"
-	DisplayName    string           `json:"display_name"`    // 使用者介面顯示名稱
-	Version        string           `json:"version"`         // 語意版本，例如 "1.0.0"
-	DescriptionDoc string           `json:"description_doc"` // 人類可讀說明文件的檔名，通常為 "README.md"
+	SchemaVersion  string           `json:"schema_version"`        // 固定 "skill_manifest.v1"
+	SkillID        string           `json:"skill_id"`              // 唯一識別碼，例如 "weather.lookup"
+	DisplayName    string           `json:"display_name"`          // 使用者介面顯示名稱
+	Description    string           `json:"description,omitempty"` // 簡述（如從外部 SKILL.md frontmatter 帶入）；optional，空值不改變舊 manifest hash
+	Version        string           `json:"version"`               // 語意版本，例如 "1.0.0"
+	DescriptionDoc string           `json:"description_doc"`       // 人類可讀說明文件的檔名，通常為 "README.md"
 	Source         SkillSource      `json:"source"`
 	Tags           SkillTags        `json:"tags"`
 	Permissions    SkillPermissions `json:"permissions"`

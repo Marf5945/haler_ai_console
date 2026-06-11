@@ -46,6 +46,9 @@ type ScanPreview struct {
 	Resources   []ScannedResource // 掃描到的所有資源
 	HasManifest bool              // true 表示已有 skill_manifest.json，是 Console-native skill
 	ScannedAt   time.Time         // 掃描時間戳記
+	Frontmatter *SkillFrontmatter // 若來源含 SKILL.md frontmatter，解析後的中繼資料（否則為 nil）
+	Description string            // 內嵌 manifest 的描述（拖回安裝時保留）
+	Embedded    *SkillManifest    // 來源資料夾已含的 skill_manifest.json；拖回安裝時用它保留原始身分
 }
 
 // nonAlnum 是用來 sanitize skill ID 的正規表示式：
@@ -130,6 +133,20 @@ func ScanSkillFolder(sourcePath string) (*ScanPreview, error) {
 			case baseLower == "skill.md" || baseLower == "readme.md":
 				// 這兩個特定檔名優先歸類為 CLI 可讀的摘要文件
 				res.Classification = ClassCLIMd
+				// 外部 CLI skill 的 SKILL.md：解析開頭 frontmatter，把宣告的 name/description 帶進預覽。
+				// 解析失敗就維持原行為（純當作 cli_md 文件）。
+				if baseLower == "skill.md" {
+					if data, rerr := os.ReadFile(fullPath); rerr == nil {
+						if parsed, ok := ParseSkillFrontmatter(data); ok {
+							fmCopy := parsed
+							preview.Frontmatter = &fmCopy
+							if name := strings.TrimSpace(parsed.Name); name != "" {
+								preview.DisplayName = name
+								preview.SkillID = sanitizeSkillID(name)
+							}
+						}
+					}
+				}
 			case ext == ".md":
 				// 其他 Markdown 也歸入 cli_md
 				res.Classification = ClassCLIMd
@@ -144,6 +161,23 @@ func ScanSkillFolder(sourcePath string) (*ScanPreview, error) {
 		}
 
 		preview.Resources = append(preview.Resources, res)
+	}
+
+	// 來源資料夾本身就帶 skill_manifest.json（典型情境：把先前匯出的 skill 拖回安裝）：
+	// 以內嵌 manifest 的 skill_id / display_name / description 為準，避免改用資料夾名稱，
+	// 否則拖回來就會變成名字壞掉、標籤遺失的孤兒。SKILL.md frontmatter（外部 CLI skill）
+	// 仍維持既有優先序，不被覆蓋。
+	if preview.HasManifest && preview.Frontmatter == nil {
+		if m, err := LoadManifest(filepath.Join(sourcePath, "skill_manifest.json")); err == nil && m != nil {
+			if id := strings.TrimSpace(m.SkillID); id != "" {
+				preview.SkillID = id
+			}
+			if name := strings.TrimSpace(m.DisplayName); name != "" {
+				preview.DisplayName = name
+			}
+			preview.Description = strings.TrimSpace(m.Description)
+			preview.Embedded = m
+		}
 	}
 
 	return preview, nil

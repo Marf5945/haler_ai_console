@@ -73,6 +73,8 @@ export function BuildSkillDraft(arg1:string,arg2:string,arg3:Array<string>,arg4:
 
 export function CancelActiveTaskProgress(arg1:string):Promise<dag.DAGRun>;
 
+export function CancelChatMessage(arg1:string):Promise<void>;
+
 export function CancelPreview():Promise<any>;
 
 export function CancelScheduledJob(arg1:string):Promise<void>;
@@ -88,6 +90,8 @@ export function CleanupEphemeralProfiles():Promise<void>;
 export function ClearInspectorHistory():Promise<void>;
 
 export function ClearMainTalk():Promise<void>;
+
+export function ClearSessionImages(arg1:string):Promise<void>;
 
 export function ClearSkillContext(arg1:string,arg2:string):Promise<void>;
 
@@ -130,6 +134,8 @@ export function CreateSubagent(arg1:string):Promise<main.CreatedSubagent>;
 export function DeactivateRemoteBridgeChannel(arg1:string):Promise<void>;
 
 export function DeleteAvatarCredential(arg1:string):Promise<void>;
+
+export function DeleteLearningRun(arg1:string):Promise<void>;
 
 export function DeleteScheduledJob(arg1:string):Promise<void>;
 
@@ -187,6 +193,8 @@ export function ExportMediaWithSidecar(arg1:string,arg2:string):Promise<void>;
 
 export function ExportPersonaHandler(arg1:string,arg2:string,arg3:string):Promise<any>;
 
+export function ExportProjectBackupHandler(arg1:string,arg2:string,arg3:string,arg4:boolean,arg5:boolean):Promise<Record<string, any>>;
+
 export function ExportSubHandler(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<subexport.ExportResult>;
 
 export function ExportVisualLearning(arg1:string):Promise<any>;
@@ -195,9 +203,13 @@ export function FetchURLContent(arg1:string,arg2:string,arg3:string,arg4:string,
 
 export function FinalizeNativeGoProgramAuthoringExport(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
+export function FinalizeNativeLearningRunExport(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
 export function FinalizeNativePersonaExport(arg1:string,arg2:string,arg3:string,arg4:string):Promise<any>;
 
 export function FinalizeNativeReferenceFileExport(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function FinalizeNativeSkillExport(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function FinalizeNativeSubExport(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
@@ -305,6 +317,8 @@ export function GetSubExportFallbackDirectory():Promise<string>;
 
 export function GetSummaryModelSettings():Promise<settings.SummaryModelSettings>;
 
+export function GetTTSPackStatus():Promise<voice.TTSPackStatus>;
+
 export function GetTabOrder():Promise<taborder.TabOrder>;
 
 export function GetTalkMessagesForAgent(arg1:string):Promise<Array<string>>;
@@ -339,13 +353,23 @@ export function HasBlockingVLReview():Promise<boolean>;
 
 export function HasOpenStopRecoveryCard():Promise<boolean>;
 
+export function ImportGoProgramExport(arg1:string):Promise<main.GoProgramAuthoringCatalogItem>;
+
+export function ImportLearningRunExport(arg1:string):Promise<main.LearningRunExportPreview>;
+
 export function ImportMediaVerify(arg1:string):Promise<any>;
+
+export function ImportProjectBackupHandler(arg1:string,arg2:string,arg3:string):Promise<Record<string, any>>;
 
 export function ImportReferenceFile(arg1:string):Promise<main.ReferenceFile>;
 
 export function ImportSubHandler(arg1:string):Promise<main.ImportSubResult>;
 
 export function ImportVideoFile(arg1:string):Promise<main.ReferenceFile>;
+
+export function InspectProjectBackupHandler(arg1:string,arg2:string):Promise<Record<string, any>>;
+
+export function InstallTTSPack():Promise<voice.TTSPackStatus>;
 
 export function InstallVoiceBaseModel():Promise<voice.State>;
 
@@ -358,6 +382,8 @@ export function IsDocumentFormat(arg1:string):Promise<boolean>;
 export function IsLearningModeActive():Promise<boolean>;
 
 export function IsLivePreviewActive():Promise<boolean>;
+
+export function IsProjectBackupEncryptedHandler(arg1:string):Promise<Record<string, any>>;
 
 export function IsReadOnlyMode():Promise<boolean>;
 
@@ -409,6 +435,8 @@ export function ListPurgeManifests():Promise<any>;
 
 export function ListReferenceFiles():Promise<Array<main.ReferenceFile>>;
 
+export function ListReferenceImages():Promise<Array<main.ReferenceFile>>;
+
 export function ListRemoteBridgeChannels():Promise<any>;
 
 export function ListRemoteBridgeInboundAdapters():Promise<any>;
@@ -437,9 +465,13 @@ export function MarkToolUnavailable(arg1:string,arg2:string):Promise<void>;
 
 export function NativeDragExportGoProgramAuthoring(arg1:string):Promise<main.NativeGoProgramDragExportResult>;
 
+export function NativeDragExportLearningRun(arg1:string):Promise<main.NativeLearningRunDragExportResult>;
+
 export function NativeDragExportPersonaHandler(arg1:string,arg2:string):Promise<main.NativePersonaDragExportResult>;
 
 export function NativeDragExportReferenceFile(arg1:string):Promise<main.NativeReferenceFileDragResult>;
+
+export function NativeDragExportSkill(arg1:string):Promise<main.NativeSkillDragExportResult>;
 
 export function NativeDragExportSubHandler(arg1:string,arg2:string,arg3:string,arg4:string):Promise<main.NativeSubDragExportResult>;
 
@@ -457,11 +489,17 @@ export function PollTelegramChatID(arg1:string):Promise<any>;
 
 export function PrepareAvatarGenerateRequest(arg1:string,arg2:string):Promise<persona_avatar.GenerateAvatarRequest>;
 
+export function PrepareCloudTTSText(arg1:string):Promise<voice.CloudTTSEgressPreview>;
+
 export function PreparePackageInstall(arg1:string,arg2:string):Promise<any>;
 
 export function PreparePackageInstallPayload(arg1:string,arg2:string,arg3:string):Promise<any>;
 
 export function PreviewExternalLink(arg1:string):Promise<any>;
+
+export function PreviewGoProgramExport(arg1:string):Promise<main.GoProgramExportPreview>;
+
+export function PreviewLearningRunExport(arg1:string):Promise<main.LearningRunExportPreview>;
 
 export function PreviewSubPackage(arg1:string):Promise<main.SubPackagePreview>;
 
@@ -506,6 +544,8 @@ export function RejectPackageInstall(arg1:string,arg2:string):Promise<void>;
 export function RemoveAllowlistEntry(arg1:string):Promise<void>;
 
 export function RemoveRemoteBridgeChannel(arg1:string):Promise<void>;
+
+export function RemoveTTSPack():Promise<voice.TTSPackStatus>;
 
 export function RemoveTabOrder(arg1:string):Promise<void>;
 
@@ -597,9 +637,15 @@ export function SearchLearningOperations(arg1:string,arg2:number):Promise<any>;
 
 export function SearchWeb(arg1:string,arg2:number):Promise<any>;
 
+export function SearchWebConfirmed(arg1:string,arg2:number):Promise<any>;
+
 export function SelectFloatingCandidate(arg1:string):Promise<main.ReadinessGateState>;
 
 export function SelectPersonaExportDirectory():Promise<string>;
+
+export function SelectProjectBackupExportDirectory():Promise<string>;
+
+export function SelectProjectBackupFile():Promise<string>;
 
 export function SelectSubExportDirectory():Promise<string>;
 
@@ -635,6 +681,8 @@ export function SetToolPreference(arg1:string,arg2:string,arg3:string,arg4:numbe
 
 export function SetTrustDomAndClick(arg1:boolean):Promise<void>;
 
+export function StageSessionImages(arg1:string,arg2:Array<string>):Promise<number>;
+
 export function StartDraftSandbox(arg1:string):Promise<string>;
 
 export function StartGoProgramAuthoring(arg1:string,arg2:string,arg3:string):Promise<main.GoProgramAuthoringResult>;
@@ -660,6 +708,8 @@ export function StopSidecar():Promise<void>;
 export function StopURLVisualLearning():Promise<any>;
 
 export function StoreAvatarCredential(arg1:string,arg2:string):Promise<void>;
+
+export function SubmitTaskLoopInput(arg1:string,arg2:string,arg3:string):Promise<dag.DAGRun>;
 
 export function SwitchRemoteBridgeMode(arg1:string,arg2:string):Promise<any>;
 

@@ -203,6 +203,8 @@ func RecordedClickWindowsAnchor(clickX, clickY int, rect *EventRect, viewport *E
 		Platform:        "windows",
 		OK:              true,
 		Click:           click,
+		ImageWidth:      width,
+		ImageHeight:     height,
 		OCRStatus:       "not_used",
 		OCRNote:         "OCR is optional and not used for recorded click anchors.",
 		DetectorBackend: "recorded",
@@ -249,6 +251,91 @@ func NewLearningService(projectRoot string) *LearningService {
 	return &LearningService{
 		learnDir: filepath.Join(projectRoot, "data", "visual_learning", "learning_runs"),
 	}
+}
+
+// LearnDir returns the root directory where learning runs (recordings) are stored.
+func (s *LearningService) LearnDir() string {
+	return s.learnDir
+}
+
+// RunDir returns the directory for a specific recording run id.
+func (s *LearningService) RunDir(runID string) string {
+	return filepath.Join(s.learnDir, runID)
+}
+
+// GetRun loads a single recording's metadata (run.json) by id.
+func (s *LearningService) GetRun(runID string) (*LearningRun, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	runID = strings.TrimSpace(runID)
+	if runID == "" || filepath.Base(runID) != runID || strings.Contains(runID, "..") {
+		return nil, fmt.Errorf("learning run: invalid run id %q", runID)
+	}
+	data, err := os.ReadFile(filepath.Join(s.learnDir, runID, "run.json"))
+	if err != nil {
+		return nil, fmt.Errorf("learning run: load run: %w", err)
+	}
+	var run LearningRun
+	if err := json.Unmarshal(data, &run); err != nil {
+		return nil, fmt.Errorf("learning run: parse run: %w", err)
+	}
+	return &run, nil
+}
+
+// DeleteRun removes a recording's directory. Refuses to delete the active run.
+func (s *LearningService) DeleteRun(runID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	runID = strings.TrimSpace(runID)
+	if runID == "" || filepath.Base(runID) != runID || strings.Contains(runID, "..") {
+		return fmt.Errorf("learning run: invalid run id %q", runID)
+	}
+	if s.activeRun != nil && s.activeRun.ID == runID {
+		return fmt.Errorf("learning run: 不能刪除正在錄製中的紀錄")
+	}
+	dir := filepath.Join(s.learnDir, runID)
+	if _, err := os.Stat(filepath.Join(dir, "run.json")); err != nil {
+		return fmt.Errorf("learning run: 找不到紀錄 %q: %w", runID, err)
+	}
+	return os.RemoveAll(dir)
+}
+
+// ImportRunDir installs a recording folder (run.json + trace) copied to learnDir/<runID>,
+// and rewrites trace_path to point at the new local location. Returns the installed run id.
+func (s *LearningService) ImportRunDir(srcRunDir string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, err := os.ReadFile(filepath.Join(srcRunDir, "run.json"))
+	if err != nil {
+		return "", fmt.Errorf("learning run: import 缺少 run.json: %w", err)
+	}
+	var run LearningRun
+	if err := json.Unmarshal(data, &run); err != nil {
+		return "", fmt.Errorf("learning run: import 解析 run.json 失敗: %w", err)
+	}
+	runID := strings.TrimSpace(run.ID)
+	if runID == "" || filepath.Base(runID) != runID || strings.Contains(runID, "..") {
+		return "", fmt.Errorf("learning run: import run id 非法 %q", runID)
+	}
+	destDir := filepath.Join(s.learnDir, runID)
+	if err := os.MkdirAll(destDir, 0o700); err != nil {
+		return "", err
+	}
+	// 複製 trace（若有）。
+	srcTrace := filepath.Join(srcRunDir, "encrypted_learning_trace.jsonl")
+	destTrace := filepath.Join(destDir, "encrypted_learning_trace.jsonl")
+	if traceBytes, terr := os.ReadFile(srcTrace); terr == nil {
+		if werr := os.WriteFile(destTrace, traceBytes, 0o600); werr != nil {
+			return "", werr
+		}
+	}
+	// trace_path 重寫成本機新位置，跨安裝/機器才指得到。
+	run.TracePath = destTrace
+	out, _ := json.MarshalIndent(&run, "", "  ")
+	if err := os.WriteFile(filepath.Join(destDir, "run.json"), out, 0o600); err != nil {
+		return "", err
+	}
+	return runID, nil
 }
 
 // IsRecording returns whether Learning Mode is currently active.
@@ -673,9 +760,38 @@ func (s *LearningService) replayStepsFromTraceLocked(tracePath string) ([]Learni
 			WindowRect:      event.WindowRect,
 		}
 		step.Summary = replayStepSummary(step)
+		if prev := len(steps) - 1; prev >= 0 && shouldMergeDoubleClickStep(steps[prev], step) {
+			step.Index = steps[prev].Index
+			steps[prev] = step
+			continue
+		}
 		steps = append(steps, step)
 	}
 	return steps, nil
+}
+
+// shouldMergeDoubleClickStep reports whether a double_click event is the second
+// half of the immediately preceding single click (same window, same spot), in
+// which case the single click must be replaced instead of replayed twice.
+func shouldMergeDoubleClickStep(prev, next LearningReplayStep) bool {
+	if next.Action != string(MouseEventDoubleClick) || prev.Action != string(MouseEventClick) {
+		return false
+	}
+	if prev.Source != next.Source || prev.Button != next.Button {
+		return false
+	}
+	if prev.WindowHandle != next.WindowHandle {
+		return false
+	}
+	dx := prev.X - next.X
+	dy := prev.Y - next.Y
+	if dx < 0 {
+		dx = -dx
+	}
+	if dy < 0 {
+		dy = -dy
+	}
+	return dx <= 8 && dy <= 8
 }
 
 func learningRunTag(runID string) string {

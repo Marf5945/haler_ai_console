@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -112,6 +113,44 @@ func (svc *ArchiveService) ConfirmArchive(preview *ScanPreview) (*SkillManifest,
 		Routing: SkillRouting{
 			MinimumAutoScore: 0.85, // 預設自動選取門檻
 		},
+	}
+
+	// 來源是外部 CLI 的 SKILL.md（含 frontmatter）時：把 name/description 帶進 manifest，
+	// 標記來源為 external_cli_skill_archive，並讓 skill 能以其宣告名稱被路由命中。
+	// 仍維持 execution=none / 需確認，frontmatter 只當「填值」用，不放寬信任。
+	if preview.Frontmatter != nil {
+		fm := preview.Frontmatter
+		manifest.Source.SourceType = SourceExternalCLIArchive
+		if d := strings.TrimSpace(fm.Description); d != "" {
+			manifest.Description = d
+		}
+		if name := strings.TrimSpace(fm.Name); name != "" {
+			manifest.Routing.TargetAliases = appendUniqueFM(manifest.Routing.TargetAliases, name)
+		}
+	}
+
+	// 拖回安裝既有的 Console-native skill（來源含 skill_manifest.json）時，
+	// 保留原始身分與路由資訊：display_name / description / version / tags / permissions /
+	// routing / lifecycle / expected_chain 都沿用內嵌 manifest，只有 Resources 會在下方
+	// 依「這次實際複製進來的資源」重建（內嵌的舊 resource id 已失效，不能沿用）。
+	if em := preview.Embedded; em != nil {
+		if name := strings.TrimSpace(em.DisplayName); name != "" {
+			manifest.DisplayName = name
+		}
+		if d := strings.TrimSpace(em.Description); d != "" {
+			manifest.Description = d
+		}
+		if v := strings.TrimSpace(em.Version); v != "" {
+			manifest.Version = v
+		}
+		manifest.Tags = em.Tags
+		manifest.Permissions = em.Permissions
+		manifest.Routing = em.Routing
+		manifest.Lifecycle = em.Lifecycle
+		manifest.ExpectedChain = em.ExpectedChain
+		if st := strings.TrimSpace(string(em.Source.SourceType)); st != "" {
+			manifest.Source.SourceType = em.Source.SourceType
+		}
 	}
 
 	var exampleIDs, programIDs, cliMdIDs []string

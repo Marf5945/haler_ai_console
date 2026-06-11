@@ -45,6 +45,7 @@ type CLIResponse struct {
 	Action       string `json:"action,omitempty"`        // 解析後的 action tag，供 Controller/UI 做內建副作用
 	Target       string `json:"target,omitempty"`        // 解析後的內容/目標，不直接等於可執行權限
 	Next         string `json:"next,omitempty"`          // 解析後的下一步：待命 / 澄清 / 確認 / 完成
+	NeedsUser    bool   `json:"needs_user,omitempty"`    // 路由結果在等使用者（skill 待確認/提問）；chat_route 節點用來判斷是否暫停 DAG
 }
 
 // CLIAdapter 是所有 CLI 通訊層的統一介面。

@@ -290,12 +290,12 @@ func detectAudioPollution(filePath string) (*PollutionReport, error) {
 	}, nil
 }
 
-func detectAudioHighFreq(samples []float64) float64 {
+func detectAudioHighFreq(samples []int16) float64 {
 	var totalE, diffE float64
 	for i, s := range samples {
-		totalE += s * s
+		totalE += sampleEnergy(s)
 		if i+1 < len(samples) {
-			d := s - samples[i+1]
+			d := float64(int32(s)-int32(samples[i+1])) / 32768.0
 			diffE += d * d
 		}
 	}
@@ -305,11 +305,11 @@ func detectAudioHighFreq(samples []float64) float64 {
 	return math.Min((diffE/totalE)/0.5, 1.0)
 }
 
-func detectAudioHistogramAnomaly(samples []float64) float64 {
+func detectAudioHistogramAnomaly(samples []int16) float64 {
 	// 量化到 100 個 bin
 	var hist [100]int
 	for _, s := range samples {
-		bin := int((s + 1.0) / 2.0 * 99)
+		bin := int((int(s) + 32768) * 100 / 65536)
 		if bin < 0 {
 			bin = 0
 		}
@@ -337,11 +337,10 @@ func detectAudioHistogramAnomaly(samples []float64) float64 {
 	return math.Min(float64(anomaly)/5.0, 1.0)
 }
 
-func detectAudioLSB(samples []float64) float64 {
+func detectAudioLSB(samples []int16) float64 {
 	ones := 0
 	for _, s := range samples {
-		quantized := int16(s * 32767)
-		if quantized&1 == 1 {
+		if s&1 == 1 {
 			ones++
 		}
 	}

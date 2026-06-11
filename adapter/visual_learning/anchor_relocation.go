@@ -257,9 +257,11 @@ func cropMatchToAnchorBox(anchor *WindowsClickAnchorResult, matchedCrop PixelBBo
 }
 
 type visualSignature struct {
-	hist [64]float64
-	grid [192]float64
+	hist [64]uint16
+	grid [192]uint16
 }
+
+const visualQuantMax = 65535.0
 
 func recordedCropSignature(anchor *WindowsClickAnchorResult) (visualSignature, bool) {
 	if anchor == nil || strings.TrimSpace(anchor.CropPNGBase64) == "" {
@@ -283,10 +285,10 @@ func imageSignature(img image.Image) visualSignature {
 	}
 }
 
-func imageHistogram(img image.Image) [64]float64 {
-	var hist [64]float64
+func imageHistogram(img image.Image) [64]uint16 {
+	var counts [64]float64
 	if img == nil {
-		return hist
+		return [64]uint16{}
 	}
 	bounds := img.Bounds()
 	total := 0.0
@@ -294,31 +296,29 @@ func imageHistogram(img image.Image) [64]float64 {
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
 			r, g, b, _ := img.At(x, y).RGBA()
 			idx := colorBin(uint8(r>>8), uint8(g>>8), uint8(b>>8))
-			hist[idx]++
+			counts[idx]++
 			total++
 		}
 	}
-	normalizeHistogram(&hist, total)
-	return hist
+	return quantizeHistogram(counts, total)
 }
 
-func rgbaHistogram(imageData []byte, width, height int, box PixelBBox) [64]float64 {
-	var hist [64]float64
+func rgbaHistogram(imageData []byte, width, height int, box PixelBBox) [64]uint16 {
+	var counts [64]float64
 	box = clampBBox(box, width, height)
 	if width <= 0 || height <= 0 || box.W <= 0 || box.H <= 0 || len(imageData) < width*height*4 {
-		return hist
+		return [64]uint16{}
 	}
 	total := 0.0
 	for y := box.Y; y < box.Y+box.H; y++ {
 		for x := box.X; x < box.X+box.W; x++ {
 			offset := (y*width + x) * 4
 			idx := colorBin(imageData[offset], imageData[offset+1], imageData[offset+2])
-			hist[idx]++
+			counts[idx]++
 			total++
 		}
 	}
-	normalizeHistogram(&hist, total)
-	return hist
+	return quantizeHistogram(counts, total)
 }
 
 func rgbaSignature(imageData []byte, width, height int, box PixelBBox) visualSignature {
@@ -328,8 +328,8 @@ func rgbaSignature(imageData []byte, width, height int, box PixelBBox) visualSig
 	}
 }
 
-func imageColorGrid(img image.Image) [192]float64 {
-	var grid [192]float64
+func imageColorGrid(img image.Image) [192]uint16 {
+	var grid [192]uint16
 	if img == nil {
 		return grid
 	}
@@ -345,16 +345,16 @@ func imageColorGrid(img image.Image) [192]float64 {
 			x := bounds.Min.X + clampInt((gx*2+1)*w/16, 0, w-1)
 			r, g, b, _ := img.At(x, y).RGBA()
 			offset := (gy*8 + gx) * 3
-			grid[offset] = float64(uint8(r>>8)) / 255.0
-			grid[offset+1] = float64(uint8(g>>8)) / 255.0
-			grid[offset+2] = float64(uint8(b>>8)) / 255.0
+			grid[offset] = quantizeUnit(float64(uint8(r>>8)) / 255.0)
+			grid[offset+1] = quantizeUnit(float64(uint8(g>>8)) / 255.0)
+			grid[offset+2] = quantizeUnit(float64(uint8(b>>8)) / 255.0)
 		}
 	}
 	return grid
 }
 
-func rgbaColorGrid(imageData []byte, width, height int, box PixelBBox) [192]float64 {
-	var grid [192]float64
+func rgbaColorGrid(imageData []byte, width, height int, box PixelBBox) [192]uint16 {
+	var grid [192]uint16
 	box = clampBBox(box, width, height)
 	if width <= 0 || height <= 0 || box.W <= 0 || box.H <= 0 || len(imageData) < width*height*4 {
 		return grid
@@ -365,9 +365,9 @@ func rgbaColorGrid(imageData []byte, width, height int, box PixelBBox) [192]floa
 			x := box.X + clampInt((gx*2+1)*box.W/16, 0, box.W-1)
 			src := (y*width + x) * 4
 			offset := (gy*8 + gx) * 3
-			grid[offset] = float64(imageData[src]) / 255.0
-			grid[offset+1] = float64(imageData[src+1]) / 255.0
-			grid[offset+2] = float64(imageData[src+2]) / 255.0
+			grid[offset] = quantizeUnit(float64(imageData[src]) / 255.0)
+			grid[offset+1] = quantizeUnit(float64(imageData[src+1]) / 255.0)
+			grid[offset+2] = quantizeUnit(float64(imageData[src+2]) / 255.0)
 		}
 	}
 	return grid
@@ -377,22 +377,24 @@ func colorBin(r, g, b uint8) int {
 	return int(r/64)*16 + int(g/64)*4 + int(b/64)
 }
 
-func normalizeHistogram(hist *[64]float64, total float64) {
+func quantizeHistogram(counts [64]float64, total float64) [64]uint16 {
+	var hist [64]uint16
 	if total <= 0 {
-		return
+		return hist
 	}
-	for i := range hist {
-		hist[i] /= total
+	for i, count := range counts {
+		hist[i] = quantizeUnit(count / total)
 	}
+	return hist
 }
 
-func histogramSimilarity(a, b [64]float64) float64 {
+func histogramSimilarity(a, b [64]uint16) float64 {
 	score := 0.0
 	for i := range a {
 		if a[i] < b[i] {
-			score += a[i]
+			score += float64(a[i]) / visualQuantMax
 		} else {
-			score += b[i]
+			score += float64(b[i]) / visualQuantMax
 		}
 	}
 	return clampFloat(score, 0, 1)
@@ -404,12 +406,26 @@ func visualSignatureSimilarity(a, b visualSignature) float64 {
 	return clampFloat(hist*0.35+grid*0.65, 0, 1)
 }
 
-func colorGridSimilarity(a, b [192]float64) float64 {
+func colorGridSimilarity(a, b [192]uint16) float64 {
 	diff := 0.0
 	for i := range a {
-		diff += math.Abs(a[i] - b[i])
+		d := int(a[i]) - int(b[i])
+		if d < 0 {
+			d = -d
+		}
+		diff += float64(d) / visualQuantMax
 	}
 	return clampFloat(1.0-diff/float64(len(a)), 0, 1)
+}
+
+func quantizeUnit(v float64) uint16 {
+	if v <= 0 {
+		return 0
+	}
+	if v >= 1 {
+		return 65535
+	}
+	return uint16(math.Round(v * visualQuantMax))
 }
 
 func scaledCandidateCropBox(anchor *WindowsClickAnchorResult, recordedBox PixelBBox, candidate PixelBBox, width, height int) PixelBBox {

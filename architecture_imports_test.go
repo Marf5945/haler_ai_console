@@ -56,6 +56,7 @@ var packageLayer = map[string]Layer{
 
 	// Orchestration layer — coordination & scheduling
 	"orchestration/skill_step":         LayerOrchestration,
+	"orchestration/skill_flow":         LayerOrchestration,
 	"orchestration/cli_manager":        LayerOrchestration,
 	"orchestration/dag":                LayerOrchestration,
 	"orchestration/step_outline":       LayerOrchestration,
@@ -65,6 +66,7 @@ var packageLayer = map[string]Layer{
 
 	// Data layer — persistence & messaging infrastructure
 	"data/storage":           LayerData,
+	"data/backup":            LayerData,
 	"data/memory":            LayerData,
 	"data/conversation":      LayerData,
 	"data/subexport":         LayerData,
@@ -280,7 +282,7 @@ func TestDataLayerNoUpwardDeps(t *testing.T) {
 	pkgImports := scanLocalImports(t, projectRoot)
 
 	dataPackages := []string{
-		"data/storage", "data/memory", "data/conversation", "data/subexport", "data/project_lifecycle",
+		"data/storage", "data/backup", "data/memory", "data/conversation", "data/subexport", "data/project_lifecycle",
 	}
 
 	upwardPackages := []string{

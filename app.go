@@ -582,6 +582,11 @@ func (a *App) startup(ctx context.Context) {
 	// #7: Inject Wails context into event bus so it can emit to frontend.
 	a.eventBus.SetContext(ctx)
 	a.interruptStaleTaskRuns("App 重新啟動")
+	// 啟動時把舊 skill 還空著的 Description（用法欄位）補上，讓「怎麼用」有內容可讀。
+	a.backfillSkillDescriptions("startup")
+	// #44 修補：把已歸檔且可見的 skill 同步進工具列，讓重開 App 後仍看得到。
+	// 先 backfill 再同步，工具列同一次啟動就能吃到補完的 Description。
+	a.syncArchivedSkillsToToolbar()
 
 	if a.remoteBridgeInbound == nil {
 		a.remoteBridgeInbound = remote_bridge.NewInboundServer(a.remoteBridge, a.eventBus)
@@ -1066,6 +1071,63 @@ func (a *App) recentConversationSentences(n int) []conversation.Sentence {
 	return out
 }
 
+func compactRoutingHistory(recent []conversation.Sentence, current string, limit int) []conversation.Sentence {
+	if limit <= 0 || len(recent) == 0 {
+		return nil
+	}
+	currentKey := comparablePromptText(current)
+	out := make([]conversation.Sentence, 0, limit)
+	for i := len(recent) - 1; i >= 0; i-- {
+		sent := recent[i]
+		if comparablePromptText(sent.Content) == "" || comparablePromptText(sent.Content) == currentKey {
+			continue
+		}
+		if r := []rune(sent.Content); len(r) > 90 {
+			sent.Content = string(r[:90]) + "..."
+		}
+		out = append(out, sent)
+		if len(out) >= limit {
+			break
+		}
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out
+}
+
+func comparablePromptText(text string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+}
+
+func compactPromptField(text string) string {
+	text = strings.TrimSpace(text)
+	text = strings.ReplaceAll(text, "\r", " ")
+	text = strings.ReplaceAll(text, "\n", " ")
+	return strings.Join(strings.Fields(text), " ")
+}
+
+func formatCompactRoutingHistory(recent []conversation.Sentence, current string, limit int) string {
+	recent = compactRoutingHistory(recent, current, limit)
+	if len(recent) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(recent))
+	for _, sent := range recent {
+		role := "A"
+		switch strings.TrimSpace(sent.Role) {
+		case "user":
+			role = "U"
+		case "assistant":
+			role = "A"
+		case "tool-action":
+			role = "T"
+		}
+		parts = append(parts, role+":"+compactPromptField(sent.Content))
+	}
+	return "H=" + strings.Join(parts, " / ")
+}
+
 // recentHistoryMaxRunesPerTurn 是注入路由子呼叫的每句歷史長度上限（rune）。
 const recentHistoryMaxRunesPerTurn = 200
 
@@ -1222,6 +1284,50 @@ func (a *App) RouteVoiceCommand(text string) voice.CommandRoute {
 	return voice.RouteCommand(text, state.Settings.CommandMode)
 }
 
+func (a *App) GetTTSPackStatus() voice.TTSPackStatus {
+	return a.voiceService.TTSPackStatus()
+}
+
+func (a *App) InstallTTSPack() (voice.TTSPackStatus, error) {
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	downloadCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+	return a.voiceService.InstallTTSPack(downloadCtx)
+}
+
+func (a *App) RemoveTTSPack() (voice.TTSPackStatus, error) {
+	return a.voiceService.RemoveTTSPack()
+}
+
+func (a *App) PrepareCloudTTSText(text string) voice.CloudTTSEgressPreview {
+	return prepareCloudTTSEgressPreview(text)
+}
+
+func prepareCloudTTSEgressPreview(text string) voice.CloudTTSEgressPreview {
+	masked, records := memory.RedactBeforeWrite(text)
+	types := map[string]bool{}
+	for _, r := range records {
+		if r.Type != "" {
+			types[r.Type] = true
+		}
+	}
+	hitTypes := make([]string, 0, len(types))
+	for typ := range types {
+		hitTypes = append(hitTypes, typ)
+	}
+	sort.Strings(hitTypes)
+	return voice.CloudTTSEgressPreview{
+		Allowed:              len(records) == 0,
+		RequiresConfirmation: len(records) > 0,
+		MaskedText:           masked,
+		HitCount:             len(records),
+		HitTypes:             hitTypes,
+	}
+}
+
 func (a *App) SavePersona(persona settings.Persona) settings.State {
 	_ = a.settingsService.SavePersona(persona)
 	return a.GetSettingsState()
@@ -1233,11 +1339,122 @@ func (a *App) ReorderPersonas(orderIDs []string) settings.State {
 }
 
 func (a *App) ListTools() []tools.Tool {
+	a.syncArchivedSkillsToToolbar()
 	return a.toolsService.List()
 }
 
 func (a *App) ActivateTool(id string) tools.ActionResult {
 	return a.toolsService.Activate(id)
+}
+
+// ---------------------------------------------------------------------------
+// #44 修補：已安裝的 skill / MCP 註冊進工具列（toolsService）。
+// 先前 AddTool 從未被呼叫，導致歸檔成功的 skill 與確認安裝的 MCP 都不會
+// 出現在「工具」面板、也不會被列為可候選工具。以下集中補上註冊路徑。
+// ---------------------------------------------------------------------------
+
+// skillManifestToTool 把已歸檔 skill manifest 轉成工具列上的一個 Tool。
+func skillManifestToTool(m skill_step.SkillManifest) tools.Tool {
+	detail := strings.TrimSpace(m.Description)
+	if detail == "" {
+		detail = "已安裝 skill"
+	}
+	return tools.Tool{
+		ID:         "skill:" + m.SkillID,
+		Icon:       "\u2726", // ✦
+		Title:      firstNonEmpty(m.DisplayName, m.SkillID),
+		Detail:     detail,
+		Kind:       "skill",
+		Target:     m.SkillID,
+		Enabled:    true,
+		Available:  true,
+		ActionTags: append([]string(nil), m.Tags.ActionTag...),
+	}
+}
+
+// registerSkillTool 把單一 skill 登記到工具列；disabled 或不可見者不登記。
+// toolsService.AddTool 內含去重，重複呼叫安全。
+func (a *App) registerSkillTool(m *skill_step.SkillManifest) {
+	if a == nil || a.toolsService == nil || m == nil || m.SkillID == "" {
+		return
+	}
+	skill_step.EnsureLifecycle(m)
+	if lc := m.Lifecycle; lc != nil {
+		if lc.Status == skill_step.LifecycleDisabled || !lc.VisibleInToolbar {
+			return
+		}
+	}
+	a.toolsService.AddTool(skillManifestToTool(*m))
+}
+
+// syncArchivedSkillsToToolbar 啟動時把 data/skills 下所有可見 skill 同步進工具列，
+// 讓「曾經安裝過」的 skill 重開 App 後仍出現在 工具 > 自動流程。
+func (a *App) syncArchivedSkillsToToolbar() {
+	if a == nil || a.skillArchive == nil || a.toolsService == nil {
+		return
+	}
+	manifests, err := a.skillArchive.ListArchived()
+	if err != nil {
+		return
+	}
+	// 所有已歸檔 skill 都以 skill（✦）顯示在工具列；已長出 skill 的小程式則在
+	// ListGoProgramAuthoringCatalog 端被濾掉，確保同一能力只出現一組（統一為 skill）。
+	for i := range manifests {
+		a.registerSkillTool(&manifests[i])
+	}
+}
+
+// archivedSkillIDSet 回傳所有已歸檔 skill 的 skill_id 集合，供小程式清單去重用。
+func (a *App) archivedSkillIDSet() map[string]bool {
+	out := map[string]bool{}
+	if a == nil || a.skillArchive == nil {
+		return out
+	}
+	manifests, err := a.skillArchive.ListArchived()
+	if err != nil {
+		return out
+	}
+	for _, m := range manifests {
+		if m.SkillID != "" {
+			out[m.SkillID] = true
+		}
+	}
+	return out
+}
+
+// registerPackageTool 在套件確認安裝後，把 mcp / skill 類型登記到工具列。
+// adapter / persona 走各自既有流程，不在此登記。
+func (a *App) registerPackageTool(pi *package_import.PendingImport) {
+	if a == nil || a.toolsService == nil || pi == nil {
+		return
+	}
+	name := strings.TrimSpace(pi.Manifest.Name)
+	if name == "" {
+		return
+	}
+	kind := strings.TrimSpace(pi.Manifest.PackageType)
+	if pi.Manifest.AddsMCPServer {
+		kind = "mcp"
+	}
+	if kind != "mcp" && kind != "skill" {
+		return
+	}
+	icon := "\u2726" // ✦
+	detail := "已安裝 skill"
+	if kind == "mcp" {
+		icon = "\u2699" // ⚙
+		detail = "已安裝 MCP server"
+	}
+	a.toolsService.AddTool(tools.Tool{
+		ID:        kind + ":" + name,
+		Icon:      icon,
+		Title:     name,
+		Detail:    detail,
+		Kind:      kind,
+		Target:    name,
+		Enabled:   true,
+		Available: true,
+	})
 }
 
 type cliActionTagSetter interface {
@@ -1282,7 +1499,7 @@ func (a *App) collectActionTags() []string {
 		}
 	}
 	// Visual Learning operation replay is app-owned; LLMs may select it via action-chain.
-	add([]string{"操作", "程式"})
+	add([]string{"操作", "程式", "流程"})
 	sort.Strings(tags)
 	return tags
 }
@@ -1297,10 +1514,25 @@ func (a *App) maybeHandleLocalSearch(userText, sessionID, traceID string) (*skil
 	if resp, ok := a.maybeHandleWebSearch(userText, sessionID, traceID); ok {
 		return resp, true
 	}
+	// 「某個 skill 怎麼用」→ 直接讀該 skill 的用法欄位（Description/Tags/權限）回用法卡，
+	// 不交給 LLM 猜、也不受配額影響。
+	if resp, ok := a.maybeHandleSkillUsage(userText, sessionID, traceID); ok {
+		return resp, true
+	}
+	// 「列出你有的 skill / 你有哪些技能」是 skill scope 的列舉，直接回傳本機已安裝
+	// skill 清單；其餘（含 image/video/document 各 scope）一律走一般本機搜尋。
+	if isListSkillsRequest(userText) {
+		a.pushActionStatus("技能", "列出已安裝技能")
+		resp := skill_step.CLIResponse{Text: a.formatInstalledSkills()}
+		debugtrace.Record("go.list_skills.direct", traceID, map[string]interface{}{"text": resp.Text})
+		return &resp, true
+	}
 	req, ok := localsearch.ParseUserQuery(userText)
 	if !ok {
 		return nil, false
 	}
+	// 護欄：原句若含「用法/做法」這類問法詞，帶進去當輔助搜尋詞（不卡門檻、低加分）。
+	req.AuxTerms = localsearch.AuxTermsFromText(userText)
 	decision := toolRoutingDecision{Kind: toolRoutingDecisionAction, Action: "搜尋", Target: req.Query, Next: actionchain.StandbyNext}
 	if handled, resp := a.maybeAskForToolReadiness(sessionID, decision, userText, traceID); handled {
 		return &resp, true
@@ -1418,10 +1650,345 @@ func (a *App) localSearchRoots() []localsearch.Root {
 		{Path: filepath.Join(root, "documents"), Source: "document"},
 		{Path: filepath.Join(root, "data", "documents"), Source: "document"},
 		{Path: filepath.Join(root, "data", "references", "files"), Source: "document"},
+		{Path: filepath.Join(root, "data", "images"), Source: "image"},
+		{Path: filepath.Join(root, "data", "references", "images"), Source: "image"},
 		{Path: filepath.Join(root, "data", "videos"), Source: "video"}, // 影片獨立資料夾：agent 可發現
-		{Path: filepath.Join(root, "data", "skills"), Source: "skill"},
+		// 注意：data/skills 不再做原始檔案掃描——skill 改由 localSearchItems 以
+		// 「名稱＋功能摘要」的形式提供，避免搜尋結果回傳 hash／main.go 等內部檔。
 		{Path: filepath.Join(root, "debug"), Source: "trace"},
 	}
+}
+
+// skillSearchContent 把 skill manifest 整理成搜尋語料：第一行是「技能 名稱：摘要」，
+// 其後補上 skill_id 與動作／領域／用途標籤，方便以名稱或關鍵詞命中。摘要優先取
+// manifest.Description，沒有時用 action/domain 標籤合成，確保搜尋結果可讀。
+// skillSummaryLine 取出單行的 skill 功能摘要：優先用 manifest.Description，
+// 沒有時用 action／domain 標籤合成，兩者都缺則回空字串。
+func skillSummaryLine(m skill_step.SkillManifest) string {
+	if s := strings.TrimSpace(m.Description); s != "" {
+		return s
+	}
+	var parts []string
+	if len(m.Tags.ActionTag) > 0 {
+		parts = append(parts, strings.Join(m.Tags.ActionTag, "、"))
+	}
+	if len(m.Tags.DomainTag) > 0 {
+		parts = append(parts, strings.Join(m.Tags.DomainTag, "、"))
+	}
+	return strings.TrimSpace(strings.Join(parts, "；"))
+}
+
+// synthesizeSkillDescription 在 skill 沒有 Description 時，用現有欄位（名稱、Tags）
+// 合成一句保底用法說明。內容不假裝知道細節，只把已知的動作／領域整理出來，並提示
+// 使用方式，避免「怎麼用」只看到「已安裝 skill」。
+func synthesizeSkillDescription(m skill_step.SkillManifest) string {
+	name := firstNonEmpty(m.DisplayName, m.SkillID)
+	parts := []string{"「" + name + "」技能"}
+	var meaningful []string
+	for _, tag := range m.Tags.ActionTag {
+		if t := strings.TrimSpace(tag); t != "" {
+			meaningful = append(meaningful, t)
+		}
+	}
+	if len(meaningful) > 0 {
+		parts = append(parts, "動作："+strings.Join(meaningful, "、"))
+	}
+	var domains []string
+	for _, tag := range m.Tags.DomainTag {
+		t := strings.TrimSpace(tag)
+		if t != "" && t != name { // DomainTag 常等於名稱，避免贅述
+			domains = append(domains, t)
+		}
+	}
+	if len(domains) > 0 {
+		parts = append(parts, "領域："+strings.Join(domains, "、"))
+	}
+	parts = append(parts, "使用時請說明要它做什麼並附上需要的資料或先載入相關檔案")
+	return strings.Join(parts, "；")
+}
+
+func curatedSkillDescription(m skill_step.SkillManifest) (string, bool) {
+	name := strings.ToLower(strings.TrimSpace(firstNonEmpty(m.DisplayName, m.SkillID)))
+	switch {
+	case strings.Contains(name, "產出電料bom"), strings.Contains(name, "產出電料BOM"):
+		return "讀取電料BOM與編碼紀錄，依指定機台交叉比對料號並補齊品名、規格、單價，輸出整合後的電料BOM表；需要輸入：機台、電料BOM、編碼紀錄；資料來源：已載入或匯入的 CSV/XLSX 表格；輸出：指定機台的整合後電料BOM表", true
+	case strings.Contains(name, "穿衣建議"):
+		return "根據輸入的溫度提供穿衣建議；需要輸入：temperature 溫度數值；輸出：result 穿衣建議文字", true
+	default:
+		return "", false
+	}
+}
+
+func fallbackSkillDescription(m skill_step.SkillManifest) string {
+	return strings.TrimSpace(synthesizeSkillDescription(m))
+}
+
+func isFallbackSkillDescription(m skill_step.SkillManifest) bool {
+	desc := strings.TrimSpace(m.Description)
+	if desc == "" {
+		return true
+	}
+	if desc == fallbackSkillDescription(m) {
+		return true
+	}
+	return strings.Contains(desc, "使用時請說明要它做什麼並附上需要的資料或先載入相關檔案")
+}
+
+func isStaleCuratedSkillDescription(m skill_step.SkillManifest) bool {
+	desc := strings.TrimSpace(m.Description)
+	if desc == "" {
+		return false
+	}
+	current, ok := curatedSkillDescription(m)
+	if !ok || desc == current {
+		return false
+	}
+	for _, stale := range staleCuratedSkillDescriptions(m) {
+		if desc == stale {
+			return true
+		}
+	}
+	return false
+}
+
+func staleCuratedSkillDescriptions(m skill_step.SkillManifest) []string {
+	name := strings.ToLower(strings.TrimSpace(firstNonEmpty(m.DisplayName, m.SkillID)))
+	switch {
+	case strings.Contains(name, "產出電料bom"), strings.Contains(name, "產出電料BOM"):
+		return []string{
+			"讀取電料BOM與編碼紀錄，交叉比對料號並補齊品名、規格、單價，輸出整合後的電料BOM表；需要輸入：電料BOM、編碼紀錄；資料來源：已載入或匯入的 CSV/XLSX 表格；輸出：整合後電料BOM表",
+			"「產出電料Bom」技能；使用時請說明要它做什麼並附上需要的資料或先載入相關檔案",
+		}
+	default:
+		return nil
+	}
+}
+
+func shouldRefreshSkillDescription(m skill_step.SkillManifest) bool {
+	return isFallbackSkillDescription(m) || isStaleCuratedSkillDescription(m)
+}
+
+func bestSkillDescription(m skill_step.SkillManifest) string {
+	if desc, ok := curatedSkillDescription(m); ok {
+		return desc
+	}
+	if desc, ok := goProgramSkillDescriptionFromDisk(m.SkillID); ok {
+		return desc
+	}
+	return fallbackSkillDescription(m)
+}
+
+// backfillSkillDescriptions 啟動時掃過所有已歸檔 skill，把 Description 空白或仍是
+// 保底說明者補成更完整的用法並存回（UpdateManifest 會重算 hash）。使用者已填的
+// 自訂說明不覆蓋。
+func (a *App) backfillSkillDescriptions(traceID string) {
+	if a == nil || a.skillArchive == nil {
+		return
+	}
+	manifests, err := a.skillArchive.ListArchived()
+	if err != nil {
+		debugtrace.Record("go.skill_backfill.error", traceID, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	filled := 0
+	for i := range manifests {
+		m := manifests[i]
+		if !shouldRefreshSkillDescription(m) {
+			continue
+		}
+		desc := bestSkillDescription(m)
+		if desc == "" || desc == strings.TrimSpace(m.Description) {
+			continue
+		}
+		m.Description = desc
+		if err := a.skillArchive.UpdateManifest(&m); err != nil {
+			debugtrace.Record("go.skill_backfill.update_error", traceID, map[string]interface{}{
+				"skill_id": m.SkillID, "error": err.Error(),
+			})
+			continue
+		}
+		filled++
+	}
+	if filled > 0 {
+		debugtrace.Record("go.skill_backfill.done", traceID, map[string]interface{}{
+			"filled": filled, "total": len(manifests),
+		})
+	}
+}
+
+// isSkillUsageRequest 偵測「某 skill 怎麼用／用法／使用方式」這類詢問特定 skill
+// 用法的意圖（問法詞）。是否真有對應 skill 由 matchArchivedSkillByName 決定。
+func isSkillUsageRequest(text string) bool {
+	t := strings.ToLower(strings.TrimSpace(text))
+	if t == "" {
+		return false
+	}
+	return containsAny(t, []string{
+		"怎麼用", "要怎麼用", "怎樣用", "如何用", "如何使用", "使用方式",
+		"用法", "怎麼操作", "如何操作", "怎麼跑", "怎麼執行", "how to use",
+	})
+}
+
+// matchArchivedSkillByName 在使用者輸入中找出被提到的已安裝 skill（以 DisplayName
+// 子字串比對，取最長命中者，避免短名誤判）。找不到回 false。
+func (a *App) matchArchivedSkillByName(userText string) (skill_step.SkillManifest, bool) {
+	if a == nil || a.skillArchive == nil {
+		return skill_step.SkillManifest{}, false
+	}
+	manifests, err := a.skillArchive.ListArchived()
+	if err != nil {
+		return skill_step.SkillManifest{}, false
+	}
+	lower := strings.ToLower(userText)
+	var best skill_step.SkillManifest
+	bestLen := 0
+	for i := range manifests {
+		m := manifests[i]
+		skill_step.EnsureLifecycle(&m)
+		if lc := m.Lifecycle; lc != nil && lc.Status == skill_step.LifecycleDisabled {
+			continue
+		}
+		name := strings.TrimSpace(m.DisplayName)
+		if name == "" {
+			continue
+		}
+		if strings.Contains(lower, strings.ToLower(name)) && len(name) > bestLen {
+			best = m
+			bestLen = len(name)
+		}
+	}
+	if bestLen == 0 {
+		return skill_step.SkillManifest{}, false
+	}
+	return best, true
+}
+
+// formatSkillUsageCard 把 skill 的「用法欄位」整理成可讀的用法卡：說明、動作/領域、
+// 資料存取權限，以及怎麼下指令。Description 為空時誠實告知並指出去哪補。
+func (a *App) formatSkillUsageCard(m skill_step.SkillManifest) string {
+	name := firstNonEmpty(m.DisplayName, m.SkillID)
+	var b strings.Builder
+	b.WriteString("技能「" + name + "」用法\n")
+	desc := strings.TrimSpace(m.Description)
+	if desc != "" {
+		b.WriteString("\n說明：" + desc + "\n")
+	}
+	if len(m.Tags.ActionTag) > 0 {
+		b.WriteString("動作：" + strings.Join(m.Tags.ActionTag, "、") + "\n")
+	}
+	if len(m.Tags.DomainTag) > 0 {
+		b.WriteString("領域：" + strings.Join(m.Tags.DomainTag, "、") + "\n")
+	}
+	var ps []string
+	if fs := strings.TrimSpace(m.Permissions.Filesystem); fs != "" {
+		ps = append(ps, "檔案("+fs+")")
+	}
+	if nw := strings.TrimSpace(m.Permissions.Network); nw != "" {
+		ps = append(ps, "網路("+nw+")")
+	}
+	if len(ps) > 0 {
+		b.WriteString("資料存取：" + strings.Join(ps, "、") + "\n")
+	}
+	if desc == "" {
+		b.WriteString("\n（此技能尚未填寫用法說明。可在 skill 的 Description／README 補上「做什麼、要輸入什麼資料」，之後這裡就會顯示。）\n")
+	}
+	b.WriteString("\n使用方式：在輸入框直接說要它做什麼，並附上需要的資料或先載入相關檔案，例如「用「" + name + "」處理我載入的檔案」。")
+	return b.String()
+}
+
+// maybeHandleSkillUsage 在使用者問「某 skill 怎麼用」且確實有對應已安裝 skill 時，
+// 直接回傳用法卡（讀 skill 的用法欄位），否則回 false 交給後續流程。
+func (a *App) maybeHandleSkillUsage(userText, sessionID, traceID string) (*skill_step.CLIResponse, bool) {
+	_ = sessionID
+	if !isSkillUsageRequest(userText) {
+		return nil, false
+	}
+	m, ok := a.matchArchivedSkillByName(userText)
+	if !ok {
+		return nil, false
+	}
+	a.pushActionStatus("技能", "說明技能用法")
+	resp := skill_step.CLIResponse{Text: a.formatSkillUsageCard(m)}
+	debugtrace.Record("go.skill_usage.direct", traceID, map[string]interface{}{
+		"skill_id": m.SkillID,
+		"has_desc": strings.TrimSpace(m.Description) != "",
+	})
+	return &resp, true
+}
+
+// isListSkillsRequest 判斷使用者是不是在問「你有哪些 skill／列出技能」這類
+// 列舉意圖，而不是要「用某個 skill 做事」。必須同時含 skill/技能關鍵詞與列舉動詞。
+func isListSkillsRequest(text string) bool {
+	t := strings.ToLower(strings.TrimSpace(text))
+	if t == "" {
+		return false
+	}
+	if !strings.Contains(t, "skill") && !strings.Contains(t, "技能") {
+		return false
+	}
+	for _, kw := range []string{
+		"列出", "哪些", "有什麼", "有甚麼", "清單", "列表", "list", "所有", "全部",
+		"可以用", "可用", "能用", "支援", "支持", "你有", "我有", "現有", "有的", "有哪",
+	} {
+		if strings.Contains(t, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// formatInstalledSkills 列出本機已安裝（已歸檔）的 skill，含名稱與功能摘要，
+// 讓「列出你有的 skill」由 App 自己回答，而不是交給 CLI 列出它自己的工具。
+func (a *App) formatInstalledSkills() string {
+	if a == nil || a.skillArchive == nil {
+		return "目前沒有已安裝的 skill。"
+	}
+	manifests, err := a.skillArchive.ListArchived()
+	if err != nil {
+		return "目前沒有已安裝的 skill。"
+	}
+	visible := manifests[:0]
+	for _, m := range manifests {
+		mm := m
+		skill_step.EnsureLifecycle(&mm)
+		if lc := mm.Lifecycle; lc != nil && lc.Status == skill_step.LifecycleDisabled {
+			continue
+		}
+		visible = append(visible, mm)
+	}
+	if len(visible) == 0 {
+		return "目前沒有已安裝的 skill。"
+	}
+	sort.SliceStable(visible, func(i, j int) bool {
+		return firstNonEmpty(visible[i].DisplayName, visible[i].SkillID) <
+			firstNonEmpty(visible[j].DisplayName, visible[j].SkillID)
+	})
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("目前已安裝 %d 個 skill：", len(visible)))
+	for _, m := range visible {
+		name := firstNonEmpty(m.DisplayName, m.SkillID)
+		b.WriteString("\n- " + name)
+		if summary := skillSummaryLine(m); summary != "" {
+			b.WriteString("：" + summary)
+		}
+	}
+	return b.String()
+}
+
+func skillSearchContent(m skill_step.SkillManifest) string {
+	name := firstNonEmpty(m.DisplayName, m.SkillID)
+	summary := skillSummaryLine(m)
+	if summary == "" {
+		summary = "已安裝 skill"
+	}
+	lines := []string{
+		"技能 " + name + "：" + summary,
+		"skill 技能 " + m.SkillID,
+		"動作 " + strings.Join(m.Tags.ActionTag, " "),
+		"領域 " + strings.Join(m.Tags.DomainTag, " "),
+		"用途 " + strings.Join(m.Tags.PurposeTag, " "),
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (a *App) localSearchItems(excludeTraceID string) []localsearch.Item {
@@ -1452,6 +2019,66 @@ func (a *App) localSearchItems(excludeTraceID string) []localsearch.Item {
 			})
 		}
 	}
+	// 每個已歸檔 skill 都提供一筆「名稱＋功能摘要」的搜尋項目，讓使用者搜尋時
+	// 看到的是技能名稱與用途，而不是 skill_id 雜湊或內部檔案內容。
+	if a.skillArchive != nil {
+		if manifests, err := a.skillArchive.ListArchived(); err == nil {
+			for i := range manifests {
+				m := manifests[i]
+				if m.SkillID == "" {
+					continue
+				}
+				items = append(items, localsearch.Item{
+					Source:  "skill",
+					Title:   firstNonEmpty(m.DisplayName, m.SkillID),
+					Path:    "skill:" + m.SkillID,
+					Content: skillSearchContent(m),
+				})
+			}
+		}
+	}
+	referenceDir := filepath.Join(appDataRoot(), "data", "references", "files")
+	if entries, err := os.ReadDir(referenceDir); err == nil {
+		type recentReference struct {
+			name string
+			path string
+			info os.FileInfo
+		}
+		var refs []recentReference
+		for _, entry := range entries {
+			if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			path := filepath.Join(referenceDir, entry.Name())
+			refs = append(refs, recentReference{name: entry.Name(), path: path, info: info})
+		}
+		sort.SliceStable(refs, func(i, j int) bool {
+			return refs[i].info.ModTime().After(refs[j].info.ModTime())
+		})
+		for i, ref := range refs {
+			if i >= 12 {
+				break
+			}
+			ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(ref.name)), ".")
+			items = append(items, localsearch.Item{
+				Source: "document",
+				Title:  "最近引用文件: " + ref.name,
+				Path:   ref.path,
+				// Content 只放真正要顯示給使用者的內容。
+				Content: strings.Join([]string{
+					ref.name,
+					"副檔名 " + ext,
+					"修改時間 " + ref.info.ModTime().Format(time.RFC3339),
+				}, "\n"),
+				// 別名／同義詞只用於比對，不會出現在 Snippet。
+				Keywords: "引用文件 已載入 檔案 本機資料 最近 最新 剛剛 剛才 拉進來 拉進來的 拖進來 拖進來的 匯入 加入",
+			})
+		}
+	}
 	for _, event := range debugtrace.EventsSnapshot() {
 		if strings.TrimSpace(excludeTraceID) != "" && event.TraceID == excludeTraceID {
 			continue
@@ -1470,6 +2097,59 @@ func (a *App) localSearchItems(excludeTraceID string) []localsearch.Item {
 		})
 	}
 	return items
+}
+
+func (a *App) recentReferenceFilesForRouting(limit int) []routingReferenceFile {
+	if limit <= 0 {
+		limit = 6
+	}
+	referenceDir := filepath.Join(appDataRoot(), "data", "references", "files")
+	entries, err := os.ReadDir(referenceDir)
+	if err != nil {
+		return nil
+	}
+	var refs []routingReferenceFile
+	for _, entry := range entries {
+		if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		name := entry.Name()
+		refs = append(refs, routingReferenceFile{
+			Name:       name,
+			Path:       filepath.Join(referenceDir, name),
+			Ext:        strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), "."),
+			ModifiedAt: info.ModTime(),
+		})
+	}
+	sort.SliceStable(refs, func(i, j int) bool {
+		return refs[i].ModifiedAt.After(refs[j].ModifiedAt)
+	})
+	if len(refs) > limit {
+		refs = refs[:limit]
+	}
+	return refs
+}
+
+func compactReferenceFilesForTrace(refs []routingReferenceFile) []map[string]string {
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]map[string]string, 0, len(refs))
+	for i, ref := range refs {
+		if i >= 6 {
+			break
+		}
+		out = append(out, map[string]string{
+			"name":  ref.Name,
+			"ext":   ref.Ext,
+			"mtime": ref.ModifiedAt.Format(time.RFC3339),
+		})
+	}
+	return out
 }
 
 func (a *App) GetAppSessionID() string {
@@ -1873,7 +2553,81 @@ func (a *App) ensureSidecarRunning() error {
 // 自動從 InjectionStore 取得當前 session 的 SkillInjection 並附加。
 // 若 CLIAdapter 尚未設定（cliAdapter == nil），回傳 stub 回應。
 func (a *App) SendCLIMessage(adapterID string, sessionID string, userText string, traceID string) (*skill_step.CLIResponse, error) {
-	return a.sendCLIMessage(adapterID, sessionID, userText, traceID, "")
+	resp, err := a.sendCLIMessage(adapterID, sessionID, userText, traceID, "")
+	// 配額／限流即時偵測：模型額度用盡時，UI 不該看到原始錯誤，改提示切換模型。
+	if notice, hit := quotaSwitchModelNotice(adapterID, resp, err); hit {
+		debugtrace.Record("go.SendCLIMessage.quota_exhausted", traceID, map[string]interface{}{
+			"adapter_id": adapterID,
+			"resp_error": cliResponseErrorString(resp),
+			"err":        errorString(err),
+		})
+		return &skill_step.CLIResponse{Text: notice}, nil
+	}
+	return resp, err
+}
+
+// routeUserIntentOnce 是「一句使用者意圖」走完整對話路由的唯一入口：直接重用
+// SendCLIMessage 的捷徑→判斷器→dispatch（含 用法/list/搜尋/resourceGate/toolReadiness/流程）。
+// 一般聊天與 DAG 的 chat_route 節點都經由它，確保路由真相只有一套（不另立第二套路由器）。
+// 注意：traceID 必須是「非 task 前綴」，否則會被 isTaskProgressTraceID 當成內部任務而跳過路由。
+func (a *App) routeUserIntentOnce(adapterID, sessionID, userText, traceID string) (*skill_step.CLIResponse, error) {
+	return a.SendCLIMessage(adapterID, sessionID, userText, traceID)
+}
+
+// quotaMarkers 是各家模型「配額／容量用盡、限流」錯誤的特徵字串（小寫比對）。
+// 這些字串只會出現在錯誤訊息，不會出現在正常的 skill／文件內容，掃 resp.Text
+// 也不易誤判。
+var quotaMarkers = []string{
+	"exhausted your capacity", // gemini: You have exhausted your capacity on this model
+	"retryablequotaerror",
+	"quota will reset",
+	"quota exceeded",
+	"insufficient_quota",
+	"model_capacity_exhausted",
+	"no capacity available for model",
+	"resource_exhausted",
+	"ratelimitexceeded",
+	"too many requests",
+	"status 429",
+	"容量不足",
+	"伺服器容量不足",
+	"限流",
+}
+
+// isQuotaExhaustedError 判斷字串是否為配額／限流類錯誤。
+func isQuotaExhaustedError(s string) bool {
+	if strings.TrimSpace(s) == "" {
+		return false
+	}
+	return containsAny(strings.ToLower(s), quotaMarkers)
+}
+
+// cliResponseErrorString 安全取出 resp.Error。
+func cliResponseErrorString(resp *skill_step.CLIResponse) string {
+	if resp == nil {
+		return ""
+	}
+	return resp.Error
+}
+
+// quotaSwitchModelNotice 偵測回應或錯誤是否為配額／限流；是的話回傳一段提示
+// 使用者切換模型的訊息，讓 UI 立即顯示可行動指引，而不是丟原始錯誤或一直重試。
+func quotaSwitchModelNotice(adapterID string, resp *skill_step.CLIResponse, err error) (string, bool) {
+	var parts []string
+	if err != nil {
+		parts = append(parts, err.Error())
+	}
+	if resp != nil {
+		parts = append(parts, resp.Error, resp.Text)
+	}
+	if !isQuotaExhaustedError(strings.Join(parts, "\n")) {
+		return "", false
+	}
+	name := strings.TrimSpace(adapterID)
+	if name == "" {
+		name = "目前的模型"
+	}
+	return "⚠️ " + name + " 配額已用盡或被限流，暫時無法回應。請在上方模型選單切換到其他模型後重試。", true
 }
 
 func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string, traceID string, modelOverride string) (*skill_step.CLIResponse, error) {
@@ -1887,6 +2641,9 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 	}
 	addDebugTraceUserText(sendTrace, traceID, userText)
 	debugtrace.Record("go.SendCLIMessage.enter", traceID, sendTrace)
+
+	// 本回合附圖（CLI 路徑）：先消費暫存圖片，避免外洩到下一則。
+	stagedImages := takeSessionImages(sessionID)
 
 	var inj *skill_step.Injection
 	if a.skillInjections != nil {
@@ -1927,6 +2684,12 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 			})
 			return resp, nil
 		}
+	}
+
+	// CLI inline 讀圖是各 CLI 自家介面；先附上誠實提示讓圖片不被靜默吞掉，
+	// 待接該 CLI 的 image flag 時改 cliImageNotice / 此處編碼即可。
+	if notice := cliImageNotice(stagedImages); notice != "" {
+		userText += notice
 	}
 
 	// 從 adapter_registry 解析 CLI 的實際執行檔路徑。
@@ -2003,14 +2766,14 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 		if resp, ok := a.maybeHandlePendingLocalSearchWebFallback(userText, sessionID, traceID); ok {
 			return resp, nil
 		}
-		recentHistory := a.recentConversationSentences(6)
+		recentHistory := compactRoutingHistory(a.recentConversationSentences(6), userText, 3)
 		keywordResp, keywordErr := a.cliAdapter.SendMessage(skill_step.CLIMessageOptions{
 			AdapterID:      adapterID,
 			CLIPath:        cliPath,
 			SessionID:      sessionID,
-			UserText:       buildSearchTermExtractionPrompt(personaPrompt, userText, recentHistory),
+			UserText:       buildSearchTermExtractionPrompt("", userText, recentHistory),
 			Model:          strings.TrimSpace(modelOverride),
-			SystemPrompt:   personaPrompt,
+			SystemPrompt:   "",
 			ContinuityKey:  conversationContinuityKey("tool-keywords", sessionID),
 			TraceID:        traceID,
 			SkipContinuity: true,
@@ -2032,14 +2795,30 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 			AdapterID:      adapterID,
 			CLIPath:        cliPath,
 			SessionID:      sessionID,
-			UserText:       buildToolRoutingDecisionPrompt(personaPrompt, userText, routingContextForToolPrompt, recentHistory),
+			UserText:       buildToolRoutingDecisionPrompt("", userText, routingContextForToolPrompt, recentHistory),
 			Model:          strings.TrimSpace(modelOverride),
-			SystemPrompt:   personaPrompt,
+			SystemPrompt:   "",
 			ContinuityKey:  conversationContinuityKey("tool-judge", sessionID),
 			TraceID:        traceID,
 			SkipContinuity: true,
 		})
-		if judgeErr != nil || judgeResp.Error != "" || judgeResp.AuthRequired {
+		if judgeResp.AuthRequired {
+			return &judgeResp, judgeErr
+		}
+		if judgeErr != nil || judgeResp.Error != "" {
+			// judge 失敗：先用本機候選做保底路由，撈不到才把錯誤丟回。
+			if fb, ok := fallbackDecisionFromLookup(routingLookup); ok {
+				debugtrace.Record("go.toolRouting.judge_fallback", traceID, map[string]interface{}{
+					"judge_error": errorString(judgeErr),
+					"resp_error":  judgeResp.Error,
+					"action":      fb.Action,
+					"target":      fb.Target,
+					"local_hits":  len(routingLookup.LocalMatches),
+				})
+				if handled, routedResp := a.responseFromToolRoutingDecision(fb, sessionID, traceID, userText); handled {
+					return &routedResp, nil
+				}
+			}
 			return &judgeResp, judgeErr
 		}
 		decision := normalizeToolRoutingDecision(parseToolRoutingDecision(judgeResp.Text), userText, routingLookup)
@@ -2048,9 +2827,9 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 				AdapterID:      adapterID,
 				CLIPath:        cliPath,
 				SessionID:      sessionID,
-				UserText:       buildToolRoutingRepairPrompt(buildToolRoutingDecisionPrompt(personaPrompt, userText, routingContextForToolPrompt, recentHistory), judgeResp.Text, userText),
+				UserText:       buildToolRoutingRepairPrompt(buildToolRoutingDecisionPrompt("", userText, routingContextForToolPrompt, recentHistory), judgeResp.Text, userText),
 				Model:          strings.TrimSpace(modelOverride),
-				SystemPrompt:   personaPrompt,
+				SystemPrompt:   "",
 				ContinuityKey:  conversationContinuityKey("tool-judge-repair", sessionID),
 				TraceID:        traceID + "-repair",
 				SkipContinuity: true,
@@ -2161,6 +2940,9 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 	if handled, readinessResp := a.maybeAskForToolReadiness(sessionID, decision, userText, traceID); handled {
 		return &readinessResp, nil
 	}
+	if handled, flowResp := a.maybeHandleSkillFlow(decision, sessionID, traceID, userText); handled {
+		return &flowResp, nil
+	}
 	if handled, programResp := a.maybeHandleGoProgramAuthoring(decision, sessionID, traceID, userText); handled {
 		return &programResp, nil
 	}
@@ -2233,6 +3015,23 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 
 // SendAPIMessage sends a composer message through an LLM API adapter.
 func (a *App) SendAPIMessage(adapterID string, sessionID string, userText string, traceID string) (*skill_step.CLIResponse, error) {
+	resp, err := a.sendAPIMessageImpl(adapterID, sessionID, userText, traceID)
+	// 配額／限流即時偵測（同 CLI 路徑）。task-progress 內部呼叫交給 planner 自己
+	// 的 transient 處理，避免把錯誤改寫成文字打亂其重試／澄清流程。
+	if !isTaskProgressTraceID(traceID) {
+		if notice, hit := quotaSwitchModelNotice(adapterID, resp, err); hit {
+			debugtrace.Record("go.SendAPIMessage.quota_exhausted", traceID, map[string]interface{}{
+				"adapter_id": adapterID,
+				"resp_error": cliResponseErrorString(resp),
+				"err":        errorString(err),
+			})
+			return &skill_step.CLIResponse{Text: notice}, nil
+		}
+	}
+	return resp, err
+}
+
+func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText string, traceID string) (*skill_step.CLIResponse, error) {
 	debugtrace.Record("go.SendAPIMessage.enter", traceID, map[string]interface{}{
 		"adapter_id": adapterID,
 		"session_id": sessionID,
@@ -2261,6 +3060,15 @@ func (a *App) SendAPIMessage(adapterID string, sessionID string, userText string
 				"error":         resp.Error,
 				"auth_required": false,
 				"auth_url":      "",
+			})
+			return resp, nil
+		}
+		// 與 CLI 路徑對齊：API 路徑同樣在進判斷前處理本機搜尋／列出 skill，
+		// 否則「列出你有的 skill」會被判為閒聊、交給模型自答。
+		if resp, handled := a.maybeHandleLocalSearch(userText, sessionID, traceID); handled {
+			debugtrace.Record("go.SendAPIMessage.local_search.direct", traceID, map[string]interface{}{
+				"text":  resp.Text,
+				"error": resp.Error,
 			})
 			return resp, nil
 		}
@@ -2305,15 +3113,10 @@ func (a *App) SendAPIMessage(adapterID string, sessionID string, userText string
 	}
 	// SEC-05 2a: Safe Client，policy 由 PolicyForLLMEndpoint 集中決定。
 	client := urlsafe.NewSafeClient(urlsafe.PolicyForLLMEndpoint(cfg.ProviderID, cfg.BaseURL), "llm_chat", 45*time.Second)
+	// 本回合若有附圖（API 路徑）：消費暫存圖片，於 buildOpenAIRequestBody 內以 base64 內嵌，不落地。
+	stagedImages := takeSessionImages(sessionID)
 	doRequest := func(prompt string) (*http.Response, error) {
-		reqBody := openAIChatRequest{
-			Model: model,
-			Messages: []openAIChatMessage{
-				// API adapters receive the same synthesized controller prompt as CLI adapters.
-				{Role: "user", Content: prompt},
-			},
-		}
-		body, err := json.Marshal(reqBody)
+		body, err := buildOpenAIRequestBody(model, prompt, stagedImages)
 		if err != nil {
 			return nil, err
 		}
@@ -2389,8 +3192,8 @@ func (a *App) SendAPIMessage(adapterID string, sessionID string, userText string
 		if resp, ok := a.maybeHandlePendingLocalSearchWebFallback(userText, sessionID, traceID); ok {
 			return resp, nil
 		}
-		recentHistory := a.recentConversationSentences(6)
-		keywordText, keywordErr := callAPI(buildSearchTermExtractionPrompt(personaPrompt, userText, recentHistory))
+		recentHistory := compactRoutingHistory(a.recentConversationSentences(6), userText, 3)
+		keywordText, keywordErr := callAPI(buildSearchTermExtractionPrompt("", userText, recentHistory))
 		debugtrace.Record("go.searchTerms.extract", traceID, map[string]interface{}{
 			"text":         keywordText,
 			"error":        errorString(keywordErr),
@@ -2403,13 +3206,26 @@ func (a *App) SendAPIMessage(adapterID string, sessionID string, userText string
 		routingLookup := a.lookupToolRoutingContext(terms, userText, traceID)
 		// SEC-06: judge prompt 帶 pending 確認摘要（同 CLI 路徑）。
 		routingContextForToolPrompt = formatToolRoutingLookupContext(routingLookup) + pendingConfirmPromptContext(sessionID)
-		judgeText, judgeErr := callAPI(buildToolRoutingDecisionPrompt(personaPrompt, userText, routingContextForToolPrompt, recentHistory))
+		judgeText, judgeErr := callAPI(buildToolRoutingDecisionPrompt("", userText, routingContextForToolPrompt, recentHistory))
 		if judgeErr != nil {
+			// judge 失敗：先用本機候選做保底路由，撈不到才把錯誤丟回。
+			if fb, ok := fallbackDecisionFromLookup(routingLookup); ok {
+				debugtrace.Record("go.toolRouting.judge_fallback", traceID, map[string]interface{}{
+					"judge_error":  judgeErr.Error(),
+					"action":       fb.Action,
+					"target":       fb.Target,
+					"local_hits":   len(routingLookup.LocalMatches),
+					"adapter_kind": "api",
+				})
+				if handled, routedResp := a.responseFromToolRoutingDecision(fb, sessionID, traceID, userText); handled {
+					return &routedResp, nil
+				}
+			}
 			return &skill_step.CLIResponse{Error: judgeErr.Error()}, nil
 		}
 		decision := normalizeToolRoutingDecision(parseToolRoutingDecision(judgeText), userText, routingLookup)
 		if shouldRepairToolRoutingDecision(userText, decision) {
-			repairText, repairErr := callAPI(buildToolRoutingRepairPrompt(buildToolRoutingDecisionPrompt(personaPrompt, userText, routingContextForToolPrompt, recentHistory), judgeText, userText))
+			repairText, repairErr := callAPI(buildToolRoutingRepairPrompt(buildToolRoutingDecisionPrompt("", userText, routingContextForToolPrompt, recentHistory), judgeText, userText))
 			debugtrace.Record("go.toolRouting.judge_repair", traceID, map[string]interface{}{
 				"text":         repairText,
 				"error":        errorString(repairErr),
@@ -2779,6 +3595,14 @@ type toolRoutingLookupContext struct {
 	Operations       []visual_learning.OperationSearchResult
 	RecentOperations []visual_learning.LearningRunCatalogItem
 	LocalMatches     []localsearch.SearchResult
+	RecentReferences []routingReferenceFile
+}
+
+type routingReferenceFile struct {
+	Name       string
+	Path       string
+	Ext        string
+	ModifiedAt time.Time
 }
 
 const (
@@ -2803,12 +3627,17 @@ func webSearchRoutingPrompt() string {
 }
 
 func buildSearchTermExtractionPrompt(systemPrompt string, userText string, recent []conversation.Sentence) string {
-	return conversation.Synthesize(conversation.SynthesisConfig{
-		SystemPrompt: systemPrompt + "\n\n請解析使用者訊息中的查詢詞與指代詞，只輸出可用來搜尋、比對資料的關鍵字詞。\n\n規則：\n- 不回答使用者問題。\n- 不判斷是否閒聊。\n- 不判斷是否使用工具。\n- 若具網路搜尋目標，輸出適合網路搜尋的關鍵字。\n- 保留使用者提到的動作、物件、App、時間指代、文件/skill/操作/對話等詞。\n- 若提到剛剛、最近、上一個、錄製、回放、重現、點擊、開啟、關閉，請保留這些指代或操作詞。\n- 若本輪缺地點、主詞或對象，但 H 上一輪有提到，請從 H 補上（例：上一輪查台中天氣、本輪只說查溫度 → 輸出 台中 溫度）。\n- 請用空格分隔詞，不要句子，不要 JSON，不要 Markdown。",
-		RawSentences: recent, // 帶最近對話歷史，讓模型能解析「溫度」這類缺地點的指代
-		CurrentInput: userText,
-		SanitizeLLM:  true,
-	})
+	_ = systemPrompt
+	parts := []string{
+		"任務=抽搜尋關鍵詞",
+		"輸出=只用空格分隔詞; 不要句子/JSON/Markdown",
+		"規則=保留使用者提到的動作、物件、App、時間指代、文件、skill、操作、對話; 若提到剛剛/最近/上一個/錄製/回放/重現/點擊/開啟/關閉要保留; 問法詞不是關鍵詞，不要輸出：怎麼用、要怎麼用、怎樣用、如何用、怎麼做、如何做、怎麼操作、如何操作; 可用H補缺主詞或地點; 不回答問題; 不判斷工具",
+	}
+	if h := formatCompactRoutingHistory(recent, userText, 3); h != "" {
+		parts = append(parts, h)
+	}
+	parts = append(parts, "Q="+compactPromptField(userText))
+	return strings.Join(parts, " | ")
 }
 
 func parseSearchTerms(text string, userText string) []string {
@@ -2857,6 +3686,9 @@ func (a *App) lookupToolRoutingContext(terms []string, userText string, traceID 
 		Query: query,
 		Terms: normalizeSearchTerms(append([]string{}, terms...), 16),
 	}
+	if a != nil {
+		ctx.RecentReferences = a.recentReferenceFilesForRouting(6)
+	}
 	if a != nil && a.learningService != nil && strings.TrimSpace(query) != "" {
 		if operations, err := a.learningService.SearchOperations(query, 5); err == nil {
 			ctx.Operations = operations
@@ -2876,9 +3708,10 @@ func (a *App) lookupToolRoutingContext(terms []string, userText string, traceID 
 		defer cancel()
 		service := localsearch.NewService(a.localSearchRoots(), a.localSearchItems(""))
 		outcome, err := service.SearchWithContext(searchCtx, localsearch.SearchRequest{
-			Query: query,
-			Scope: []string{"all"},
-			Limit: 6,
+			Query:    query,
+			Scope:    []string{"all"},
+			Limit:    6,
+			AuxTerms: localsearch.AuxTermsFromText(userText),
 		})
 		if err == nil {
 			ctx.LocalMatches = outcome.Results
@@ -2892,94 +3725,131 @@ func (a *App) lookupToolRoutingContext(terms []string, userText string, traceID 
 		"operation_hits": len(ctx.Operations),
 		"recent_ops":     len(ctx.RecentOperations),
 		"local_hits":     len(ctx.LocalMatches),
+		"loaded_files":   compactReferenceFilesForTrace(ctx.RecentReferences),
 	})
 	return ctx
 }
 
 func formatToolRoutingLookupContext(ctx toolRoutingLookupContext) string {
 	var b strings.Builder
-	b.WriteString("\n\n[系統提供: routing_lookup]\n")
+	b.WriteString("\n[lookup] ")
 	fmt.Fprintf(&b, "query=%q\n", ctx.Query)
 	if len(ctx.Terms) > 0 {
 		fmt.Fprintf(&b, "terms=%q\n", strings.Join(ctx.Terms, " "))
 	}
-	b.WriteString("saved_operations:\n")
+	b.WriteString("loaded_files=")
+	if len(ctx.RecentReferences) == 0 {
+		b.WriteString("none\n")
+	} else {
+		for i, ref := range ctx.RecentReferences {
+			if i >= 6 {
+				break
+			}
+			if i > 0 {
+				b.WriteString("; ")
+			}
+			fmt.Fprintf(&b, "name=%q ext=%q mtime=%q", ref.Name, ref.Ext, ref.ModifiedAt.Format(time.RFC3339))
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("saved_operations=")
 	if len(ctx.Operations) == 0 {
-		b.WriteString("- none\n")
+		b.WriteString("none\n")
 	} else {
 		for i, op := range ctx.Operations {
 			if i >= 5 {
 				break
 			}
-			risk := learningRiskLevel(op.Risk)
-			fmt.Fprintf(&b, "- tag=%q run_id=%q title=%q summary=%q operation_tag=%q keywords=%q risk=%q score=%.2f\n",
-				op.Tag, op.RunID, op.Title, op.Summary, op.OperationTag, strings.Join(op.Keywords, ", "), risk, op.Score)
-		}
-	}
-	b.WriteString("recent_operations_when_no_match:\n")
-	if len(ctx.RecentOperations) == 0 {
-		b.WriteString("- none\n")
-	} else {
-		for i, op := range ctx.RecentOperations {
-			if i >= 5 {
-				break
+			if i > 0 {
+				b.WriteString("; ")
 			}
 			risk := learningRiskLevel(op.Risk)
-			fmt.Fprintf(&b, "- tag=%q run_id=%q title=%q summary=%q operation_tag=%q keywords=%q risk=%q steps=%d stopped_at=%q\n",
-				op.Tag, op.RunID, op.Title, op.Summary, op.OperationTag, strings.Join(op.Keywords, ", "), risk, op.StepCount, op.StoppedAt.Format(time.RFC3339))
+			fmt.Fprintf(&b, "tag=%q title=%q action=%q risk=%q score=%.2f", op.Tag, op.Title, op.OperationTag, risk, op.Score)
 		}
+		b.WriteString("\n")
 	}
-	b.WriteString("local_matches:\n")
+	b.WriteString("recent_operations_when_no_match=")
+	if len(ctx.RecentOperations) == 0 {
+		b.WriteString("none\n")
+	} else {
+		for i, op := range ctx.RecentOperations {
+			if i >= 3 {
+				break
+			}
+			if i > 0 {
+				b.WriteString("; ")
+			}
+			risk := learningRiskLevel(op.Risk)
+			fmt.Fprintf(&b, "tag=%q title=%q action=%q risk=%q steps=%d time=%q",
+				op.Tag, op.Title, op.OperationTag, risk, op.StepCount, op.StoppedAt.Format(time.RFC3339))
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("local_matches=")
 	if len(ctx.LocalMatches) == 0 {
-		b.WriteString("- none\n")
+		b.WriteString("none\n")
 	} else {
 		for i, item := range ctx.LocalMatches {
 			if i >= 6 {
 				break
 			}
-			fmt.Fprintf(&b, "- source=%q title=%q path=%q snippet=%q score=%d\n",
-				item.Source, item.Title, item.Path, item.Snippet, item.Score)
+			if i > 0 {
+				b.WriteString("; ")
+			}
+			fmt.Fprintf(&b, "source=%q title=%q file=%q score=%d",
+				item.Source, item.Title, filepath.Base(item.Path), item.Score)
 		}
+		b.WriteString("\n")
 	}
-	b.WriteString("[/系統提供: routing_lookup]\n")
+	b.WriteString("[/lookup]\n")
 	return b.String()
 }
 
 func buildToolRoutingDecisionPrompt(systemPrompt string, userText string, lookupContext string, recentOpt ...[]conversation.Sentence) string {
+	_ = systemPrompt
 	var recent []conversation.Sentence
 	if len(recentOpt) > 0 {
 		recent = recentOpt[0]
 	}
-	systemPrompt += webSearchRoutingPrompt()
 	routingRules := strings.Join([]string{
-		fmt.Sprintf("In this app, plain search/find/query defaults to local search unless web_search_routing applies. If local_matches is none and the user appears to ask for search/find/query, do not answer from general knowledge; output %s%s<query>%s%s so the local-search tool can report no local result and ask whether to use web search.", "\u641c\u5c0b", actionchain.Separator, actionchain.Separator, "\u6587\u4ef6"),
-		"只能輸出以下格式之一，不可輸出其他文字：",
-		"閒聊ㄌ<回答>",
-		"操作ㄌ<候選tag/名稱/關鍵詞>ㄌ待命",
-		"程式ㄌ<程式名稱>ㄌ輸出",
-		"查詢ㄌ<關鍵詞>ㄌ操作",
-		"搜尋ㄌ<關鍵詞>ㄌ文件",
-		"網路ㄌ<搜尋關鍵字>ㄌ待命",
-		"提問ㄌ<問題>ㄌ待命",
-		"需要工具",
-		"判斷：",
-		"- 需要工具：需要其他工具，或候選不足但不像閒聊。",
-		"- 網路路由：凡需網路搜尋才能判斷的變動資料，如網路、即時、今天、今日、最新、現在等關鍵字，輸出：網路ㄌ<搜尋關鍵字>ㄌ待命。",
-		"- 操作：明確要求重現、回放、照做、執行、開始已保存操作，且 saved_operations 明確；只有 recent_operations 不算明確。",
-		"- 程式：需要製作或使用一個尚未確定存在的小程式來處理資料、比較、轉換、計算或產生結論時，輸出：程式ㄌ<短程式名稱>ㄌ輸出。",
-		"- 程式作者預設且唯一語言是 Go；使用者說「做/建立/製作 skill」且提到 JSON、表格、CSV、XLSX、資料處理、判斷或輸出建議時，也必須輸出：程式ㄌ<短程式名稱>ㄌ輸出。",
-		"- 查詢：找、列出、查詢已保存操作，或操作候選不明。",
-		"- 搜尋：找本機資料、文件、skill、記憶、對話、trace、專案內容。",
-		"- 提問：無法判斷要找「本機資料」還是「上網查」，或缺必要資訊（如地點）且 H 也補不出來時，輸出：提問ㄌ你是要找本機文件，還是上網查？ㄌ待命。",
-		"- 上下文補全：本輪缺地點/主詞但 H 上一輪有提到，請補上後再判斷（例：上一輪台中天氣、本輪查溫度 → 視為查台中溫度）。",
-		"- 閒聊：明顯聊天且候選無關。",
-	}, "\n")
-	return conversation.Synthesize(conversation.SynthesisConfig{
-		SystemPrompt: systemPrompt + lookupContext + "\n\n" + routingRules,
-		RawSentences: recent, // 帶最近對話歷史，讓 judge 能用上下文判斷（如沿用上一輪地點）
-		CurrentInput: userText,
-		SanitizeLLM:  true,
-	})
+		fmt.Sprintf("本app預設本機搜尋；只有即時/今天/最新/現在/網路等變動資料才輸出 網路%s<搜尋關鍵字>%s%s。local_matches none 且使用者像在找本機資料時，輸出 %s%s<query>%s%s。", actionchain.Separator, actionchain.Separator, actionchain.StandbyNext, "\u641c\u5c0b", actionchain.Separator, actionchain.Separator, "\u6587\u4ef6"),
+		"若 loaded_files 不是 none，使用者問剛剛/最近/拉進來/拖進來/已載入/引用的檔案時，不要問檔名或路徑；輸出 搜尋ㄌ引用文件ㄌ文件。",
+		"勿呼叫任何工具；「工具」僅是分類標籤。",
+		"格式只能是：閒聊ㄌ<回答> | 操作ㄌ<候選tag/名稱/關鍵詞>ㄌ待命 | 程式ㄌ<程式名稱>ㄌ輸出 | 流程ㄌ<skill名稱>ㄌ輸出 | 查詢ㄌ<關鍵詞>ㄌ操作 | 搜尋ㄌ<關鍵詞>ㄌ文件 | 網路ㄌ<搜尋關鍵字>ㄌ待命 | 提問ㄌ<問題>ㄌ待命 | 需要工具",
+		"需要工具：需要其他工具，或候選不足但不像閒聊。",
+		"網路路由：凡需網路搜尋才能判斷的變動資料，如網路、即時、今天、今日、最新、現在等關鍵字→網路。",
+		"操作：明確重現/回放/照做/執行已保存操作且 saved_operations 明確→操作；只有 recent_operations 不算明確。",
+		"判斷=製作獨立程式(產出 .go 等程式檔)→程式; 使用既有/已安裝 skill，或要既有 skill 處理資料/表格/CSV/XLSX/JSON並輸出→流程; 找操作候選→查詢; 找本機資料/文件/skill/記憶/對話/trace/專案→搜尋; 無法判斷本機或網路且缺必要資訊→提問; 明顯聊天→閒聊",
+	}, " ")
+	parts := []string{strings.TrimSpace(lookupContext), "rules=" + routingRules}
+	if h := formatCompactRoutingHistory(recent, userText, 3); h != "" {
+		parts = append(parts, h)
+	}
+	parts = append(parts, "Q="+compactPromptField(userText))
+	return strings.Join(parts, " | ")
+}
+
+// fallbackDecisionFromLookup 在 judge 呼叫失敗（配額耗盡、CLI 逾時、Gemini 嘗試
+// 呼叫不存在的工具等）時，用 lookup 已取得的本機候選推導保底決策：本機若已命中
+// （skill／工具／文件），就視為本機搜尋把使用者導向本機資料，而不是把 CLI 錯誤
+// 直接丟回。沒有任何候選時回 false，維持原本的錯誤回傳行為。
+func fallbackDecisionFromLookup(lookup toolRoutingLookupContext) (toolRoutingDecision, bool) {
+	if len(lookup.LocalMatches) == 0 {
+		return toolRoutingDecision{}, false
+	}
+	target := strings.TrimSpace(lookup.Query)
+	if target == "" {
+		target = strings.TrimSpace(lookup.LocalMatches[0].Title)
+	}
+	if target == "" {
+		return toolRoutingDecision{}, false
+	}
+	return toolRoutingDecision{
+		Kind:   toolRoutingDecisionAction,
+		Action: "搜尋",
+		Target: target,
+		Next:   actionchain.StandbyNext,
+	}, true
 }
 
 func parseToolRoutingDecision(text string) toolRoutingDecision {
@@ -3009,6 +3879,13 @@ func parseToolRoutingDecision(text string) toolRoutingDecision {
 }
 
 func normalizeToolRoutingDecision(decision toolRoutingDecision, userText string, lookup toolRoutingLookupContext) toolRoutingDecision {
+	if isLoadedReferenceVisibilityQuestion(userText) && len(lookup.RecentReferences) > 0 {
+		decision.Kind = toolRoutingDecisionAction
+		decision.Action = "搜尋"
+		decision.Target = "引用文件"
+		decision.Next = "文件"
+		return decision
+	}
 	if shouldRouteUserTextToWebSearch(userText) && shouldPromoteDecisionToWebSearch(decision) {
 		target := firstNonEmpty(decision.Target, lookup.Query, compactReferenceQuery(userText), userText)
 		if strings.TrimSpace(target) != "" {
@@ -3036,6 +3913,40 @@ func normalizeToolRoutingDecision(decision toolRoutingDecision, userText string,
 	decision.Target = target
 	decision.Next = actionchain.StandbyNext
 	return decision
+}
+
+func isLoadedReferenceVisibilityQuestion(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	mentionsFile := containsAny(trimmed, []string{"檔案", "文件", "引用", "引用文件", "拉進來", "拖進來", "剛剛", "最近", "已載入", "匯入"}) ||
+		containsAny(lower, []string{"file", "files", "upload", "uploaded", "drag", "drop", "reference"})
+	if !mentionsFile {
+		return false
+	}
+	asksVisibility := containsAny(trimmed, []string{"有看到", "看到", "看得到", "知道", "有沒有", "是不是有", "列出", "有哪些", "什麼檔"}) ||
+		containsAny(lower, []string{"see", "seen", "loaded", "list", "what file", "which file"})
+	if !asksVisibility {
+		return false
+	}
+	return !containsAny(trimmed, []string{"產生", "生成", "製作", "做", "分析", "比較", "轉換", "匯出", "處理"})
+}
+
+func formatRecentReferenceFilesAnswer(refs []routingReferenceFile) string {
+	if len(refs) == 0 {
+		return "我這邊目前沒有看到已載入的引用檔。"
+	}
+	var b strings.Builder
+	b.WriteString("有，已載入的引用檔：")
+	for i, ref := range refs {
+		if i >= 6 {
+			break
+		}
+		fmt.Fprintf(&b, "\n%d. %s（%s，%s）", i+1, ref.Name, strings.ToUpper(ref.Ext), ref.ModifiedAt.Format("2006-01-02 15:04:05"))
+	}
+	return b.String()
 }
 
 func shouldRepairToolRoutingDecision(userText string, decision toolRoutingDecision) bool {
@@ -3130,6 +4041,20 @@ func extractGoProgramName(text string) string {
 		cleaned = strings.TrimSpace(strings.TrimSuffix(cleaned, suffix))
 	}
 	cleaned = strings.Trim(cleaned, " -_／/")
+	// 攔截「用途／用法／做法／作法」這類問法/說明詞，避免被當成 skill 名稱的一部分
+	// （例如「產出電料Bom的用法」→「產出電料Bom」）。連同緊鄰的「的」一起反覆去除，
+	// 直到名稱穩定。
+	for {
+		before := cleaned
+		for _, w := range []string{"用途", "用法", "做法", "作法"} {
+			cleaned = strings.TrimSpace(strings.TrimSuffix(cleaned, w))
+		}
+		cleaned = strings.TrimSpace(strings.TrimSuffix(cleaned, "的"))
+		cleaned = strings.Trim(cleaned, " -_／/")
+		if cleaned == before {
+			break
+		}
+	}
 	if len([]rune(cleaned)) > 24 {
 		r := []rune(cleaned)
 		cleaned = string(r[:24])
@@ -3193,6 +4118,16 @@ func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sess
 	if len(userTextOpt) > 0 && strings.TrimSpace(userTextOpt[0]) != "" {
 		userText = strings.TrimSpace(userTextOpt[0])
 	}
+	if isLoadedReferenceVisibilityQuestion(userText) {
+		if refs := a.recentReferenceFilesForRouting(6); len(refs) > 0 {
+			return true, skill_step.CLIResponse{
+				Text:   formatRecentReferenceFilesAnswer(refs),
+				Action: "搜尋",
+				Target: "引用文件",
+				Next:   "文件",
+			}
+		}
+	}
 	switch decision.Kind {
 	case toolRoutingDecisionChat:
 		return true, skill_step.CLIResponse{Text: strings.TrimSpace(decision.Text)}
@@ -3214,6 +4149,9 @@ func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sess
 		}
 		if handled, resp := a.maybeAskForToolReadiness(sessionID, decision, userText, traceID); handled {
 			return true, resp
+		}
+		if handled, flowResp := a.maybeHandleSkillFlow(decision, sessionID, traceID, userText); handled {
+			return true, flowResp
 		}
 		if handled, resp := a.maybeHandleGoProgramAuthoring(decision, sessionID, traceID, userText); handled {
 			return true, resp
@@ -3250,11 +4188,14 @@ func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sess
 }
 
 func buildToolRoutingJudgePrompt(systemPrompt string, userText string) string {
-	return conversation.Synthesize(conversation.SynthesisConfig{
-		SystemPrompt: systemPrompt + "\n\n工具判斷規則：只能輸出兩種格式之一：\n1. 需要工具\n2. 閒聊ㄌ<回答>\n若需要搜尋本機文件、讀取資料、開啟/寫入/匯出、排程、製作或使用小程式、已保存螢幕操作、DAG/自動流程或任何系統工具，只輸出「需要工具」。\nReplay / 重現 / 操作 / 開啟 / 關閉 / 點擊 / 已保存示範相關請求必須輸出「需要工具」。\n不要輸出動作清單，不要猜工具名稱，不要直接輸出無前綴自然語言。",
-		CurrentInput: userText,
-		SanitizeLLM:  true,
-	})
+	_ = systemPrompt
+	return strings.Join([]string{
+		"任務=工具粗判",
+		"輸出只能是 需要工具 或 閒聊ㄌ<回答>",
+		"需要搜尋本機文件/讀資料/開啟/寫入/匯出/排程/製作或使用小程式/已保存螢幕操作/DAG/自動流程/重現/回放/操作/點擊時，輸出需要工具",
+		"不要猜工具名稱; 不要輸出無前綴自然語言",
+		"Q=" + compactPromptField(userText),
+	}, " | ")
 }
 
 func isNeedToolResponse(text string) bool {
@@ -3275,7 +4216,7 @@ func errorString(err error) string {
 func buildLocalModelPrompt(systemPrompt string, actionTags []string, userText string) string {
 	tagList := strings.Join(conversation.PromptActionTags(actionTags), "、")
 	return fmt.Sprintf(
-		"%s\n回答規則：用三行回答，每行一個欄位，但不要寫欄位名稱（不要寫 動作:、內容:、下一步:）。\n第一行寫動作（從候選中選：%s）\n動作定義：已知答案、一般聊天、寒暄、情緒回應用 輸出；需要系統查資料用 搜尋；需要製作或使用資料處理小程式用 程式；操作=只代表執行或重現已保存的螢幕 replay 操作，不是一般的處理/回答；讀取=取得內容並回報；開啟=用外部應用程式呈現；寫入=新增或修改檔案；匯出=產生檔案；提問=只有缺少必要資訊時才補問；選項=只有使用者明確要求選擇時才顯示選項卡。\n第二行直接寫要顯示給使用者的內容，不要加 內容:；若第一行是選項且沒有問題文字，必須用 ㄤ 開頭，例如 ㄤ紅色ㄤ綠色ㄤ藍色；若有問題文字，寫 問題ㄤ選項一ㄤ選項二。\n第三行只寫 待命、輸出、選項 其中之一；程式通常寫 輸出，其他通常寫 待命。\n沒有明確重現、回放、照做、執行已保存操作的意思時，不要選 操作。\n範例：\n輸出\n你好啊\n待命\n\nQ: %s\n",
+		"%s\n回答規則：用三行回答，每行一個欄位，但不要寫欄位名稱（不要寫 動作:、內容:、下一步:）。\n第一行寫動作（從候選中選：%s）\n動作定義：已知答案、一般聊天、寒暄、情緒回應用 輸出；需要系統查資料用 搜尋；需要製作獨立程式用 程式；要用既有 skill 處理資料用 流程；操作=只代表執行或重現已保存的螢幕 replay 操作，不是一般的處理/回答；讀取=取得內容並回報；開啟=用外部應用程式呈現；寫入=新增或修改檔案；匯出=產生檔案；提問=只有缺少必要資訊時才補問；選項=只有使用者明確要求選擇時才顯示選項卡。\n第二行直接寫要顯示給使用者的內容，不要加 內容:；若第一行是選項且沒有問題文字，必須用 ㄤ 開頭，例如 ㄤ紅色ㄤ綠色ㄤ藍色；若有問題文字，寫 問題ㄤ選項一ㄤ選項二。\n第三行只寫 待命、輸出、選項 其中之一；程式、流程通常寫 輸出，其他通常寫 待命。\n沒有明確重現、回放、照做、執行已保存操作的意思時，不要選 操作。\n範例：\n輸出\n你好啊\n待命\n\nQ: %s\n",
 		systemPrompt, tagList, userText,
 	)
 }
@@ -3898,6 +4839,34 @@ func conversationContinuityKey(lane, sessionID string) string {
 	return lane + ":" + sessionID
 }
 
+// replyLanguageField turns the user's Role Language setting into the compact
+// "語言=..." directive injected into the persona system prompt. Picking a
+// specific language (e.g. Japanese) instructs the model to always reply in it;
+// Auto / unknown follows whatever language the user wrote in.
+func (a *App) replyLanguageField() string {
+	role := ""
+	if a.uiSettingsService != nil {
+		role = strings.TrimSpace(a.uiSettingsService.Get().RoleLanguage)
+	}
+	switch role {
+	case "中", "中文", "繁中", "繁體中文", "Traditional Chinese", "Chinese", "zh-TW", "zh":
+		return "語言=繁體中文（請一律以繁體中文回覆）"
+	case "en", "英文", "English":
+		return "語言=English（always reply in English）"
+	case "ja", "日文", "日本語", "Japanese":
+		return "語言=日本語（必ず日本語で返信してください）"
+	case "pt", "pt-PT", "Português", "葡萄牙文":
+		return "語言=Português de Portugal（responda sempre em português）"
+	case "es", "Español", "西班牙文":
+		return "語言=Español（responde siempre en español）"
+	case "th", "ไทย", "泰文":
+		return "語言=ไทย（ตอบกลับเป็นภาษาไทยเสมอ）"
+	default:
+		// Auto / 自動 / unrecognised: mirror the user's input language.
+		return "語言=與使用者輸入語言一致"
+	}
+}
+
 // buildSharedPersonaPrompt keeps persona data compact; user-written persona
 // fields such as "請簡短回答" remain global rules for both lanes.
 func (a *App) buildSharedPersonaPrompt(persona settings.Persona) string {
@@ -3906,7 +4875,7 @@ func (a *App) buildSharedPersonaPrompt(persona settings.Persona) string {
 		name = "憂樂傻酷"
 	}
 
-	fields := []string{"角色=" + name, "語言=繁中"}
+	fields := []string{"角色=" + name, a.replyLanguageField()}
 	if value := strings.TrimSpace(persona.Identity); value != "" {
 		fields = append(fields, "身份="+value)
 	}
@@ -4201,6 +5170,12 @@ func (a *App) ImportReferenceFile(sourcePath string) (ReferenceFile, error) {
 	if err != nil {
 		return ReferenceFile{}, err
 	}
+	if err := a.indexReferenceFileIfNeeded(ref.Path, referenceVectorsDir(), a.currentVectorizer()); err != nil {
+		debugtrace.Record("reference_import.index_error", "", map[string]interface{}{
+			"name":  ref.Name,
+			"error": err.Error(),
+		})
+	}
 	a.maybeEmitConfigMissing(ref.Name)
 	return ref, nil
 }
@@ -4285,8 +5260,13 @@ func (a *App) PreparePackageInstallPayload(sourceName, fileContent, manifestJSON
 // ConfirmPackageInstall confirms a quarantined import after user review.
 // After this returns, the caller may write to tool_registry.
 func (a *App) ConfirmPackageInstall(importID string) error {
-	_, err := a.packageService.ConfirmInstall(importID)
-	return err
+	pending, err := a.packageService.ConfirmInstall(importID)
+	if err != nil {
+		return err
+	}
+	a.registerPackageTool(pending)
+	a.eventBus.Emit("tools:list_changed", nil)
+	return nil
 }
 
 // RejectPackageInstall rejects a quarantined import; removes quarantine package.
@@ -4367,6 +5347,10 @@ func (a *App) ConfirmSkillArchive(previewID string) (interface{}, error) {
 		return nil, fmt.Errorf("app: ConfirmSkillArchive: preview %q not found", previewID)
 	}
 	manifest, err := a.skillArchive.ConfirmArchive(preview)
+	if err == nil && manifest != nil {
+		a.registerSkillTool(manifest)
+		a.eventBus.Emit("tools:list_changed", nil)
+	}
 	return frontendDTO(manifest), err
 }
 
@@ -5724,9 +6708,13 @@ func (a *App) StartLearningMode(activeWindowHash string) (interface{}, error) {
 	}
 	if a.nativeInput != nil {
 		if err := a.nativeInput.Start(func(event visual_learning.NativeClickEvent) {
+			eventType := visual_learning.MouseEventClick
+			if event.ClickCount >= 2 {
+				eventType = visual_learning.MouseEventDoubleClick
+			}
 			trace := visual_learning.MouseEventTrace{
 				Timestamp:       event.Timestamp,
-				EventType:       visual_learning.MouseEventClick,
+				EventType:       eventType,
 				X:               event.X,
 				Y:               event.Y,
 				Button:          event.Button,
@@ -5825,8 +6813,11 @@ func (a *App) recordedNativeWindowsAnchor(event visual_learning.NativeClickEvent
 	if err != nil || capture.Width <= 0 || capture.Height <= 0 || len(capture.ImageData) == 0 {
 		return visual_learning.RecordedClickWindowsAnchor(event.X, event.Y, nil, fallbackViewport)
 	}
-	localX := event.X - capture.WindowRect.X
-	localY := event.Y - capture.WindowRect.Y
+	// 螢幕座標是 point，截圖是 pixel（Retina 為 2x）；anchor 一律存在截圖
+	// pixel 空間（anchor.ImageWidth/Height 記錄該空間大小供回放縮放）。
+	scale := capture.PixelScale()
+	localX := int(math.Round(float64(event.X-capture.WindowRect.X) * scale))
+	localY := int(math.Round(float64(event.Y-capture.WindowRect.Y) * scale))
 	detection := a.yoloDetector.Detect(capture.ImageData, capture.Width, capture.Height)
 	shape := a.opencvPipeline.Propose(capture.ImageData, capture.Width, capture.Height)
 	anchor, err := visual_learning.ResolveWindowsClickAnchor(
@@ -5988,6 +6979,12 @@ func (a *App) ExecuteNativeLearningReplayStep(payload string) (interface{}, erro
 	const replayGeneSkillID = "learning_replay"
 	a.emitHookGeneDataEntered(replayGeneSkillID, invocationID)
 	defer a.emitHookGeneCompleted(replayGeneSkillID, invocationID)
+	// 錄到的 window handle 可能已失效（macOS 的 CGWindowID 在目標視窗關閉後
+	// 即作廢）；先以 handle/process/title 比對目前桌面，必要時重新找回視窗。
+	resolvedWin, resolvedOK := a.nativeInput.ResolveWindow(step.WindowHandle, step.WindowProcess, step.WindowTitle)
+	if resolvedOK {
+		step.WindowHandle = resolvedWin.Handle
+	}
 	if relocated, ok := a.relocateNativeReplayStep(step); ok {
 		a.emitHookGeneDataProcessed(replayGeneSkillID, invocationID)
 		if relocated.NeedsConfirmation && canAutoConfirmBrowserReplay(step, relocated) {
@@ -6044,17 +7041,49 @@ func (a *App) ExecuteNativeLearningReplayStep(payload string) (interface{}, erro
 		result.DebugInfoPath = debugInfoPathForImage(relocated.DebugImagePath)
 		return frontendDTO(result), nil
 	}
+	// 無視覺重定位可用：至少把錄製座標重映射到視窗目前的位置/大小，
+	// 避免視窗移動後盲點舊座標。
+	if resolvedOK {
+		step = adjustNativeStepToWindowRect(step, resolvedWin.Rect)
+	}
 	result := a.nativeInput.Click(step)
 	a.emitHookGeneDataLeft(replayGeneSkillID, invocationID, true)
 	return frontendDTO(result), nil
+}
+
+// adjustNativeStepToWindowRect 將「錄製當下相對視窗的點」按比例映射到視窗
+// 目前的 rect（兩者皆為螢幕 point 座標空間）。
+func adjustNativeStepToWindowRect(step visual_learning.LearningReplayStep, current visual_learning.PixelBBox) visual_learning.LearningReplayStep {
+	recorded := step.WindowRect
+	if recorded.W <= 0 || recorded.H <= 0 || current.W <= 0 || current.H <= 0 {
+		return step
+	}
+	if recorded == current {
+		return step
+	}
+	relX := float64(step.X-recorded.X) / float64(recorded.W)
+	relY := float64(step.Y-recorded.Y) / float64(recorded.H)
+	if relX < 0 || relX > 1 || relY < 0 || relY > 1 {
+		return step
+	}
+	step.X = current.X + int(math.Round(relX*float64(current.W)))
+	step.Y = current.Y + int(math.Round(relY*float64(current.H)))
+	return step
 }
 
 func (a *App) relocateNativeReplayStep(step visual_learning.LearningReplayStep) (visual_learning.AnchorRelocationResult, bool) {
 	if a == nil || a.nativeInput == nil || step.WindowsAnchor == nil || step.WindowHandle == 0 {
 		return visual_learning.AnchorRelocationResult{}, false
 	}
-	recordedWidth := step.WindowRect.W
-	recordedHeight := step.WindowRect.H
+	// anchor 座標存在「錄製當下截圖」的 pixel 空間；優先用 anchor 自記的影像
+	// 尺寸。拿 point 空間的 WindowRect 來當分母在 Retina 上會差 2 倍，導致
+	// 重定位整個錯位（舊 trace 沒有 image_width 時仍退回 WindowRect）。
+	recordedWidth := step.WindowsAnchor.ImageWidth
+	recordedHeight := step.WindowsAnchor.ImageHeight
+	if recordedWidth <= 0 || recordedHeight <= 0 {
+		recordedWidth = step.WindowRect.W
+		recordedHeight = step.WindowRect.H
+	}
 	if recordedWidth <= 0 || recordedHeight <= 0 {
 		if step.Viewport != nil {
 			recordedWidth = step.Viewport.Width
@@ -6098,9 +7127,10 @@ func (a *App) relocateNativeReplayStep(step visual_learning.LearningReplayStep) 
 			relocated.DebugImagePath = debugPath
 		}
 		windowPoint := relocated.ExecutionPoint
+		captureScale := capture.PixelScale()
 		relocated.ExecutionPoint = visual_learning.PixelPoint{
-			X: capture.WindowRect.X + windowPoint.X,
-			Y: capture.WindowRect.Y + windowPoint.Y,
+			X: capture.WindowRect.X + int(math.Round(float64(windowPoint.X)/captureScale)),
+			Y: capture.WindowRect.Y + int(math.Round(float64(windowPoint.Y)/captureScale)),
 		}
 	}
 	relocated.OriginalPoint = visual_learning.PixelPoint{X: step.X, Y: step.Y}
@@ -6144,14 +7174,18 @@ func fallbackScaledWindowAnchorRelocation(step visual_learning.LearningReplaySte
 	if reason == "" {
 		reason = "YOLO/OpenCV did not produce a relocation candidate"
 	}
+	captureScale := capture.PixelScale()
 	return visual_learning.AnchorRelocationResult{
-		OK:             true,
-		Method:         "scaled_anchor_relocation",
-		Reason:         reason + "; using recorded visual anchor ratio inside the current resized window",
-		Confidence:     0.45,
-		OriginalPoint:  visual_learning.PixelPoint{X: step.X, Y: step.Y},
-		ExecutionPoint: visual_learning.PixelPoint{X: capture.WindowRect.X + windowPoint.X, Y: capture.WindowRect.Y + windowPoint.Y},
-		AnchorBBox:     scaledBox,
+		OK:            true,
+		Method:        "scaled_anchor_relocation",
+		Reason:        reason + "; using recorded visual anchor ratio inside the current resized window",
+		Confidence:    0.45,
+		OriginalPoint: visual_learning.PixelPoint{X: step.X, Y: step.Y},
+		ExecutionPoint: visual_learning.PixelPoint{
+			X: capture.WindowRect.X + int(math.Round(float64(windowPoint.X)/captureScale)),
+			Y: capture.WindowRect.Y + int(math.Round(float64(windowPoint.Y)/captureScale)),
+		},
+		AnchorBBox: scaledBox,
 	}, true
 }
 
@@ -6229,11 +7263,15 @@ func relocationResultForWindowOverlay(result visual_learning.AnchorRelocationRes
 	if capture.Width <= 0 || capture.Height <= 0 {
 		return result
 	}
-	if result.ExecutionPoint.X >= capture.WindowRect.X && result.ExecutionPoint.X < capture.WindowRect.X+capture.Width &&
-		result.ExecutionPoint.Y >= capture.WindowRect.Y && result.ExecutionPoint.Y < capture.WindowRect.Y+capture.Height {
+	// 螢幕座標（point）落在視窗範圍內時，轉成截圖（pixel）座標再畫 overlay。
+	scale := capture.PixelScale()
+	winW := int(math.Round(float64(capture.Width) / scale))
+	winH := int(math.Round(float64(capture.Height) / scale))
+	if result.ExecutionPoint.X >= capture.WindowRect.X && result.ExecutionPoint.X < capture.WindowRect.X+winW &&
+		result.ExecutionPoint.Y >= capture.WindowRect.Y && result.ExecutionPoint.Y < capture.WindowRect.Y+winH {
 		result.ExecutionPoint = visual_learning.PixelPoint{
-			X: result.ExecutionPoint.X - capture.WindowRect.X,
-			Y: result.ExecutionPoint.Y - capture.WindowRect.Y,
+			X: int(math.Round(float64(result.ExecutionPoint.X-capture.WindowRect.X) * scale)),
+			Y: int(math.Round(float64(result.ExecutionPoint.Y-capture.WindowRect.Y) * scale)),
 		}
 	}
 	return result
@@ -6303,6 +7341,8 @@ func canAutoConfirmBrowserReplay(step visual_learning.LearningReplayStep, reloca
 	process := strings.ToLower(filepath.Base(processPath))
 	switch process {
 	case "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe":
+	// macOS 的 process 是 app 名稱而非 .exe（CGWindowList 的 kCGWindowOwnerName）。
+	case "google chrome", "google chrome beta", "microsoft edge", "firefox", "safari", "brave browser", "opera", "vivaldi", "arc":
 	default:
 		return false
 	}

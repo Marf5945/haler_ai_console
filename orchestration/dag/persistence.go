@@ -239,7 +239,8 @@ func ListPersistedRuns(projectRoot string) ([]string, error) {
 // DeletePersistedRun 刪除持久化的 DAGRun。
 func DeletePersistedRun(projectRoot string, runID string) error {
 	dir := filepath.Join(projectRoot, "dag_runs")
-	// critical 與 full 兩檔都嘗試刪除；缺檔忽略。
+	// critical 與 full 兩檔都嘗試刪除；缺檔忽略。loop sidecar 一併清，避免孤兒檔。
 	_ = os.Remove(filepath.Join(dir, runID+suffixCritical))
+	DeleteLoopStatesForRun(projectRoot, runID)
 	return os.Remove(filepath.Join(dir, runID+suffixFull))
 }

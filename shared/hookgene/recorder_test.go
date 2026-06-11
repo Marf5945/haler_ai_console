@@ -160,7 +160,7 @@ func TestEvictStalePending(t *testing.T) {
 	// 直接驗證孤兒驅逐邏輯（缺 completed 的 invocation 不永久殘留）。
 	r := &Recorder{pending: map[string]*pendingInvocation{}}
 	now := time.Now()
-	r.pending["old"] = &pendingInvocation{firstSeen: now.Add(-time.Hour)}      // > 30m → 驅逐
+	r.pending["old"] = &pendingInvocation{firstSeen: now.Add(-time.Hour)}     // > 30m → 驅逐
 	r.pending["fresh"] = &pendingInvocation{firstSeen: now.Add(-time.Minute)} // 新 → 保留
 	r.evictStalePending(now)
 	if _, ok := r.pending["old"]; ok {

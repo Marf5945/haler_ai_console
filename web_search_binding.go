@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"ui_console/adapter/debugtrace"
+	"ui_console/data/memory"
 	"ui_console/orchestration/skill_step"
 	"ui_console/shared/actionchain"
 	"ui_console/shared/eventbus"
@@ -73,7 +74,27 @@ func (a *App) ClearWebSearchConfig() (interface{}, error) {
 
 // SearchWeb is the Wails-facing network search binding.
 func (a *App) SearchWeb(query string, limit int) (interface{}, error) {
-	req := websearch.SearchRequest{Query: strings.TrimSpace(query), Limit: limit}
+	// SEC-15: 直接呼叫入口同樣過出境檢查；命中回 need_confirm，
+	// 前端確認後改呼叫 SearchWebConfirmed 送遮蔽版。
+	masked, records := memory.RedactBeforeWrite(strings.TrimSpace(query))
+	if len(records) > 0 {
+		return map[string]interface{}{
+			"status":       "need_confirm",
+			"masked_query": masked,
+			"hits":         describeEgressHits(records),
+		}, nil
+	}
+	return a.searchWebDirect(strings.TrimSpace(query), limit)
+}
+
+// SearchWebConfirmed 前端確認後用遮蔽版查詢續行（仍再過一次檢查，防呆）。
+func (a *App) SearchWebConfirmed(maskedQuery string, limit int) (interface{}, error) {
+	cleaned, _ := memory.RedactBeforeWrite(strings.TrimSpace(maskedQuery))
+	return a.searchWebDirect(cleaned, limit)
+}
+
+func (a *App) searchWebDirect(query string, limit int) (interface{}, error) {
+	req := websearch.SearchRequest{Query: query, Limit: limit}
 	cfg, err := a.loadWebSearchProviderConfig()
 	if err != nil {
 		a.emitWebSearchConfigRequired()
@@ -97,6 +118,10 @@ func (a *App) maybeHandleWebSearch(userText, sessionID, traceID string) (*skill_
 	if resp, handled := a.maybeHandleURLFetch(userText, sessionID, traceID); handled {
 		return resp, true
 	}
+	// SEC-15: 出境閘門的 pending 確認（「好」→ 送遮蔽版、「取消」→ 放棄）。
+	if resp, handled := a.maybeResumePendingSearchEgress(userText, sessionID, traceID); handled {
+		return resp, true
+	}
 	req, ok := websearch.ParseUserQuery(userText)
 	if !ok {
 		return nil, false
@@ -106,6 +131,10 @@ func (a *App) maybeHandleWebSearch(userText, sessionID, traceID string) (*skill_
 		return &resp, true
 	}
 	req.Query = a.targetWithBackground(sessionID, req.Query)
+	// SEC-15: 查詢（含背景）出境前過機密檢查，命中先問。
+	if resp, gated := a.gateSearchEgress(req, sessionID, traceID); gated {
+		return resp, true
+	}
 	resp := a.executeWebSearch(req, traceID)
 	return &resp, true
 }
@@ -159,6 +188,11 @@ func (a *App) executeWebSearch(req websearch.SearchRequest, traceID string) skil
 		urls = append(urls, r.URL)
 	}
 	recordWebSearchResultURLs(urls, "", traceID)
+	// 搜尋＋模型摘要：先嘗試用目前對話模型整理成帶來源標號的摘要；
+	// 失敗、未設定可用模型或回應為空時，回退成原始結果清單（不讓使用者看到錯誤）。
+	if summary, ok := a.summarizeWebSearchOutcome(req, outcome, traceID); ok {
+		return skill_step.CLIResponse{Text: summary}
+	}
 	return skill_step.CLIResponse{Text: websearch.FormatSearchOutcome(req, outcome)}
 }
 

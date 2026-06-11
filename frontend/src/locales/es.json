@@ -279,7 +279,11 @@
     "sending": "Enviando… ({current}/{total})",
     "voiceHold": "Mantén Pulsado para Hablar",
     "summary": "Resumen",
-    "delete": "Eliminar"
+    "delete": "Eliminar",
+    "insertImage": "Insertar imagen",
+    "removeImage": "Quitar imagen",
+    "imagePreview": "Vista previa de imagen",
+    "imageTooLarge": "Imagen demasiado grande (máx {max})"
   },
   "system": {
     "sidecarFail": "[Sistema] El Sidecar no se pudo iniciar: verifica que Node.js esté instalado localmente o revisa el registro para más detalles.",
@@ -324,9 +328,9 @@
   "settings": {
     "panelSettings": "Ajustes del Panel",
     "panelLanguage": "Idioma del Panel",
-    "langZhTW": "中",
-    "langEn": "en",
-    "langJa": "ja",
+    "langZhTW": "中文",
+    "langEn": "English",
+    "langJa": "日文",
     "roleLanguage": "Idioma del Personaje",
     "roleLangAuto": "Auto",
     "fontPreset": "Preajuste de Fuente",
@@ -385,9 +389,9 @@
     "voiceManualSpecify": "Manual",
     "voiceAutoDetect": "Detección automática",
     "localModelDefault": "Modelo Local",
-    "langPt": "pt",
-    "langEs": "es",
-    "langTh": "th"
+    "langPt": "Português",
+    "langEs": "Español",
+    "langTh": "ไทย"
   },
   "onboarding": {
     "fillNamePath": "Completa un nombre y una ruta",

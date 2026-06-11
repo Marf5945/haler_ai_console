@@ -11,9 +11,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"ui_console/adapter/adapter_registry"
 	"ui_console/adapter/debugtrace"
@@ -49,8 +49,6 @@ type goProgramContractReview struct {
 	MissingUserData bool     `json:"missing_user_data"`
 	RequiredData    []string `json:"required_data"`
 }
-
-var goProgramIDNonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
 
 func (a *App) maybeHandleGoProgramAuthoring(decision toolRoutingDecision, sessionID, traceID, userText string) (bool, skill_step.CLIResponse) {
 	if strings.TrimSpace(decision.Action) != "程式" {
@@ -650,6 +648,39 @@ func requiresClothingTable(review goProgramContractReview) bool {
 	return strings.Contains(text, "衣服") || strings.Contains(text, "clothing") || strings.Contains(text, "clothes")
 }
 
+// buildGoProgramSkillDescription 從小程式 manifest 組出「用法說明」字串，填進
+// SkillManifest.Description，讓使用者問「這個 skill 怎麼用」時有實際內容可讀，
+// 而不是只看到「已安裝 skill」。內容涵蓋：用途、需要的輸入、資料來源、輸出。
+func buildGoProgramSkillDescription(m go_program.Manifest) string {
+	purpose := strings.TrimSpace(m.Purpose)
+	if purpose == "" || strings.HasPrefix(strings.ToLower(purpose), "pending program skill") {
+		purpose = "處理已載入資料並產出結果的小程式"
+	}
+	parts := []string{purpose}
+	if len(m.InputSchema.Required) > 0 {
+		parts = append(parts, "需要輸入："+strings.Join(m.InputSchema.Required, "、"))
+	}
+	if len(m.DataSources) > 0 {
+		var names []string
+		for _, ds := range m.DataSources {
+			n := strings.TrimSpace(ds.Name)
+			if n == "" {
+				n = strings.TrimSpace(ds.Kind)
+			}
+			if n != "" {
+				names = append(names, n)
+			}
+		}
+		if len(names) > 0 {
+			parts = append(parts, "資料來源："+strings.Join(names, "、"))
+		}
+	}
+	if len(m.OutputSchema.Required) > 0 {
+		parts = append(parts, "輸出："+strings.Join(m.OutputSchema.Required, "、"))
+	}
+	return strings.Join(parts, "；")
+}
+
 func (a *App) saveGoProgramPendingSkill(manifest go_program.Manifest, sourceDir, hash string) (string, error) {
 	skillID := "go-program-" + normalizeGoProgramID(manifest.DisplayName)
 	m := &skill_step.SkillManifest{
@@ -657,6 +688,7 @@ func (a *App) saveGoProgramPendingSkill(manifest go_program.Manifest, sourceDir,
 		SkillID:        skillID,
 		DisplayName:    manifest.DisplayName,
 		Version:        "0.1.0",
+		Description:    buildGoProgramSkillDescription(manifest),
 		DescriptionDoc: "README.md",
 		Tags: skill_step.SkillTags{
 			PurposeTag: []string{"go_program", "authoring_loop"},
@@ -686,7 +718,30 @@ func (a *App) saveGoProgramPendingSkill(manifest go_program.Manifest, sourceDir,
 	if err := copyTreeForGoProgram(sourceDir, dest); err != nil {
 		return "", err
 	}
+	// 同時把 go_program.Manifest 存進 skill 資料夾，保留用途／輸入schema，供日後
+	// 重新推導用法說明或重長使用（原本只複製 source，manifest 會遺失而無法還原）。
+	if data, err := json.MarshalIndent(manifest, "", "  "); err == nil {
+		_ = os.WriteFile(filepath.Join(appDataRoot(), "data", "skills", skillID, "programs", "program_manifest.json"), data, 0o600)
+	}
 	return skillID, nil
+}
+
+// goProgramSkillDescriptionFromDisk 讀取已歸檔 skill 內保存的 go_program.Manifest，
+// 有的話回傳完整用法說明；找不到回 ("", false) 讓呼叫端退回保底合成。
+func goProgramSkillDescriptionFromDisk(skillID string) (string, bool) {
+	path := filepath.Join(appDataRoot(), "data", "skills", skillID, "programs", "program_manifest.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	var m go_program.Manifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return "", false
+	}
+	if desc := strings.TrimSpace(buildGoProgramSkillDescription(m)); desc != "" {
+		return desc, true
+	}
+	return "", false
 }
 
 func boolPerm(v bool) string {
@@ -724,15 +779,28 @@ func copyTreeForGoProgram(src, dst string) error {
 }
 
 func normalizeGoProgramID(name string) string {
-	lower := strings.ToLower(strings.TrimSpace(name))
-	id := goProgramIDNonAlnum.ReplaceAllString(lower, "-")
-	id = strings.Trim(id, "-")
-	if id == "" {
-		id = "program"
+	trimmed := strings.TrimSpace(name)
+	// 保留中文等 unicode 文字與英數字，其餘（空白、標點…）收斂成單一 "-"。
+	// 這樣「產出電料Bom」會得到 id「產出電料bom」，而不是被刪到只剩 hash。
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(trimmed) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', unicode.IsLetter(r):
+			b.WriteRune(r)
+			prevDash = false
+		default:
+			if !prevDash {
+				b.WriteRune('-')
+				prevDash = true
+			}
+		}
 	}
-	if id != lower {
-		sum := sha256.Sum256([]byte(strings.TrimSpace(name)))
-		id = fmt.Sprintf("%s-%x", id, sum[:4])
+	id := strings.Trim(b.String(), "-")
+	if id == "" {
+		// 名稱完全沒有可用字元時，才退回 hash 以維持唯一性。
+		sum := sha256.Sum256([]byte(trimmed))
+		return fmt.Sprintf("program-%x", sum[:4])
 	}
 	return id
 }

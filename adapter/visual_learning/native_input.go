@@ -12,6 +12,7 @@ type NativeClickEvent struct {
 	WindowTitle   string    `json:"window_title,omitempty"`
 	WindowProcess string    `json:"window_process,omitempty"`
 	WindowHandle  uintptr   `json:"window_handle,omitempty"`
+	ClickCount    int       `json:"click_count,omitempty"`
 	ScreenX       int       `json:"screen_x,omitempty"`
 	ScreenY       int       `json:"screen_y,omitempty"`
 	ScreenWidth   int       `json:"screen_width,omitempty"`
@@ -26,6 +27,30 @@ type WindowCapture struct {
 	WindowRect    PixelBBox `json:"window_rect"`
 	WindowTitle   string    `json:"window_title,omitempty"`
 	WindowProcess string    `json:"window_process,omitempty"`
+	// Scale is the pixels-per-point ratio of the captured image relative to
+	// WindowRect (e.g. 2.0 on a macOS Retina display). 0 must be treated as 1.
+	Scale float64 `json:"scale,omitempty"`
+}
+
+// PixelScale returns the capture's pixels-per-point ratio, defaulting to 1.
+func (c WindowCapture) PixelScale() float64 {
+	if c.Scale > 0 {
+		return c.Scale
+	}
+	return 1
+}
+
+// ResolvedWindow describes the current OS window matched to a recorded step.
+// When the recorded native handle is stale (window closed/reopened), the
+// platform implementation may re-find the window by process name and title;
+// Refound is true in that case.
+type ResolvedWindow struct {
+	Handle  uintptr   `json:"handle"`
+	PID     int       `json:"pid,omitempty"`
+	Title   string    `json:"title,omitempty"`
+	Process string    `json:"process,omitempty"`
+	Rect    PixelBBox `json:"rect"`
+	Refound bool      `json:"refound,omitempty"`
 }
 
 // NativeReplayResult is returned for one OS-level replay step.

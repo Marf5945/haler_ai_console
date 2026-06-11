@@ -4,46 +4,141 @@
 //	xl/sharedStrings.xml — 字串表（所有儲存格文字集中在這）
 //	xl/worksheets/sheet1.xml — 工作表（儲存格用 <v> 索引指向字串表）
 //
-// Import：抽取所有字串。Export：產生最小單工作表 xlsx。
+// Import：讀成二維表格或 tab 分隔文字。Export：產生最小單工作表 xlsx。
 package builtin
 
 import (
+	"encoding/xml"
 	"fmt"
 	"html"
+	"path"
 	"sort"
+	"strconv"
 	"strings"
 )
 
-const xlsxSharedStringsNS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-
 // ExtractXlsxText 從 .xlsx 抽出所有儲存格文字。
-// 策略：讀 sharedStrings.xml 取所有 <t> 文字，以 \n 分隔。
+// 策略：讀第一個工作表，回傳 tab 分隔欄位、\n 分隔列的文字。
 func ExtractXlsxText(path string) (string, error) {
-	data, err := zipReadFile(path, "xl/sharedStrings.xml")
+	grid, err := ReadXlsxSheetGrid(path, "")
 	if err != nil {
-		return "", fmt.Errorf("xlsx_rw: read sharedStrings: %w", err)
+		return "", err
 	}
-	if data == nil {
-		// 有些 xlsx 沒有 sharedStrings（全部是數字），嘗試直接讀 sheet
-		return extractXlsxFromSheet(path)
-	}
-
-	// 抽取 <t> 節點文字
-	text := xmlExtractText(data, xlsxSharedStringsNS, "t", "si")
-	if text == "" {
-		// fallback: 不限 namespace 抽取
-		text = xmlExtractText(data, "", "t", "si")
-	}
-	return text, nil
+	return xlsxGridToTabText(grid), nil
 }
 
-// extractXlsxFromSheet 從 sheet1 直接抽取 <v> 值（fallback）。
-func extractXlsxFromSheet(path string) (string, error) {
-	data, err := zipReadFile(path, "xl/worksheets/sheet1.xml")
-	if err != nil || data == nil {
-		return "", fmt.Errorf("xlsx_rw: no sharedStrings or sheet1 found")
+// ReadXlsxSheetGrid 將指定工作表讀成二維字串表格 grid[列][欄]。
+// sheetName 為空時讀第一個工作表。
+func ReadXlsxSheetGrid(filePath, sheetName string) ([][]string, error) {
+	target, err := xlsxResolveSheetTarget(filePath, sheetName)
+	if err != nil {
+		return nil, err
 	}
-	return xmlExtractText(data, "", "v", "row"), nil
+	shared, err := xlsxReadSharedStrings(filePath)
+	if err != nil {
+		return nil, err
+	}
+	data, err := zipReadFile(filePath, target)
+	if err != nil {
+		return nil, fmt.Errorf("xlsx_rw: read %s: %w", target, err)
+	}
+	if data == nil {
+		return nil, fmt.Errorf("xlsx_rw: worksheet %s not found", target)
+	}
+
+	var sheet struct {
+		Rows []struct {
+			R     string `xml:"r,attr"`
+			Cells []struct {
+				R  string `xml:"r,attr"`
+				T  string `xml:"t,attr"`
+				V  string `xml:"v"`
+				Is struct {
+					T string `xml:"t"`
+					R []struct {
+						T string `xml:"t"`
+					} `xml:"r"`
+				} `xml:"is"`
+			} `xml:"c"`
+		} `xml:"sheetData>row"`
+	}
+	if err := xml.Unmarshal(data, &sheet); err != nil {
+		return nil, fmt.Errorf("xlsx_rw: parse worksheet XML: %w", err)
+	}
+
+	var grid [][]string
+	for rowPos, row := range sheet.Rows {
+		rowIdx := rowPos
+		if n, err := strconv.Atoi(strings.TrimSpace(row.R)); err == nil && n > 0 {
+			rowIdx = n - 1
+		}
+		cells := map[int]string{}
+		maxCol := -1
+		for cellPos, c := range row.Cells {
+			colIdx := cellPos
+			if c.R != "" {
+				parsedRow, parsedCol, err := parseXlsxA1CellRef(c.R)
+				if err != nil {
+					continue
+				}
+				rowIdx = parsedRow
+				colIdx = parsedCol
+			}
+			if colIdx > maxCol {
+				maxCol = colIdx
+			}
+			cells[colIdx] = xlsxCellText(c.T, c.V, c.Is.T, xlsxRichTextRuns(c.Is.R), shared)
+		}
+		for len(grid) <= rowIdx {
+			grid = append(grid, nil)
+		}
+		if maxCol < 0 {
+			grid[rowIdx] = []string{}
+			continue
+		}
+		line := make([]string, maxCol+1)
+		for col, v := range cells {
+			line[col] = v
+		}
+		grid[rowIdx] = line
+	}
+	return grid, nil
+}
+
+// ConvertXlsxToCSV 將第一個工作表轉成 CSV，方便系統讀取。
+func ConvertXlsxToCSV(xlsxPath, csvPath string) error {
+	return ConvertXlsxSheetToCSV(xlsxPath, csvPath, "", ',')
+}
+
+// ConvertXlsxSheetToCSV 將指定工作表轉成 CSV/TSV。
+func ConvertXlsxSheetToCSV(xlsxPath, csvPath, sheetName string, delimiter rune) error {
+	grid, err := ReadXlsxSheetGrid(xlsxPath, sheetName)
+	if err != nil {
+		return err
+	}
+	return WriteCSVRecords(grid, csvPath, delimiter)
+}
+
+// ConvertCSVToXlsx 將 CSV 轉回單工作表 XLSX。
+func ConvertCSVToXlsx(csvPath, xlsxPath string) error {
+	return ConvertDelimitedToXlsx(csvPath, xlsxPath, ',')
+}
+
+// ConvertDelimitedToXlsx 將 CSV/TSV 轉回單工作表 XLSX。
+func ConvertDelimitedToXlsx(inputPath, xlsxPath string, delimiter rune) error {
+	records, err := ReadCSVRecords(inputPath, delimiter)
+	if err != nil {
+		return err
+	}
+	return GenerateStyledXlsx(XlsxSpec{Rows: recordsToXlsxRows(records)}, xlsxPath)
+}
+
+func xlsxGridToTabText(grid [][]string) string {
+	lines := make([]string, 0, len(grid))
+	for _, row := range grid {
+		lines = append(lines, strings.Join(row, "\t"))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // GenerateXlsx 從純文字產生最小 .xlsx 檔案。
@@ -286,6 +381,129 @@ func tsvToXlsxRows(content string) [][]XlsxCell {
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+func recordsToXlsxRows(records [][]string) [][]XlsxCell {
+	rows := make([][]XlsxCell, 0, len(records))
+	for _, record := range records {
+		row := make([]XlsxCell, 0, len(record))
+		for _, cell := range record {
+			row = append(row, XlsxCell{Value: cell})
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func xlsxResolveSheetTarget(filePath, sheetName string) (string, error) {
+	wbData, err := zipReadFile(filePath, "xl/workbook.xml")
+	if err != nil || wbData == nil {
+		return "xl/worksheets/sheet1.xml", nil
+	}
+	var wb struct {
+		Sheets []struct {
+			Name string `xml:"name,attr"`
+			RID  string `xml:"id,attr"`
+		} `xml:"sheets>sheet"`
+	}
+	if err := xml.Unmarshal(wbData, &wb); err != nil || len(wb.Sheets) == 0 {
+		return "xl/worksheets/sheet1.xml", nil
+	}
+
+	relData, _ := zipReadFile(filePath, "xl/_rels/workbook.xml.rels")
+	relMap := map[string]string{}
+	if relData != nil {
+		var rels struct {
+			Rel []struct {
+				ID     string `xml:"Id,attr"`
+				Target string `xml:"Target,attr"`
+			} `xml:"Relationship"`
+		}
+		if xml.Unmarshal(relData, &rels) == nil {
+			for _, r := range rels.Rel {
+				relMap[r.ID] = r.Target
+			}
+		}
+	}
+
+	pick := wb.Sheets[0]
+	if strings.TrimSpace(sheetName) != "" {
+		for _, s := range wb.Sheets {
+			if strings.TrimSpace(s.Name) == strings.TrimSpace(sheetName) {
+				pick = s
+				break
+			}
+		}
+	}
+	target := relMap[pick.RID]
+	if target == "" {
+		return "xl/worksheets/sheet1.xml", nil
+	}
+	if strings.HasPrefix(target, "/") {
+		return strings.TrimPrefix(target, "/"), nil
+	}
+	if strings.HasPrefix(target, "xl/") {
+		return path.Clean(target), nil
+	}
+	return path.Clean("xl/" + target), nil
+}
+
+func xlsxReadSharedStrings(filePath string) ([]string, error) {
+	data, err := zipReadFile(filePath, "xl/sharedStrings.xml")
+	if err != nil {
+		return nil, err
+	}
+	if data == nil {
+		return nil, nil
+	}
+	var sst struct {
+		SI []struct {
+			T string `xml:"t"`
+			R []struct {
+				T string `xml:"t"`
+			} `xml:"r"`
+		} `xml:"si"`
+	}
+	if err := xml.Unmarshal(data, &sst); err != nil {
+		return nil, fmt.Errorf("xlsx_rw: parse sharedStrings: %w", err)
+	}
+	out := make([]string, 0, len(sst.SI))
+	for _, si := range sst.SI {
+		if si.T != "" || len(si.R) == 0 {
+			out = append(out, si.T)
+			continue
+		}
+		out = append(out, strings.Join(xlsxRichTextRuns(si.R), ""))
+	}
+	return out, nil
+}
+
+func xlsxRichTextRuns(runs []struct {
+	T string `xml:"t"`
+}) []string {
+	out := make([]string, 0, len(runs))
+	for _, r := range runs {
+		out = append(out, r.T)
+	}
+	return out
+}
+
+func xlsxCellText(cellType, rawValue, inlineText string, inlineRuns []string, shared []string) string {
+	switch cellType {
+	case "s":
+		idx, err := strconv.Atoi(strings.TrimSpace(rawValue))
+		if err == nil && idx >= 0 && idx < len(shared) {
+			return shared[idx]
+		}
+		return ""
+	case "inlineStr":
+		if inlineText != "" || len(inlineRuns) == 0 {
+			return inlineText
+		}
+		return strings.Join(inlineRuns, "")
+	default:
+		return rawValue
+	}
 }
 
 func xlsxSpecRows(spec XlsxSpec) ([][]XlsxCell, error) {

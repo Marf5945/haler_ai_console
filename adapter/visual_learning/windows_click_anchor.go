@@ -72,6 +72,12 @@ type WindowsClickAnchorResult struct {
 	DetectorBackend  string                   `json:"detector_backend,omitempty"`
 	DetectorDegraded bool                     `json:"detector_degraded"`
 	NeedsReview      bool                     `json:"needs_review"`
+	// ImageWidth/ImageHeight record the pixel size of the screenshot the anchor
+	// coordinates live in. Replay must scale from THIS space (not the window's
+	// point-space rect) so point/pixel mismatches (e.g. Retina 2x) cannot skew
+	// relocation.
+	ImageWidth  int `json:"image_width,omitempty"`
+	ImageHeight int `json:"image_height,omitempty"`
 }
 
 // ResolveWindowsClickAnchor applies the Windows learning-mode selection rules:
@@ -99,6 +105,8 @@ func ResolveWindowsClickAnchor(
 	result := WindowsClickAnchorResult{
 		Platform:         "windows",
 		Click:            PixelPoint{X: clickX, Y: clickY},
+		ImageWidth:       width,
+		ImageHeight:      height,
 		OCRStatus:        "not_used",
 		OCRNote:          "OCR is optional and not used by this Windows-first anchor interface; shape/OCR text can be added later as an enhancer.",
 		DetectorBackend:  detection.Backend,

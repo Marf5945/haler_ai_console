@@ -279,7 +279,11 @@
     "sending": "傳送中… ({current}/{total})",
     "voiceHold": "按住說話",
     "summary": "摘要",
-    "delete": "刪除"
+    "delete": "刪除",
+    "insertImage": "插入圖片",
+    "removeImage": "移除圖片",
+    "imagePreview": "圖片預覽",
+    "imageTooLarge": "圖片過大（上限 {max}）"
   },
   "system": {
     "sidecarFail": "[系統] Sidecar 啟動失敗 — 請確認本機已安裝 Node.js，或查看 log 取得詳細錯誤。",
@@ -324,9 +328,9 @@
   "settings": {
     "panelSettings": "面板設定",
     "panelLanguage": "面板語言",
-    "langZhTW": "中",
-    "langEn": "en",
-    "langJa": "ja",
+    "langZhTW": "中文",
+    "langEn": "English",
+    "langJa": "日文",
     "roleLanguage": "角色語言",
     "roleLangAuto": "自動",
     "fontPreset": "字體版型",
@@ -385,9 +389,9 @@
     "voiceManualSpecify": "手動指定",
     "voiceAutoDetect": "自動偵測",
     "localModelDefault": "本機模型",
-    "langPt": "pt",
-    "langEs": "es",
-    "langTh": "th"
+    "langPt": "Português",
+    "langEs": "Español",
+    "langTh": "ไทย"
   },
   "onboarding": {
     "fillNamePath": "請填入名稱與路徑",

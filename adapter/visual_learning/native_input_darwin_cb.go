@@ -10,13 +10,14 @@ package visual_learning
 import "C"
 
 // goNativeClickCallback 由 native_input_darwin.go 的 CGEventTap C 回呼呼叫，
-// 透過 cgo.Handle 還原 *NativeInput 後送出事件。
+// 透過 cgo.Handle 還原 *NativeInput 後送出事件。clickCount 來自
+// kCGMouseEventClickState（雙擊時第二次 mouse-up 為 2）。
 //
 //export goNativeClickCallback
-func goNativeClickCallback(x, y C.double, button C.int, handle C.uintptr_t) {
+func goNativeClickCallback(x, y C.double, button, clickCount C.int, handle C.uintptr_t) {
 	n, ok := handleToNativeInput(uintptr(handle))
 	if !ok || n == nil {
 		return
 	}
-	n.emitClick(int(x), int(y), int(button))
+	n.emitClick(int(x), int(y), int(button), int(clickCount))
 }

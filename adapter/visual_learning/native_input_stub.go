@@ -49,3 +49,7 @@ func (n *NativeInput) MoveCursorOnly(step LearningReplayStep) NativeReplayResult
 func (n *NativeInput) CaptureWindow(hwnd uintptr) (WindowCapture, error) {
 	return WindowCapture{}, fmt.Errorf("native window capture is not implemented on this platform")
 }
+
+func (n *NativeInput) ResolveWindow(handle uintptr, process, title string) (ResolvedWindow, bool) {
+	return ResolvedWindow{}, false
+}

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"ui_console/builtin"
@@ -266,33 +267,29 @@ func (a *App) ensureReferenceVectorIndexes() {
 			continue
 		}
 		filePath := filepath.Join(refDir, entry.Name())
-		indexPath := filepath.Join(vecDir, entry.Name()+".json")
+		_ = a.indexReferenceFileIfNeeded(filePath, vecDir, vec)
+	}
+}
 
-		// 讀檔案前 64 KiB
-		f, err := os.Open(filePath)
-		if err != nil {
-			continue
-		}
-		buf := make([]byte, 64*1024)
-		n, _ := f.Read(buf)
-		f.Close()
-		content := string(buf[:n])
-		if content == "" {
-			continue
-		}
-		contentHash := sha256Hex64(content)
-
-		// 已有索引 → 讀回比對 metadata；一致就跳過
-		if data, rerr := os.ReadFile(indexPath); rerr == nil {
-			var existing builtin.DocumentVectorIndex
-			if json.Unmarshal(data, &existing) == nil {
-				if !builtin.IndexNeedsRebuild(existing, vec, contentHash) {
-					continue
-				}
+func (a *App) indexReferenceFileIfNeeded(filePath, vecDir string, vec builtin.Vectorizer) error {
+	if !builtin.IsSearchableFormat(filePath) {
+		return nil
+	}
+	content, err := builtin.ExtractSearchableText(filePath)
+	if err != nil || strings.TrimSpace(content) == "" {
+		return err
+	}
+	contentHash := sha256Hex64(content)
+	indexPath := filepath.Join(vecDir, filepath.Base(filePath)+".json")
+	if data, rerr := os.ReadFile(indexPath); rerr == nil {
+		var existing builtin.DocumentVectorIndex
+		if json.Unmarshal(data, &existing) == nil {
+			if !builtin.IndexNeedsRebuild(existing, vec, contentHash) {
+				return nil
 			}
 		}
-		_ = builtin.BuildAndSaveVectorIndexToDir(vecDir, entry.Name(), content, vec)
 	}
+	return builtin.BuildAndSaveVectorIndexToDir(vecDir, filepath.Base(filePath), content, vec)
 }
 
 // sha256Hex64 — local helper mirroring builtin.sha256Hex（不匯出避免循環）。

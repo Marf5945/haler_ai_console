@@ -450,7 +450,14 @@ func detectArchivedSkillRefs(manifests []skill_step.SkillManifest, refsText stri
 	root := appDataRoot()
 	for _, manifest := range manifests {
 		id := strings.TrimSpace(manifest.SkillID)
-		if id == "" || !portableReferenceMentions(refsText, id) {
+		if id == "" {
+			continue
+		}
+		// 比對 skill ID 或顯示名稱：新紀錄（tool_history.jsonl）兩者都有；
+		// 舊 sub（修正前拉出）只剩 talk_full 對話文字，內文通常只出現
+		// 顯示名稱（如「產出電料Bom」），沒有完整 ID，所以顯示名稱也要比。
+		if !portableReferenceMentions(refsText, id) &&
+			!portableReferenceMentions(refsText, manifest.DisplayName) {
 			continue
 		}
 		systemPath := filepath.Join(root, "data", "skills", id)

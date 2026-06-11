@@ -3,9 +3,12 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"ui_console/adapter/visual_learning"
+	"ui_console/data/conversation"
 	"ui_console/shared/actionchain"
+	"ui_console/shared/localsearch"
 )
 
 func chainText(action, target, next string) string {
@@ -147,6 +150,25 @@ func TestProgramSkillTableRequestRepairsGenericSkillOutput(t *testing.T) {
 	}
 }
 
+func TestExtractGoProgramNameStripsHowToWords(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"幫我做一個產出電料Bom的用法", "產出電料Bom"},
+		{"做一個產出電料Bom做法", "產出電料Bom"},
+		{"製作產出電料Bom作法", "產出電料Bom"},
+		{"產生 skill 電料表的用途", "電料表"},
+		// 不可誤傷：名稱本身不含這些詞時保持原樣。
+		{"做一個產出電料Bom", "產出電料Bom"},
+	}
+	for _, c := range cases {
+		if got := extractGoProgramName(c.in); got != c.want {
+			t.Fatalf("extractGoProgramName(%q)=%q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestGoProgramAuthoringClarifiesMissingFormat(t *testing.T) {
 	question, need := goProgramAuthoringClarification("產生 skill 輸入 電料料表")
 	if !need {
@@ -160,6 +182,83 @@ func TestGoProgramAuthoringClarifiesMissingFormat(t *testing.T) {
 	_, need = goProgramAuthoringClarification("幫我做一個穿衣建議程式，依照天氣 JSON 和衣服表格輸出建議")
 	if need {
 		t.Fatalf("explicit weather JSON plus clothing table request should enter authoring loop")
+	}
+}
+
+func TestRoutingLookupContextIncludesLoadedFilesCompactly(t *testing.T) {
+	stoppedAt := time.Date(2026, 6, 7, 0, 21, 34, 0, time.FixedZone("CST", 8*60*60))
+	lookup := toolRoutingLookupContext{
+		Query: "看到 拉進來的檔案",
+		Terms: []string{"看到", "拉進來的檔案"},
+		RecentReferences: []routingReferenceFile{{
+			Name:       "電料BOM-260327M1.xlsx",
+			Ext:        "xlsx",
+			ModifiedAt: time.Date(2026, 6, 9, 22, 48, 3, 0, time.FixedZone("CST", 8*60*60)),
+		}},
+		RecentOperations: []visual_learning.LearningRunCatalogItem{{
+			Tag:       "demo-123",
+			RunID:     "learn-should-not-leak",
+			Title:     "empty demo",
+			Summary:   "No replayable click steps were recorded.",
+			Keywords:  []string{"empty", "no", "replayable"},
+			StepCount: 0,
+			StoppedAt: &stoppedAt,
+		}},
+		LocalMatches: []localsearch.SearchResult{{
+			Source: "document",
+			Title:  "最近引用文件: 電料BOM-260327M1.xlsx",
+			Path:   "/tmp/電料BOM-260327M1.xlsx",
+			Score:  34,
+		}},
+	}
+	out := formatToolRoutingLookupContext(lookup)
+	for _, want := range []string{"loaded_files=", "電料BOM-260327M1.xlsx", "2026-06-09T22:48:03+08:00"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("routing lookup missing %q:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"learn-should-not-leak", "keywords=", "summary="} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("routing lookup should stay compact, found %q:\n%s", unwanted, out)
+		}
+	}
+}
+
+func TestRoutingPromptsSkipPersonaAndCurrentHistoryDuplicate(t *testing.T) {
+	userText := "你有看到我拉進來的檔案嗎"
+	recent := []conversation.Sentence{
+		{Role: "user", Content: "上一輪說明"},
+		{Role: "user", Content: userText},
+	}
+	keywordPrompt := buildSearchTermExtractionPrompt("身份=成熟可靠的本機助手", userText, recent)
+	if strings.Contains(keywordPrompt, "身份=成熟可靠") {
+		t.Fatalf("keyword routing prompt should not include persona: %s", keywordPrompt)
+	}
+	if strings.Count(keywordPrompt, userText) != 1 {
+		t.Fatalf("keyword routing prompt should include current input once, got %d:\n%s", strings.Count(keywordPrompt, userText), keywordPrompt)
+	}
+	judgePrompt := buildToolRoutingDecisionPrompt("角色=憂樂傻酷", userText, "[lookup] loaded_files=name=\"demo.xlsx\" ext=\"xlsx\" mtime=\"2026-06-09T22:48:03+08:00\"\n[/lookup]", recent)
+	if strings.Contains(judgePrompt, "角色=憂樂傻酷") {
+		t.Fatalf("judge routing prompt should not include persona: %s", judgePrompt)
+	}
+	if strings.Count(judgePrompt, userText) != 1 {
+		t.Fatalf("judge routing prompt should include current input once, got %d:\n%s", strings.Count(judgePrompt, userText), judgePrompt)
+	}
+}
+
+func TestNormalizeReferenceVisibilityQuestionUsesLoadedFiles(t *testing.T) {
+	decision := parseToolRoutingDecision(chainText("提問", "請問檔案名稱或路徑是什麼？", actionchain.StandbyNext))
+	lookup := toolRoutingLookupContext{
+		Query: "看到 拉進來的檔案",
+		RecentReferences: []routingReferenceFile{{
+			Name:       "demo.xlsx",
+			Ext:        "xlsx",
+			ModifiedAt: time.Now(),
+		}},
+	}
+	normalized := normalizeToolRoutingDecision(decision, "你有看到我拉進來的檔案嗎", lookup)
+	if normalized.Action != "搜尋" || normalized.Target != "引用文件" || normalized.Next != "文件" {
+		t.Fatalf("loaded-file visibility question should route to references, got %#v", normalized)
 	}
 }
 

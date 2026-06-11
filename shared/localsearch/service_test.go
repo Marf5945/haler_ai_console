@@ -1,11 +1,14 @@
 package localsearch
 
 import (
+	"archive/zip"
 	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"ui_console/builtin"
 )
 
 func TestSearchFindsContentAndPath(t *testing.T) {
@@ -108,19 +111,44 @@ func TestRequestFromActionSupportsActionChainLocalSearch(t *testing.T) {
 	}
 }
 
+func TestFileTypeClassifierKeepsGenericFilesAllAndSpecificTypesScoped(t *testing.T) {
+	req, ok := ParseUserQuery("搜尋 剛剛拉進來的檔案")
+	if !ok || req.Query != "剛剛拉進來的檔案" || len(req.Scope) != 1 || req.Scope[0] != "all" {
+		t.Fatalf("generic 檔案 should search all scopes: %#v ok=%v", req, ok)
+	}
+	req, ok = ParseUserQuery("搜尋 文件 客戶合約")
+	if !ok || req.Query != "客戶合約" || len(req.Scope) != 1 || req.Scope[0] != "document" {
+		t.Fatalf("文件 should scope to document and strip classifier word: %#v ok=%v", req, ok)
+	}
+	req, ok = ParseUserQuery("搜尋 圖片 介面截圖")
+	if !ok || req.Query != "介面截圖" || len(req.Scope) != 1 || req.Scope[0] != "image" {
+		t.Fatalf("圖片 should scope to image: %#v ok=%v", req, ok)
+	}
+	req, ok = ParseUserQuery("搜尋 影片 教學")
+	if !ok || req.Query != "教學" || len(req.Scope) != 1 || req.Scope[0] != "video" {
+		t.Fatalf("影片 should scope to video: %#v ok=%v", req, ok)
+	}
+	req, ok = ParseUserQuery("搜尋 照片和影片")
+	if !ok || req.Query != "照片和影片" || len(req.Scope) != 2 || req.Scope[0] != "image" || req.Scope[1] != "video" {
+		t.Fatalf("mixed media words should keep both scopes: %#v ok=%v", req, ok)
+	}
+}
+
 func TestDefaultSearchExcludesTraceAndMemoryUnlessExplicit(t *testing.T) {
 	svc := NewService(nil, []Item{
 		{Source: "trace", Title: "trace stdout", Content: "needle from current stdout"},
 		{Source: "memory", Title: "memory note", Content: "needle from user memory"},
 		{Source: "document", Title: "doc", Content: "needle in a document"},
+		{Source: "image", Title: "image", Content: "needle in an image filename"},
+		{Source: "video", Title: "video", Content: "needle in a video filename"},
 	})
 	// 預設 all：排除 trace 與 memory（對話已是 context，避免自我回音），只回本機檔案。
 	results, err := svc.Search(SearchRequest{Query: "needle", Scope: []string{"all"}, Limit: 10})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
-	if len(results) != 1 || results[0].Source != "document" {
-		t.Fatalf("default all scope should skip trace+memory, only document: %#v", results)
+	if len(results) != 3 {
+		t.Fatalf("default all scope should skip trace+memory and keep file categories: %#v", results)
 	}
 
 	// 明確 memory：才回對話。
@@ -139,6 +167,22 @@ func TestDefaultSearchExcludesTraceAndMemoryUnlessExplicit(t *testing.T) {
 	}
 	if len(results) != 1 || results[0].Source != "trace" {
 		t.Fatalf("explicit trace scope should include trace: %#v", results)
+	}
+
+	results, err = svc.Search(SearchRequest{Query: "needle", Scope: []string{"image"}, Limit: 10})
+	if err != nil {
+		t.Fatalf("Search image: %v", err)
+	}
+	if len(results) != 1 || results[0].Source != "image" {
+		t.Fatalf("explicit image scope should include only image: %#v", results)
+	}
+
+	results, err = svc.Search(SearchRequest{Query: "needle", Scope: []string{"video"}, Limit: 10})
+	if err != nil {
+		t.Fatalf("Search video: %v", err)
+	}
+	if len(results) != 1 || results[0].Source != "video" {
+		t.Fatalf("explicit video scope should include only video: %#v", results)
 	}
 }
 
@@ -212,6 +256,149 @@ func TestSearchSkipsNonUTF8Files(t *testing.T) {
 	if len(results) != 0 {
 		t.Fatalf("non-UTF-8 file should be skipped: %#v", results)
 	}
+}
+
+func TestSearchIndexesAllSupportedDocumentFormats(t *testing.T) {
+	cases := []struct {
+		name   string
+		ext    string
+		create func(string, string) error
+	}{
+		{"txt", ".txt", func(path, text string) error { return os.WriteFile(path, []byte(text), 0o600) }},
+		{"md", ".md", func(path, text string) error { return os.WriteFile(path, []byte("# 標題\n"+text), 0o600) }},
+		{"csv", ".csv", func(path, text string) error { return os.WriteFile(path, []byte("name,value\nrow,"+text+"\n"), 0o600) }},
+		{"tsv", ".tsv", func(path, text string) error {
+			return os.WriteFile(path, []byte("name\tvalue\nrow\t"+text+"\n"), 0o600)
+		}},
+		{"json", ".json", func(path, text string) error { return os.WriteFile(path, []byte(`{"content":"`+text+`"}`), 0o600) }},
+		{"html", ".html", func(path, text string) error {
+			return os.WriteFile(path, []byte("<html><body><p>"+text+"</p></body></html>"), 0o600)
+		}},
+		{"htm", ".htm", func(path, text string) error {
+			return os.WriteFile(path, []byte("<html><body><p>"+text+"</p></body></html>"), 0o600)
+		}},
+		{"docx", ".docx", func(path, text string) error { return builtin.GenerateDocx(text, path) }},
+		{"xlsx", ".xlsx", func(path, text string) error { return builtin.GenerateXlsx("欄位\n"+text, path) }},
+		{"pptx", ".pptx", func(path, text string) error { return builtin.GeneratePptx(path, text) }},
+		{"odt", ".odt", func(path, text string) error { return builtin.GenerateOdt(text, path) }},
+		{"ods", ".ods", func(path, text string) error { return builtin.GenerateOds(text, path) }},
+		{"odp", ".odp", func(path, text string) error { return builtin.GenerateOdp(text, path) }},
+		{"epub", ".epub", createTestEpub},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			needle := "共同索引驗收-" + tc.name
+			path := filepath.Join(root, "sample"+tc.ext)
+			if err := tc.create(path, needle); err != nil {
+				t.Fatalf("create %s: %v", tc.ext, err)
+			}
+			wantPath, err := filepath.EvalSymlinks(path)
+			if err != nil {
+				t.Fatalf("EvalSymlinks: %v", err)
+			}
+			svc := NewService([]Root{{Path: root, Source: "document"}}, nil)
+			results, err := svc.Search(SearchRequest{Query: needle, Scope: []string{"document"}, Limit: 3})
+			if err != nil {
+				t.Fatalf("Search: %v", err)
+			}
+			if len(results) == 0 || results[0].Path != wantPath || !strings.Contains(results[0].Snippet, needle) {
+				t.Fatalf("%s should be indexed and searchable, got %#v", tc.ext, results)
+			}
+		})
+	}
+}
+
+func TestSearchMatchesRecentReferencePhraseByTerms(t *testing.T) {
+	svc := NewService(nil, []Item{{
+		Source:   "document",
+		Title:    "最近引用文件: demo.xlsx",
+		Content:  "demo.xlsx\n副檔名 xlsx",
+		Keywords: "引用文件 已載入 檔案 本機資料 最近 最新 剛剛 剛才 拉進來 拉進來的 拖進來",
+	}})
+	results, err := svc.Search(SearchRequest{Query: "看到 剛剛 拉進來的 檔案", Scope: []string{"document"}, Limit: 3})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("recent reference phrase should match metadata item: %#v", results)
+	}
+}
+
+func TestSearchIndexesImageAndVideoMetadata(t *testing.T) {
+	root := t.TempDir()
+	imageDir := filepath.Join(root, "data", "references", "files")
+	videoDir := filepath.Join(root, "data", "videos")
+	if err := os.MkdirAll(imageDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(videoDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	imagePath := filepath.Join(imageDir, "介面截圖.png")
+	videoPath := filepath.Join(videoDir, "教學影片.mp4")
+	if err := os.WriteFile(imagePath, []byte{0x89, 'P', 'N', 'G'}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(videoPath, []byte{0x00, 0x00, 0x00, 0x18}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService([]Root{
+		{Path: imageDir, Source: "document"},
+		{Path: videoDir, Source: "video"},
+	}, nil)
+
+	results, err := svc.Search(SearchRequest{Query: "圖片 介面截圖", Scope: []string{"image"}, Limit: 5})
+	if err != nil {
+		t.Fatalf("Search image: %v", err)
+	}
+	if len(results) != 1 || results[0].Source != "image" || !strings.Contains(results[0].Title, "介面截圖") {
+		t.Fatalf("image metadata should be indexed as image: %#v", results)
+	}
+
+	results, err = svc.Search(SearchRequest{Query: "影片 教學", Scope: []string{"video"}, Limit: 5})
+	if err != nil {
+		t.Fatalf("Search video: %v", err)
+	}
+	if len(results) != 1 || results[0].Source != "video" || !strings.Contains(results[0].Title, "教學影片") {
+		t.Fatalf("video metadata should be indexed as video: %#v", results)
+	}
+}
+
+func createTestEpub(path, text string) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	zw := zip.NewWriter(f)
+	defer zw.Close()
+	files := map[string]string{
+		"META-INF/container.xml": `<?xml version="1.0"?>
+<container version="1.0">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`,
+		"OEBPS/content.opf": `<?xml version="1.0"?>
+<package>
+  <manifest>
+    <item id="chapter1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+</package>`,
+		"OEBPS/chapter1.xhtml": `<html xmlns="http://www.w3.org/1999/xhtml"><body><p>` + text + `</p></body></html>`,
+	}
+	for name, content := range files {
+		w, err := zw.Create(name)
+		if err != nil {
+			return err
+		}
+		if _, err := w.Write([]byte(content)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func TestBuildSnippetCentersAroundQueryWithinOneHundredRunes(t *testing.T) {

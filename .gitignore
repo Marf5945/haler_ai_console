@@ -22,6 +22,7 @@
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/vite.config.*.timestamp-*.mjs
 
 # === 備份檔 / 歷史殘留 ===
 # SEC-W11 第二刀（2026-05-24）：避免 *.bak2 等備份檔再被 commit
@@ -95,6 +96,7 @@ temp_sessions/
 coverage.out
 coverage.html
 *.test.log
+**/_perm_test_*
 
 # === 環境設定 ===
 .env
@@ -130,3 +132,8 @@ __pycache__/
 
 # === YOLOX 模型權重（改由 GitHub Releases 發布，倉庫只留 model_hashes.json 供 SHA256 驗證）===
 /assets/models/*.onnx
+
+# === 2026-06-12 清理補充 ===
+/assets/models/yolox_button_s.mlmodelc/
+/data/backup/
+REFACTOR_SKILL_FLOW.md

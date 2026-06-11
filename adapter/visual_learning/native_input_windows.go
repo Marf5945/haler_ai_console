@@ -399,10 +399,32 @@ func (n *NativeInput) CaptureWindow(hwnd uintptr) (WindowCapture, error) {
 		ImageData:     data,
 		Width:         rect.W,
 		Height:        rect.H,
+		Scale:         1, // Windows capture is already in the same pixel space as screen coordinates
 		WindowRect:    rect,
 		WindowTitle:   title,
 		WindowProcess: procName,
 	}, nil
+}
+
+// ResolveWindow validates a recorded HWND against the current desktop. Windows
+// HWNDs are reasonably stable within a session; when stale, no re-find by
+// process/title is attempted yet (macOS needs it because CGWindowIDs die with
+// the window).
+func (n *NativeInput) ResolveWindow(handle uintptr, process, title string) (ResolvedWindow, bool) {
+	if handle == 0 {
+		return ResolvedWindow{}, false
+	}
+	rect, err := windowRect(handle)
+	if err != nil || rect.W <= 0 || rect.H <= 0 {
+		return ResolvedWindow{}, false
+	}
+	_, curTitle, curProc := windowInfo(handle)
+	return ResolvedWindow{
+		Handle:  handle,
+		Title:   curTitle,
+		Process: curProc,
+		Rect:    rect,
+	}, true
 }
 
 func sendMouseButton(flags uint32) error {

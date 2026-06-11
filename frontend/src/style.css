@@ -78,7 +78,7 @@
 
   .adapter-btn,
   .command-btn {
-    @apply flex min-h-[40px] w-full min-w-0 items-center gap-3 overflow-hidden rounded-[6px] border px-3 text-[14px] font-black leading-none text-white;
+    @apply flex min-h-[22px] w-full min-w-0 items-center gap-2 overflow-hidden rounded-[6px] border px-2 text-[12px] font-black leading-none text-white;
     box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 8px 20px rgba(0,0,0,.28);
   }
 
@@ -92,9 +92,9 @@
 
   .adapter-icon,
   .command-btn > span:first-child {
-    @apply grid h-8 w-8 shrink-0 place-items-center rounded-[6px] border border-white/12 font-black;
+    @apply grid h-5 w-5 shrink-0 place-items-center rounded-[5px] border border-white/12 font-black;
     background: rgba(0,0,0,.18);
-    font-size: clamp(16px, 1.25vw, 24px);
+    font-size: clamp(11px, .9vw, 16px);
   }
 
   .adapter-cli {
@@ -135,8 +135,11 @@
 
   /* 「可選 Adapter」提示標籤：非按鈕，純文字提示已連接幾個 CLI */
   .adapter-hint {
-    @apply block px-3 py-1 text-[12px] font-medium tracking-wide text-white/45;
+    @apply block px-3 py-1 text-[12px] font-medium tracking-wide;
     letter-spacing: .08em;
+    /* 跟著各主題面板文字色走，避免亮字在淺色主題（原諒青等）看不見 */
+    color: inherit;
+    opacity: .62;
   }
 
   /* adapter 選中狀態：外框亮起呼吸光 */
@@ -1363,7 +1366,7 @@
   }
 
   .command-btn {
-    @apply min-h-[42px] border-white/30 text-[15px];
+    @apply min-h-[22px] border-white/30 text-[12px];
     background: linear-gradient(180deg, rgba(17,17,16,.95), rgba(3,3,3,.98));
   }
 
@@ -1374,13 +1377,13 @@
 
   .workspace {
     @apply relative grid min-h-0 gap-3;
-    grid-template-rows: 282px minmax(0, 1fr);
+    grid-template-rows: 262px minmax(0, 1fr);
   }
 
   .top-console {
     @apply relative z-30 grid gap-3 overflow-visible p-[12px];
     grid-template-columns: 96px minmax(0, 1fr);
-    grid-template-rows: 50px 58px 1fr;
+    grid-template-rows: 50px 40px 1fr;
   }
 
   .persona-block {
@@ -1681,9 +1684,9 @@
   }
 
   .haora-band {
-    @apply col-start-2 row-start-2 grid content-start rounded-[6px] border border-[#ffba55]/65 p-2;
-    grid-template-rows: 48px;
-    min-height: 68px;
+    @apply col-start-2 row-start-2 grid content-start rounded-[6px] border border-[#ffba55]/65 px-2 py-[6px];
+    grid-template-rows: 34px;
+    min-height: 48px;
     background: linear-gradient(180deg, #ec8904, #c56f08);
     box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 14px 34px rgba(0,0,0,.28);
   }
@@ -1713,7 +1716,7 @@
   }
 
   .haora-card {
-    @apply relative grid min-h-[40px] place-items-center rounded-[6px] border border-[#ffba55]/80 px-2 text-[13px] font-black text-white;
+    @apply relative grid min-h-[34px] place-items-center rounded-[6px] border border-[#ffba55]/80 px-2 text-[13px] font-black text-white;
     flex: 0 0 calc((100% - 2rem) / 5);
     min-width: 150px;
     cursor: grab;
@@ -1816,8 +1819,9 @@
   }
 
   .conversation-panel {
-    @apply relative z-10 grid min-h-0 gap-3 p-3;
+    @apply relative z-10 grid min-h-0 gap-1.5 p-3;
     grid-template-rows: minmax(0, 1fr) auto;
+    padding-bottom: 4px;
   }
 
   .system-stack {
@@ -2266,12 +2270,19 @@
   .message-row button {
     @apply min-h-[30px] min-w-[50px] rounded-[6px] border border-white/35 px-2 text-[12px] font-black;
     background: linear-gradient(180deg, #181a1c, #070808);
+    color: #fff;
     display: none;
     align-self: start;
     opacity: 0;
     pointer-events: none;
     transform: translateX(6px);
     transition: opacity .16s ease, transform .16s ease;
+  }
+
+  .message-row .message-delete-action {
+    border-color: rgba(255,255,255,.42);
+    background: linear-gradient(180deg, #181a1c, #070808);
+    color: #fff;
   }
 
   .message-row-active button {
@@ -2368,8 +2379,8 @@
   }
 
   .composer {
-    @apply grid gap-2;
-    grid-template-columns: 36px 36px minmax(0, 1fr);
+    @apply grid gap-1.5;
+    grid-template-columns: 28px 28px 28px minmax(0, 1fr);
   }
 
   .composer-risk {
@@ -2406,7 +2417,7 @@
   }
 
   .attach-btn {
-    @apply min-h-[44px] rounded-[8px] border border-white/30 text-[18px] font-black;
+    @apply min-h-[32px] rounded-[6px] border border-white/30 text-[13px] font-black;
     background: linear-gradient(180deg, rgba(17,17,16,.95), rgba(3,3,3,.98));
   }
 
@@ -2425,7 +2436,7 @@
   }
 
   .voice-btn {
-    @apply grid min-h-[44px] place-items-center rounded-[8px] border border-white/30 text-white;
+    @apply grid min-h-[32px] place-items-center rounded-[6px] border border-white/30 text-white;
     background: linear-gradient(180deg, rgba(18,18,17,.97), rgba(4,4,4,.98));
   }
 
@@ -2438,8 +2449,17 @@
     box-shadow: 0 0 0 3px rgba(255,75,131,.16), inset 0 0 18px rgba(255,75,131,.18);
   }
 
+  .image-insert-btn {
+    @apply grid min-h-[32px] place-items-center rounded-[6px] border border-white/30 text-[14px] font-black text-white/86;
+    background: linear-gradient(180deg, rgba(18,18,17,.97), rgba(4,4,4,.98));
+  }
+
+  .composer-image-file {
+    @apply hidden;
+  }
+
   .mic-icon {
-    @apply h-5 w-5;
+    @apply h-4 w-4;
     fill: none;
     stroke: currentColor;
     stroke-width: 1.9;
@@ -2448,12 +2468,56 @@
   }
 
   .input-wrap {
-    @apply relative min-h-[44px];
+    @apply relative min-h-[32px];
+  }
+
+  .input-wrap-has-image {
+    @apply min-h-[58px];
   }
 
   .input-wrap textarea {
-    @apply h-full min-h-[44px] w-full resize-none rounded-[7px] border border-white/35 bg-[#090909] py-3 pl-4 pr-20 text-[12px] font-bold text-white outline-none;
+    @apply h-full min-h-[32px] w-full resize-none rounded-[6px] border border-white/35 bg-[#090909] py-2 pl-3 pr-16 text-[12px] font-bold leading-tight text-white outline-none;
     background: linear-gradient(180deg, rgba(20,20,19,.98), rgba(7,7,7,.98));
+  }
+
+  .input-wrap-has-image textarea {
+    @apply min-h-[58px] pl-[74px];
+  }
+
+  .composer-image-preview {
+    @apply absolute left-1.5 top-1/2 z-10 h-12 w-14 -translate-y-1/2 overflow-hidden rounded-[6px] border border-white/22 bg-black;
+    box-shadow: 0 8px 18px rgba(0,0,0,.24);
+  }
+
+  .composer-image-preview img {
+    @apply h-full w-full object-cover;
+  }
+
+  .composer-image-preview button {
+    @apply absolute right-0.5 top-0.5 grid h-4 w-4 place-items-center rounded-full border border-white/45 bg-black/70 text-[11px] font-black leading-none text-white;
+  }
+
+  .composer-image-strip {
+    grid-column: 1 / -1;
+    @apply flex flex-wrap gap-1.5 pb-1;
+  }
+
+  .composer-image-thumb {
+    @apply relative h-12 w-14 overflow-hidden rounded-[6px] border border-white/22 bg-black;
+    box-shadow: 0 8px 18px rgba(0,0,0,.24);
+  }
+
+  .composer-image-thumb img {
+    @apply h-full w-full object-cover;
+  }
+
+  .composer-image-thumb button {
+    @apply absolute right-0.5 top-0.5 grid h-4 w-4 place-items-center rounded-full border border-white/45 bg-black/70 text-[11px] font-black leading-none text-white;
+  }
+
+  .composer-image-error {
+    grid-column: 1 / -1;
+    @apply rounded-[5px] border border-[#ff6b6b]/50 bg-black/40 px-2 py-0.5 text-[11px] font-bold text-[#ff8a8a];
   }
 
   .input-wrap textarea::placeholder {
@@ -2461,7 +2525,7 @@
   }
 
   .send-btn {
-    @apply absolute right-2 top-1/2 min-h-[30px] min-w-[66px] -translate-y-1/2 rounded-[6px] bg-pink-hot text-[12px] font-black text-white;
+    @apply absolute right-1.5 top-1/2 min-h-[24px] min-w-[54px] -translate-y-1/2 rounded-[5px] bg-pink-hot text-[11px] font-black text-white;
     background: linear-gradient(180deg, #f00686, #c50067);
   }
 
@@ -2470,7 +2534,7 @@
   }
 
   .voice-status {
-    @apply col-span-3 -mt-1 rounded-[6px] border border-white/10 px-2 py-1 text-[10px] font-bold text-white/65;
+    @apply col-span-4 -mt-1.5 rounded-[5px] border border-white/10 px-2 py-0 text-[9px] font-bold leading-tight text-white/65;
     background: rgba(255,255,255,.035);
   }
 
@@ -2487,16 +2551,23 @@
 
   .tool-card,
   .tool-slot {
-    @apply grid min-h-[50px] w-full min-w-0 place-items-center overflow-hidden rounded-[8px] border text-[14px] font-black text-white;
+    @apply grid min-h-[22px] w-full min-w-0 place-items-center overflow-hidden rounded-[6px] border text-[12px] font-black leading-none text-white;
     box-shadow: inset 0 1px 0 rgba(255,255,255,.10), 0 12px 24px rgba(0,0,0,.30);
   }
 
   .tool-card {
-    @apply grid-cols-[34px_minmax(0,1fr)] gap-2 px-3 text-left;
+    @apply grid-cols-[20px_minmax(0,1fr)] gap-2 px-2 text-left;
   }
 
   .tool-card span:first-child {
-    font-size: clamp(18px, 1.45vw, 28px);
+    @apply grid h-5 w-5 shrink-0 place-items-center rounded-[5px] border border-white/12;
+    background: rgba(0,0,0,.18);
+    font-size: calc(15px * var(--ui-font-scale));
+  }
+
+  .right-panel .tool-card > span:last-child {
+    font-size: clamp(12px, 1vw, 16px);
+    line-height: 1;
   }
 
   .tool-amber {
@@ -2520,13 +2591,13 @@
   }
 
   .tool-use-bottom {
-    @apply mt-auto min-h-[42px] border-[#ffba55]/78 text-white;
+    @apply mt-auto min-h-[22px] border-[#ffba55]/78 text-white;
     margin-bottom: clamp(36px, 6vh, 72px);
     background: linear-gradient(180deg, #7a420d, #3a1d05);
   }
 
   .tool-use-bottom > span:last-child {
-    font-size: clamp(13px, 1vw, 20px);
+    font-size: clamp(12px, 1vw, 16px);
   }
 
   .reference-link-card,
@@ -2594,9 +2665,11 @@
   }
 
   .reference-file-list {
-    --reference-file-row-height: 54px;
-    @apply grid gap-2 overflow-y-auto pr-0.5;
-    max-height: calc((var(--reference-file-row-height) * 6) + (0.5rem * 5));
+    --reference-file-row-height: 36px;
+    --reference-file-row-gap: 0.25rem;
+    @apply grid overflow-y-auto pr-0.5;
+    gap: var(--reference-file-row-gap);
+    max-height: calc((var(--reference-file-row-height) * 9) + (var(--reference-file-row-gap) * 8));
     grid-auto-rows: var(--reference-file-row-height);
     overscroll-behavior: contain;
     scrollbar-width: none;
@@ -2608,7 +2681,7 @@
   }
 
   .reference-file-name {
-    @apply relative grid overflow-hidden rounded-[7px] border border-white/14 px-2.5 py-1.5 text-[10px] font-black leading-snug text-white/78;
+    @apply relative grid overflow-hidden rounded-[7px] border border-white/14 px-2 py-1 text-[9px] font-black leading-tight text-white/78;
     align-content: center;
     background: rgba(0,0,0,.22);
   }
@@ -2656,7 +2729,7 @@
   }
 
   .reference-file-main {
-    @apply relative z-[1] grid items-center gap-2;
+    @apply relative z-[1] grid items-center gap-1.5;
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
@@ -2665,7 +2738,7 @@
   }
 
   .reference-file-status {
-    @apply rounded-[999px] border px-1.5 py-0.5 text-[8px] font-black leading-none;
+    @apply rounded-[999px] border px-1.5 py-0 text-[8px] font-black leading-none;
     border-color: rgba(255,255,255,.18);
     color: rgba(255,255,255,.72);
     background: rgba(0,0,0,.20);
@@ -2688,7 +2761,7 @@
   }
 
   .reference-file-detail {
-    @apply relative z-[1] mt-1 block max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-[9px] font-bold leading-tight text-white/45;
+    @apply relative z-[1] mt-0.5 block max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-[8px] font-bold leading-none text-white/45;
   }
 
   .command-tool-trigger {
@@ -2764,14 +2837,26 @@
   }
 
   .tools-popup-search {
-    @apply grid place-items-center rounded-full border text-[26px] font-black text-white;
+    @apply grid place-items-center rounded-full border p-0 font-black text-white;
+    place-self: center;
     height: clamp(26px, 2.5vw, 34px);
     width: clamp(26px, 2.5vw, 34px);
+    line-height: 1;
     border-color: rgba(255,255,255,.18);
     background: linear-gradient(180deg, rgba(40, 63, 58, .96), rgba(28, 43, 43, .98));
     box-shadow:
       inset 0 1px 0 rgba(255,255,255,.10),
       0 12px 22px rgba(0,0,0,.30);
+  }
+
+  .tools-popup-search-icon {
+    @apply h-[18px] w-[18px];
+    display: block;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
   .tools-popup-search-active {
@@ -2865,7 +2950,7 @@
   }
 
   .settings-side-panel .settings-style-block {
-    min-height: 122px;
+    min-height: 84px;
   }
 
   .settings-side-panel,
@@ -2900,6 +2985,8 @@
 
   .settings-side-panel {
     @apply overflow-y-auto pr-1;
+    padding-bottom: 28px;
+    scroll-padding-bottom: 36px;
   }
 
   .settings-side-panel h2 {
@@ -2908,6 +2995,8 @@
 
   .tools-side-panel {
     @apply mt-3 flex min-h-0 flex-1 flex-col overflow-y-auto rounded-[10px] border border-white/22 bg-[#101010] pr-1 shadow-[0_18px_34px_rgba(0,0,0,.36)];
+    padding-bottom: 28px;
+    scroll-padding-bottom: 36px;
     animation: settingsDrop .18s ease-out both;
     background-image:
       linear-gradient(180deg, rgba(255,255,255,.05), transparent 30%),
@@ -3196,27 +3285,27 @@
   }
 
   .settings-menu-list {
-    @apply grid gap-3 px-3 py-4;
+    @apply grid gap-1.5 px-3 py-2;
   }
 
   /* Settings selector rows use two lines so long English labels do not collide with values. */
   .settings-select-row {
-    @apply grid min-h-[66px] min-w-0 items-start gap-2;
+    @apply grid min-h-[44px] min-w-0 items-start gap-1;
     grid-template-columns: minmax(0, 1fr);
   }
 
   .settings-select-label {
-    @apply flex min-w-0 items-start gap-1.5 whitespace-normal text-[13px] font-black leading-tight text-white/82;
+    @apply flex min-w-0 items-start gap-1.5 whitespace-normal text-[12px] font-black leading-tight text-white/82;
     word-break: normal;
     overflow-wrap: anywhere;
   }
 
   .settings-select-label i {
-    @apply grid h-5 w-5 shrink-0 place-items-center text-[15px] not-italic text-white/68;
+    @apply grid h-4 w-5 shrink-0 place-items-center text-[13px] not-italic text-white/68;
   }
 
   .settings-select-row button {
-    @apply flex min-h-[35px] items-center justify-center gap-1.5 justify-self-end rounded-[8px] border border-white/22 text-[11px] font-black text-white/82;
+    @apply flex min-h-[30px] items-center justify-center gap-1.5 justify-self-end rounded-[8px] border border-white/22 text-[11px] font-black text-white/82;
     width: min(112px, 100%);
     min-width: 0;
     background: linear-gradient(180deg, rgba(35,35,35,.95), rgba(11,11,11,.98));
@@ -3270,30 +3359,30 @@
   }
 
   .settings-style-block {
-    @apply mt-1 px-4 pb-4;
+    @apply mt-0 px-4 pb-2;
   }
 
   .settings-style-label {
-    @apply mb-4 flex items-center gap-1.5 whitespace-nowrap text-[13px] font-black leading-none text-white/82;
+    @apply mb-2 flex items-center gap-1.5 whitespace-nowrap text-[12px] font-black leading-none text-white/82;
   }
 
   .settings-style-label span:first-child {
-    @apply grid h-5 w-5 shrink-0 place-items-center text-[16px] text-white/65;
+    @apply grid h-4 w-5 shrink-0 place-items-center text-[13px] text-white/65;
   }
 
+  /* 主題選項固定一行一個，避免各語系標籤長度不同時排成歪斜的網格 */
   .settings-segments {
-    @apply grid justify-center gap-0 overflow-visible rounded-[10px] border border-white/18;
-    grid-template-columns: repeat(3, max-content);
+    @apply grid gap-0 overflow-visible rounded-[10px] border border-white/18;
+    grid-template-columns: 1fr;
   }
 
   .settings-segments button {
-    @apply min-h-[39px] min-w-[3.8em] whitespace-nowrap border-r border-b border-white/16 px-2 text-[11px] font-black text-white/68;
+    @apply min-h-[30px] w-full whitespace-nowrap border-b border-white/16 px-2 text-[11px] font-black text-white/68;
     background: linear-gradient(180deg, rgba(24,24,24,.94), rgba(7,7,7,.98));
-    inline-size: max-content;
   }
 
-  .settings-segments button:nth-child(3n) {
-    @apply border-r-0;
+  .settings-segments button:last-child {
+    @apply border-b-0;
   }
 
   .settings-segments .segment-active {
@@ -3372,6 +3461,12 @@
     border-color: #d8d8d8;
     background: linear-gradient(180deg, #ffffff, #f0f0f0);
     color: #202020;
+  }
+
+  .console-shell[data-theme="white"] .message-row .message-delete-action {
+    border-color: rgba(255,255,255,.42);
+    background: linear-gradient(180deg, #181a1c, #070808);
+    color: #fff;
   }
 
   .console-shell[data-theme="white"] .haora-band {
@@ -6543,6 +6638,7 @@
 
 /* §12A.5B Dispatch 狀態提示 */
 .dispatch-status-area {
+  grid-column: 1 / -1;
   padding: 3px 8px;
   display: flex;
   gap: 8px;
@@ -8090,18 +8186,62 @@
 .reference-file-name { position: relative; }
 .reference-file-ext-badge {
   position: absolute;
-  right: 4px;
-  bottom: 3px;
-  font-size: 9px;
+  right: 3px;
+  bottom: 2px;
+  font-size: 8px;
   line-height: 1;
-  padding: 1px 4px;
+  padding: 0 3px 1px;
   border-radius: 4px;
   background: rgba(60, 60, 60, 0.55);
   color: #fff;
-  letter-spacing: 0.3px;
+  letter-spacing: 0;
   pointer-events: none;
   max-width: 55%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ── SettingPopupSelect 下拉清單（settings-popup-list）主題配色 ──
+   修正：消極白主題下，選項按鈕繼承面板深色文字、疊在深色彈窗上看不見。 */
+.console-shell .settings-popup-list {
+  background: rgba(20, 13, 7, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  color: #fff8ef;
+}
+.console-shell .settings-popup-list button.settings-popup-option {
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 7px;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+}
+.console-shell .settings-popup-list button.settings-popup-option:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+.console-shell .settings-popup-list button.settings-popup-option.active {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* 消極白：下拉改亮底深字 */
+.console-shell[data-theme="white"] .settings-popup-list {
+  background: #ffffff;
+  border-color: #e0e0e0;
+  color: #202020;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+}
+.console-shell[data-theme="white"] .settings-popup-list button.settings-popup-option {
+  color: #202020;
+  background: transparent;
+}
+.console-shell[data-theme="white"] .settings-popup-list button.settings-popup-option:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+.console-shell[data-theme="white"] .settings-popup-list button.settings-popup-option.active {
+  background: rgba(0, 0, 0, 0.10);
 }

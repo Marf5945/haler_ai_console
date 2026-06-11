@@ -123,6 +123,22 @@ func (s *Service) AddTool(tool Tool) {
 	s.tools = append(s.tools, tool)
 }
 
+// RemoveTool removes a tool from the toolbar registry.
+func (s *Service) RemoveTool(toolID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := s.tools[:0]
+	for _, tool := range s.tools {
+		if tool.ID == toolID {
+			continue
+		}
+		next = append(next, tool)
+	}
+	s.tools = next
+	delete(s.disconnectCache, toolID)
+	_ = s.saveDisconnectCache()
+}
+
 // AddActionTag records a reviewed action tag on the selected tool.
 func (s *Service) AddActionTag(toolID, tag string) bool {
 	s.mu.Lock()

@@ -2,6 +2,7 @@
 package builtin
 
 import (
+	"container/list"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -71,7 +73,22 @@ func IndexNeedsRebuild(existing DocumentVectorIndex, vec Vectorizer, contentHash
 	if want.Type == "dense" && want.Dimension != got.Dimension {
 		return true
 	}
+	if want.Type == "dense" && !indexUsesQuantizedDense(existing) {
+		return true
+	}
 	return false
+}
+
+func indexUsesQuantizedDense(index DocumentVectorIndex) bool {
+	for _, chunk := range index.Chunks {
+		if chunk.Vec.Meta.Type != "dense" {
+			continue
+		}
+		if chunk.Vec.DenseQ == nil || len(chunk.Vec.DenseQ.Values) == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 type DocumentSearchResult struct {
@@ -95,7 +112,7 @@ func BuildAndSaveVectorIndex(store *Store, blob *DocumentBlob, vec Vectorizer) e
 		SchemaVersion:  "document_vector_index.v2",
 		DocID:          blob.Meta.DocID,
 		UpdatedAt:      time.Now(),
-		Chunks:         chunks,
+		Chunks:         quantizeDenseChunksForStorage(chunks),
 		VectorMeta:     vec.Meta(),
 		ContentHash:    sha256Hex(blob.Content),
 		ChunkerVersion: ChunkerVersion,
@@ -125,7 +142,7 @@ func BuildAndSaveVectorIndexToDir(vectorsDir, docID, content string, vec Vectori
 		SchemaVersion:  "document_vector_index.v2",
 		DocID:          docID,
 		UpdatedAt:      time.Now(),
-		Chunks:         chunks,
+		Chunks:         quantizeDenseChunksForStorage(chunks),
 		VectorMeta:     vec.Meta(),
 		ContentHash:    sha256Hex(content),
 		ChunkerVersion: ChunkerVersion,
@@ -139,6 +156,13 @@ func BuildAndSaveVectorIndexToDir(vectorsDir, docID, content string, vec Vectori
 	}
 	path := filepath.Join(vectorsDir, filepath.Base(docID)+".json")
 	return os.WriteFile(path, data, 0o600)
+}
+
+func quantizeDenseChunksForStorage(chunks []DocumentChunk) []DocumentChunk {
+	for i := range chunks {
+		chunks[i].Vec = QuantizeDenseForStorage(chunks[i].Vec)
+	}
+	return chunks
 }
 
 // BuildDocumentChunks 用「段落 hybrid」策略拆 chunk 並向量化。
@@ -363,6 +387,67 @@ func SearchDocuments(store *Store, query string, vec Vectorizer, limit int) ([]D
 	}, "document")
 }
 
+// ── 向量索引記憶體快取（stage 0：只解速度瓶頸，不改索引格式、不加依賴）──
+// 動機：SearchDocumentsInDir 舊版每次查詢都重讀＋重新 json.Unmarshal 整個語料，
+// 解析才是熱路徑成本（cosine 數學是零頭）。這裡把解析後的 index 快取在記憶體，
+// 用檔案 mtime+size 當失效鍵——只 stat、不讀內容；重建索引會改 mtime，快取自動失效。
+// LRU 上限避免跟著使用者成長到無限大。回傳的 index 之 Chunks 與快取共享底層陣列，
+// 搜尋只讀不改，故共享安全。
+const vectorIndexCacheMaxEntries = 512
+
+type vectorIndexCacheEntry struct {
+	modTime time.Time
+	size    int64
+	index   DocumentVectorIndex
+	elem    *list.Element // 在 LRU 佇列中的位置（Value 存檔案路徑）
+}
+
+var vectorIndexCache = struct {
+	sync.Mutex
+	m  map[string]*vectorIndexCacheEntry
+	ll *list.List // 前=最近使用、後=最久未用
+}{m: make(map[string]*vectorIndexCacheEntry), ll: list.New()}
+
+// loadVectorIndexCached 回傳解析後索引：命中且 mtime+size 未變就免碰磁碟。
+func loadVectorIndexCached(path string, info os.FileInfo) (DocumentVectorIndex, error) {
+	vectorIndexCache.Lock()
+	defer vectorIndexCache.Unlock()
+
+	if e, ok := vectorIndexCache.m[path]; ok && e.modTime.Equal(info.ModTime()) && e.size == info.Size() {
+		vectorIndexCache.ll.MoveToFront(e.elem) // 標記最近使用
+		return e.index, nil
+	}
+
+	// miss / 過期：讀檔重新解析
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return DocumentVectorIndex{}, err
+	}
+	var idx DocumentVectorIndex
+	if err := json.Unmarshal(data, &idx); err != nil {
+		return DocumentVectorIndex{}, err
+	}
+
+	if e, ok := vectorIndexCache.m[path]; ok {
+		e.modTime, e.size, e.index = info.ModTime(), info.Size(), idx
+		vectorIndexCache.ll.MoveToFront(e.elem)
+	} else {
+		e := &vectorIndexCacheEntry{modTime: info.ModTime(), size: info.Size(), index: idx}
+		e.elem = vectorIndexCache.ll.PushFront(path)
+		vectorIndexCache.m[path] = e
+		// 超過上限就淘汰最久未用的一筆
+		for vectorIndexCache.ll.Len() > vectorIndexCacheMaxEntries {
+			oldest := vectorIndexCache.ll.Back()
+			if oldest == nil {
+				break
+			}
+			vectorIndexCache.ll.Remove(oldest)
+			delete(vectorIndexCache.m, oldest.Value.(string))
+		}
+	}
+	return idx, nil
+}
+
 // SearchDocumentsInDir 在任意 vectors 目錄搜尋（通用）。
 func SearchDocumentsInDir(vectorsDir, query string, vec Vectorizer, limit int, metaLookup func(string) (string, string, string), source string) ([]DocumentSearchResult, error) {
 	query = strings.TrimSpace(query)
@@ -388,12 +473,13 @@ func SearchDocumentsInDir(vectorsDir, query string, vec Vectorizer, limit int, m
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(vectorsDir, entry.Name()))
-		if err != nil {
+		// 走記憶體快取：mtime+size 未變就免讀磁碟、免重解析（解析才是熱路徑瓶頸）。
+		info, ierr := entry.Info()
+		if ierr != nil {
 			continue
 		}
-		var index DocumentVectorIndex
-		if err := json.Unmarshal(data, &index); err != nil {
+		index, lerr := loadVectorIndexCached(filepath.Join(vectorsDir, entry.Name()), info)
+		if lerr != nil {
 			continue
 		}
 		// 整個 index 的 vectorizer 跟 query 不符就跳過——不要花時間算每個 chunk。

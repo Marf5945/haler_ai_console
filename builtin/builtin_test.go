@@ -533,6 +533,48 @@ func TestXlsxRoundtrip(t *testing.T) {
 	}
 }
 
+func TestXlsxCSVConversionsPreserveGrid(t *testing.T) {
+	tmp := t.TempDir()
+	xlsxPath := filepath.Join(tmp, "source.xlsx")
+	csvPath := filepath.Join(tmp, "out.csv")
+	roundtripPath := filepath.Join(tmp, "roundtrip.xlsx")
+
+	err := GenerateStyledXlsx(XlsxSpec{
+		Cells: map[string]XlsxCell{
+			"A1": {Value: "Name"},
+			"C1": {Value: "Note"},
+			"A2": {Value: "Alice"},
+			"B2": {Value: "台北"},
+			"C2": {Value: "Hello, CSV"},
+		},
+	}, xlsxPath)
+	if err != nil {
+		t.Fatalf("GenerateStyledXlsx: %v", err)
+	}
+
+	if err := ConvertXlsxToCSV(xlsxPath, csvPath); err != nil {
+		t.Fatalf("ConvertXlsxToCSV: %v", err)
+	}
+	records, err := ReadCSVRecords(csvPath, ',')
+	if err != nil {
+		t.Fatalf("ReadCSVRecords: %v", err)
+	}
+	if len(records) != 2 || len(records[0]) != 3 || records[0][1] != "" || records[1][2] != "Hello, CSV" {
+		t.Fatalf("unexpected csv records: %#v", records)
+	}
+
+	if err := ConvertCSVToXlsx(csvPath, roundtripPath); err != nil {
+		t.Fatalf("ConvertCSVToXlsx: %v", err)
+	}
+	grid, err := ReadXlsxSheetGrid(roundtripPath, "")
+	if err != nil {
+		t.Fatalf("ReadXlsxSheetGrid: %v", err)
+	}
+	if len(grid) != 2 || len(grid[0]) != 3 || grid[0][1] != "" || grid[1][2] != "Hello, CSV" {
+		t.Fatalf("unexpected xlsx grid: %#v", grid)
+	}
+}
+
 func TestGenerateStyledXlsxWritesStylesAndColumns(t *testing.T) {
 	tmp := t.TempDir()
 	xlsxPath := filepath.Join(tmp, "styled.xlsx")

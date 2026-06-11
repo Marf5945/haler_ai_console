@@ -36,7 +36,17 @@ type VectorMetadata struct {
 type Vector struct {
 	Sparse map[string]float64 `json:"sparse,omitempty"`
 	Dense  []float64          `json:"dense,omitempty"`
+	DenseQ *QuantizedDense    `json:"dense_q,omitempty"`
 	Meta   VectorMetadata     `json:"meta"`
+}
+
+// QuantizedDense stores dense embeddings as int8 values plus one symmetric scale.
+// It is meant for persisted indexes; query vectors can stay float64.
+type QuantizedDense struct {
+	Values    []int8  `json:"values"`
+	Scale     float64 `json:"scale"`
+	Dimension int     `json:"dimension,omitempty"`
+	Norm      float64 `json:"norm,omitempty"`
 }
 
 // Validate 檢查不變式：Type 必須是 sparse/dense；對應的 backing 不可空。
@@ -50,15 +60,21 @@ func (v Vector) Validate() error {
 		if v.Dense != nil {
 			return errors.New("vector: sparse type must not have Dense set")
 		}
+		if v.DenseQ != nil {
+			return errors.New("vector: sparse type must not have DenseQ set")
+		}
 	case "dense":
-		if v.Dense == nil {
-			return errors.New("vector: dense type but Dense is nil")
+		if len(v.Dense) == 0 && (v.DenseQ == nil || len(v.DenseQ.Values) == 0) {
+			return errors.New("vector: dense type but no dense backing is set")
+		}
+		if len(v.Dense) > 0 && v.DenseQ != nil {
+			return errors.New("vector: dense type must not set both Dense and DenseQ")
 		}
 		if v.Sparse != nil {
 			return errors.New("vector: dense type must not have Sparse set")
 		}
-		if v.Meta.Dimension > 0 && len(v.Dense) != v.Meta.Dimension {
-			return fmt.Errorf("vector: dense length %d != declared dimension %d", len(v.Dense), v.Meta.Dimension)
+		if v.Meta.Dimension > 0 && v.denseLen() != v.Meta.Dimension {
+			return fmt.Errorf("vector: dense length %d != declared dimension %d", v.denseLen(), v.Meta.Dimension)
 		}
 	default:
 		return fmt.Errorf("vector: unknown type %q", v.Meta.Type)
@@ -68,7 +84,7 @@ func (v Vector) Validate() error {
 
 // IsEmpty 判斷是否為零值 Vector（無 Type、無 backing）。用於 JSON 反序列化檢查。
 func (v Vector) IsEmpty() bool {
-	return v.Meta.Type == "" && len(v.Sparse) == 0 && len(v.Dense) == 0
+	return v.Meta.Type == "" && len(v.Sparse) == 0 && len(v.Dense) == 0 && (v.DenseQ == nil || len(v.DenseQ.Values) == 0)
 }
 
 // Cosine 計算兩個 Vector 的 cosine similarity。
@@ -86,10 +102,10 @@ func (v Vector) Cosine(other Vector) (float64, error) {
 		if v.Meta.ModelID != other.Meta.ModelID {
 			return 0, ErrIncompatibleVector
 		}
-		if len(v.Dense) != len(other.Dense) {
+		if v.denseLen() != other.denseLen() {
 			return 0, ErrIncompatibleVector
 		}
-		return cosineDense(v.Dense, other.Dense), nil
+		return cosineDenseVector(v, other), nil
 	default:
 		return 0, ErrIncompatibleVector
 	}
@@ -120,6 +136,99 @@ func cosineDense(a, b []float64) float64 {
 		return 0
 	}
 	return dot / (math.Sqrt(na) * math.Sqrt(nb))
+}
+
+func cosineDenseVector(a, b Vector) float64 {
+	n := a.denseLen()
+	if n == 0 || b.denseLen() != n {
+		return 0
+	}
+	var dot, na, nb float64
+	for i := 0; i < n; i++ {
+		av := a.denseAt(i)
+		bv := b.denseAt(i)
+		dot += av * bv
+		na += av * av
+		nb += bv * bv
+	}
+	if na == 0 || nb == 0 {
+		return 0
+	}
+	return dot / (math.Sqrt(na) * math.Sqrt(nb))
+}
+
+func (v Vector) denseLen() int {
+	if len(v.Dense) > 0 {
+		return len(v.Dense)
+	}
+	if v.DenseQ != nil {
+		return len(v.DenseQ.Values)
+	}
+	return 0
+}
+
+func (v Vector) denseAt(i int) float64 {
+	if len(v.Dense) > 0 {
+		return v.Dense[i]
+	}
+	if v.DenseQ != nil && i >= 0 && i < len(v.DenseQ.Values) {
+		return float64(v.DenseQ.Values[i]) * v.DenseQ.Scale
+	}
+	return 0
+}
+
+// QuantizeDenseForStorage returns a copy of v that persists dense vectors as
+// int8+scale. Sparse vectors and query-time dense vectors are left untouched by
+// callers that do not explicitly opt into this helper.
+func QuantizeDenseForStorage(v Vector) Vector {
+	if v.Meta.Type != "dense" || len(v.Dense) == 0 {
+		return v
+	}
+	q := quantizeDense(v.Dense)
+	if q == nil {
+		return v
+	}
+	v.Dense = nil
+	v.DenseQ = q
+	return v
+}
+
+func quantizeDense(dense []float64) *QuantizedDense {
+	if len(dense) == 0 {
+		return nil
+	}
+	maxAbs := 0.0
+	for _, v := range dense {
+		if a := math.Abs(v); a > maxAbs {
+			maxAbs = a
+		}
+	}
+	scale := 1.0
+	if maxAbs > 0 {
+		scale = maxAbs / 127.0
+	}
+	values := make([]int8, len(dense))
+	var norm float64
+	for i, v := range dense {
+		q := 0
+		if scale > 0 {
+			q = int(math.Round(v / scale))
+		}
+		if q > 127 {
+			q = 127
+		} else if q < -127 {
+			q = -127
+		}
+		values[i] = int8(q)
+		dequant := float64(values[i]) * scale
+		norm += dequant * dequant
+	}
+	return &QuantizedDense{
+		Values:    values,
+		Scale:     scale,
+		Dimension: len(values),
+		Norm:      math.Sqrt(norm),
+	}
 }
 
 // UnmarshalJSON 接受兩種 schema：

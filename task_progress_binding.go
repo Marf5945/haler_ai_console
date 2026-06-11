@@ -80,6 +80,13 @@ func (a *App) StartTaskProgress(userText, adapterID, modelID, sessionID string) 
 	})
 	a.emitTaskRun("task:progress_started", run)
 
+	// 多指令拆解（v1）：flag 開啟才走；失敗則退回原本單一 planner（永不當機）。
+	if decomposeEnabled() {
+		if dr, derr := a.startDecomposedRun(projectRoot, run, userText, adapterID, modelID, sessionID); derr == nil {
+			return dr, nil
+		}
+	}
+
 	rawPlan, normalized, repairCount, err := a.planTaskProgress(userText, adapterID, modelID, sessionID, planTraceID)
 	if err != nil {
 		if latest, loadErr := dag.LoadFullRun(projectRoot, run.ID); loadErr == nil && latest.Status == "cancelled" {
@@ -201,7 +208,7 @@ func (a *App) CancelTaskProgress(runID, reason string) (*dag.DAGRun, error) {
 			reviewIDs = append(reviewIDs, run.Nodes[i].ReviewID)
 		}
 		switch run.Nodes[i].Status {
-		case dag.StatusRunning, dag.StatusWaitingReview, dag.StatusReady:
+		case dag.StatusRunning, dag.StatusWaitingReview, dag.StatusWaitingUser, dag.StatusReady:
 			run.Nodes[i].Status = dag.StatusCancelled
 			run.Nodes[i].CompletedAt = now
 		case dag.StatusPlanned:
@@ -229,6 +236,20 @@ func (a *App) cancelTaskTrace(traceID string) {
 	}
 	// Best-effort: run state is already cancelled; this stops the active CLI child.
 	_ = a.sidecar.CancelTrace(traceID)
+}
+
+// CancelChatMessage stops the in-flight CLI/skill conversational request bound to
+// traceID. The composer stop button uses this for non-DAG sends so the user can
+// interrupt a running chat/skill turn, not only DAG task runs. Best-effort: the
+// active CLI child is killed; the bound Wails call then returns an error which the
+// frontend suppresses for traces the user cancelled.
+func (a *App) CancelChatMessage(traceID string) error {
+	traceID = strings.TrimSpace(traceID)
+	if traceID == "" {
+		return nil
+	}
+	a.cancelTaskTrace(traceID)
+	return nil
 }
 
 func (a *App) resolveTaskReviewCards(projectRoot string, reviewIDs []string) {
@@ -1249,6 +1270,17 @@ func (a *App) executeTaskNode(projectRoot string, run *dag.DAGRun, idx int, adap
 			return
 		}
 	}
+	// chat_route 節點回報「需要使用者確認/補資訊」→ 整個 DAG 暫停（v1），不計失敗。
+	if errors.Is(err, errChatRouteNeedsUser) {
+		a.pauseChatRouteForUser(projectRoot, run, node, result)
+		return
+	}
+	// loop 的低風險澄清 → 節點 waiting_user、run 保持 running，其他 branch 照跑。
+	if errors.Is(err, errTaskLoopNeedsUser) {
+		run.ActiveTraceID = ""
+		a.pauseTaskLoopForUser(projectRoot, run, node, result)
+		return
+	}
 	end := time.Now().Format(time.RFC3339)
 	node.CompletedAt = end
 	node.ResultSummary = result
@@ -1298,6 +1330,7 @@ func (a *App) executeTaskNodeAction(run *dag.DAGRun, node dag.DAGNode, adapterID
 		"tool_call":     taskExecutorFunc(a.executeToolTaskNode),
 		"cli_task":      taskExecutorFunc(a.executeAdapterTaskNode),
 		"subagent_call": taskExecutorFunc(a.executeSubagentTaskNode),
+		"chat_route":    taskExecutorFunc(a.executeChatRouteTaskNode),
 	}
 	executor, ok := executors[node.ExecutorType]
 	if !ok {
@@ -1904,7 +1937,7 @@ func (a *App) interruptStaleTaskRuns(reason string) {
 		run.Status = "interrupted"
 		run.InterruptReason = taskInterruptReason("app_restart")
 		for i := range run.Nodes {
-			if run.Nodes[i].Status == dag.StatusRunning || run.Nodes[i].Status == dag.StatusWaitingReview || run.Nodes[i].Status == dag.StatusReady {
+			if run.Nodes[i].Status == dag.StatusRunning || run.Nodes[i].Status == dag.StatusWaitingReview || run.Nodes[i].Status == dag.StatusWaitingUser || run.Nodes[i].Status == dag.StatusReady {
 				run.Nodes[i].Status = dag.StatusCancelled
 				run.Nodes[i].CompletedAt = now
 			}
@@ -1917,4 +1950,275 @@ func (a *App) interruptStaleTaskRuns(reason string) {
 		_ = dag.UpdateRunIndex(projectRoot, run.ID, run.Status, now, 0, len(run.Nodes), 0, run.InterruptReason)
 		_ = reason
 	}
+}
+
+// =============================================================================
+// 多指令拆解（decompose）+ chat_route 節點 — v1
+// 設計：decompose 只做「切句／排序／標相依」，不選工具、不判風險、不產格式；每個
+// 子句變成一個 chat_route 節點，執行時丟回「一般聊天路由」(routeUserIntentOnce)，
+// 確保路由真相只有一套。v1 只在 feature flag 開啟時於 /dag 走此路徑；遇到確認時
+// 整個 DAG 暫停（沿用既有 waiting_review，不動排程核心、不引入併發）。
+// =============================================================================
+
+const decomposeMaxSteps = 10      // 一次最多拆 10 步
+const decomposeMaxStepRunes = 600 // 每步文字長度上限（rune）
+
+// decomposeEnabled 回報多指令拆解 feature flag 是否開啟。預設關 → 行為與舊版完全相同。
+func decomposeEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("AI_CONSOLE_DECOMPOSE"))) {
+	case "1", "true", "on", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+// decomposeStep 是 decompose LLM 唯一允許輸出的單位：只有 id/text/相依。
+type decomposeStep struct {
+	ID        string   `json:"id"`
+	Text      string   `json:"text"`
+	DependsOn []string `json:"depends_on"`
+}
+
+type decomposePlan struct {
+	Title string          `json:"title"`
+	Steps []decomposeStep `json:"steps"`
+}
+
+// buildDecomposePrompt：極簡拆解 prompt。嚴禁輸出工具/動作/風險/參數，只准切句。
+func buildDecomposePrompt(userText string) string {
+	clean := sanitizeTaskPlannerUserText(userText)
+	return `把使用者訊息拆成多個「各自獨立、可單獨執行」的子指令。只輸出單一 JSON，禁止 Markdown。
+格式: {"title":"短標題","steps":[{"id":"s1","text":"保留原意的單一子指令","depends_on":[]}]}
+規則: 只做切句、排序、標相依(depends_on 放前置步驟 id)；最多 ` + strconv.Itoa(decomposeMaxSteps) + ` 步；不要選工具、不要輸出 tool/action/executor_type/risk/params；單一意圖就只輸出一步；每個子句要能獨立看懂。
+使用者訊息:` + clean
+}
+
+// parseDecomposePlan 解析並驗證 decompose 輸出 → 安全的 chat_route 節點清單。
+// 驗證：丟空步、長度上限、id 去重、最多 N 步、相依只留指向存在 id 者、不可成環。
+func parseDecomposePlan(raw string) (decomposePlan, []dag.DAGNode, error) {
+	var plan decomposePlan
+	if err := json.Unmarshal([]byte(dag.ExtractJSONPlan(raw)), &plan); err != nil {
+		return decomposePlan{}, nil, fmt.Errorf("decompose JSON 不合法: %w", err)
+	}
+	// 1) 清洗：丟空步、截長度、id 去重
+	seen := map[string]bool{}
+	var steps []decomposeStep
+	for _, s := range plan.Steps {
+		text := strings.TrimSpace(s.Text)
+		if text == "" {
+			continue
+		}
+		if len([]rune(text)) > decomposeMaxStepRunes {
+			text = string([]rune(text)[:decomposeMaxStepRunes])
+		}
+		id := strings.TrimSpace(s.ID)
+		if id == "" || seen[id] {
+			id = fmt.Sprintf("s%d", len(steps)+1)
+		}
+		seen[id] = true
+		steps = append(steps, decomposeStep{ID: id, Text: text, DependsOn: s.DependsOn})
+	}
+	if len(steps) == 0 {
+		return decomposePlan{}, nil, fmt.Errorf("decompose 沒有有效步驟")
+	}
+	if len(steps) > decomposeMaxSteps {
+		steps = steps[:decomposeMaxSteps]
+	}
+	// 2) 相依：只保留指向「存在的別的 id」者
+	idset := map[string]bool{}
+	for _, s := range steps {
+		idset[s.ID] = true
+	}
+	for i := range steps {
+		var deps []string
+		for _, d := range steps[i].DependsOn {
+			d = strings.TrimSpace(d)
+			if d != "" && d != steps[i].ID && idset[d] {
+				deps = append(deps, d)
+			}
+		}
+		steps[i].DependsOn = deps
+	}
+	// 3) 環偵測：有環就整批退回（寧可退回單句流程，也不要跑壞）
+	if decomposeHasCycle(steps) {
+		return decomposePlan{}, nil, fmt.Errorf("decompose 相依成環")
+	}
+	// 4) 轉 chat_route 節點：risk 一律 low（真風險由節點內路由器把關，不在此重判）
+	nodes := make([]dag.DAGNode, 0, len(steps))
+	for _, s := range steps {
+		nodes = append(nodes, dag.DAGNode{
+			ID:           s.ID,
+			Title:        s.Text,
+			Operation:    "chat_route",
+			ExecutorType: "chat_route",
+			Target:       s.Text,
+			RiskClass:    string(risk.Low),
+			Status:       dag.StatusPlanned,
+			Dependencies: s.DependsOn,
+		})
+	}
+	return plan, nodes, nil
+}
+
+// decomposeHasCycle 以 DFS 三色法偵測相依環。
+func decomposeHasCycle(steps []decomposeStep) bool {
+	deps := map[string][]string{}
+	for _, s := range steps {
+		deps[s.ID] = s.DependsOn
+	}
+	const white, gray, black = 0, 1, 2
+	color := map[string]int{}
+	var dfs func(string) bool
+	dfs = func(n string) bool {
+		color[n] = gray
+		for _, m := range deps[n] {
+			if color[m] == gray {
+				return true
+			}
+			if color[m] == white && dfs(m) {
+				return true
+			}
+		}
+		color[n] = black
+		return false
+	}
+	for _, s := range steps {
+		if color[s.ID] == white && dfs(s.ID) {
+			return true
+		}
+	}
+	return false
+}
+
+// planDecompose 呼叫模型拿拆解結果，回傳 (title, chat_route 節點, raw, err)。
+func (a *App) planDecompose(userText, adapterID, modelID, sessionID, traceID string) (string, []dag.DAGNode, string, error) {
+	resp, err := a.callPlannerAdapter(adapterID, modelID, sessionID, buildDecomposePrompt(userText), traceID)
+	if err != nil {
+		return "", nil, "", err
+	}
+	if resp == nil || strings.TrimSpace(resp.Text) == "" {
+		return "", nil, "", fmt.Errorf("decompose 無回應")
+	}
+	plan, nodes, perr := parseDecomposePlan(resp.Text)
+	if perr != nil {
+		return "", nil, resp.Text, perr
+	}
+	title := strings.TrimSpace(plan.Title)
+	if title == "" {
+		title = truncateRunes(userText, 28)
+	}
+	return title, nodes, resp.Text, nil
+}
+
+// startDecomposedRun：用 decompose 結果填充 run 並啟動排程（取代封閉詞彙 planner）。
+// 失敗回 error，由 StartTaskProgress 退回原本單一 planner（先窄後寬、永不當機）。
+func (a *App) startDecomposedRun(projectRoot string, run *dag.DAGRun, userText, adapterID, modelID, sessionID string) (*dag.DAGRun, error) {
+	planTraceID := fmt.Sprintf("task-intent-%s", run.ID)
+	title, nodes, raw, err := a.planDecompose(userText, adapterID, modelID, sessionID, planTraceID)
+	if err != nil {
+		return nil, err
+	}
+	if latest, loadErr := dag.LoadFullRun(projectRoot, run.ID); loadErr == nil && latest.Status == "cancelled" {
+		return latest, nil
+	}
+	rawStored, truncated := dag.TruncateRawPlan(raw)
+	now := time.Now().Format(time.RFC3339)
+	run.Status = "running"
+	run.Title = title
+	run.Nodes = nodes
+	run.UpdatedAt = now
+	run.ActiveTraceID = ""
+	run.Planner = dag.PlannerMetadata{
+		RawModelPlan:          rawStored,
+		RawModelPlanTruncated: truncated,
+		PlannerAdapterID:      adapterID,
+		PlannerModelID:        modelID,
+	}
+	if hook, herr := a.hookService.StartRun(run.ID, "outline-from-dag"); herr == nil {
+		run.HookRunID = hook.ID
+		run.OutlineID = "outline-from-dag"
+	}
+	_ = dag.SaveFullRunLocked(projectRoot, run)
+	_ = dag.UpdateRunIndex(projectRoot, run.ID, run.Status, "", 0, len(run.Nodes), 0, "")
+	a.emitTaskRun("task:progress_updated", run)
+	go a.runTaskProgress(run.ID, adapterID, sessionID)
+	return run, nil
+}
+
+// errChatRouteNeedsUser：chat_route 的路由結果是「需要確認/補資訊」，不是最終結果。
+// 用此 sentinel 讓 executeTaskNode 把整個 DAG 暫停等使用者（v1）。
+var errChatRouteNeedsUser = errors.New("chat_route_needs_user")
+
+// chatRouteNeedsUser 判斷一則路由回應是否在等使用者（skill 待確認 / 提問）。
+func chatRouteNeedsUser(resp *skill_step.CLIResponse) bool {
+	if resp == nil {
+		return false
+	}
+	return resp.NeedsUser || strings.TrimSpace(resp.Action) == "提問"
+}
+
+// executeChatRouteTaskNode 把節點子句丟回「一般聊天路由」(routeUserIntentOnce)。
+// 不直接碰任何工具：捷徑(用法/list)、resourceGate、toolReadiness、流程 全由路由器處理。
+// 首次遇到需確認 → 回 errChatRouteNeedsUser 讓整個 DAG 暫停；核准後重跑就直接收結果。
+func (a *App) executeChatRouteTaskNode(run *dag.DAGRun, node dag.DAGNode, adapterID, sessionID, traceID string) (string, error) {
+	// v3.1.6 M1：flag 開啟 → 節點內 tool loop（多輪觀察）；預設關，行為與舊版相同。
+	if taskLoopEnabled() {
+		return a.executeChatRouteLoop(run, node, adapterID, sessionID, "chatroute-"+run.ID+"-"+node.ID)
+	}
+	resp, err := a.routeUserIntentOnce(adapterID, sessionID, node.Target, "chatroute-"+run.ID+"-"+node.ID)
+	if err != nil {
+		return "", err
+	}
+	if resp == nil {
+		return "", fmt.Errorf("chat_route: 無回應")
+	}
+	if resp.Error != "" {
+		return "", errors.New(resp.Error)
+	}
+	text := strings.TrimSpace(resp.Text)
+	if chatRouteNeedsUser(resp) && strings.TrimSpace(node.ApprovedAt) == "" {
+		// 尚未核准、且在等使用者 → 把提示當 result 帶回，由 executeTaskNode 暫停整個 DAG。
+		return text, errChatRouteNeedsUser
+	}
+	if text == "" {
+		text = "（此步驟無文字輸出）"
+	}
+	// 結果會進下游節點的 prompt，先 sanitize 防跨節點注入（與 cli_task 一致）。
+	return controlseal.SanitizeForLLM(controlseal.SourceCLIOutput, text).LLMText, nil
+}
+
+// pauseChatRouteForUser：chat_route 需要使用者確認/補資訊 → 整個 DAG 暫停（v1）。
+// 沿用既有 review 卡 + waiting_review，不動排程核心、不引入併發寫入。
+func (a *App) pauseChatRouteForUser(projectRoot string, run *dag.DAGRun, node *dag.DAGNode, prompt string) {
+	reason := strings.TrimSpace(prompt)
+	if reason == "" {
+		reason = "這一步需要你確認或補充資訊後才會繼續。"
+	}
+	card := a.reviewService.AddCard(review.CardParams{
+		RiskClass:    risk.Medium,
+		Operation:    "chat_route",
+		Target:       node.Target,
+		Reason:       reason,
+		AcceptLabel:  "確認繼續",
+		RejectLabel:  "取消任務",
+		AcceptEffect: "核准後繼續這一步",
+		RejectEffect: "取消整個任務",
+		SourceType:   "task_progress",
+		SourceID:     run.ID,
+	})
+	now := time.Now().Format(time.RFC3339)
+	node.Status = dag.StatusWaitingReview
+	node.ReviewID = card.ID
+	node.ResultSummary = reason
+	run.Status = "waiting_review"
+	run.ActiveNodeID = node.ID
+	run.UpdatedAt = now
+	a.taskMu.Lock()
+	a.taskReviewIndex[card.ID] = taskReviewRef{RunID: run.ID, NodeID: node.ID}
+	a.taskMu.Unlock()
+	_ = dag.SaveFullRunLocked(projectRoot, run)
+	_ = dag.UpdateRunIndex(projectRoot, run.ID, run.Status, "", 0, len(run.Nodes), 0, "")
+	a.eventBus.Emit(eventbus.EventReviewCardAdded, card)
+	a.emitTaskRun("task:progress_waiting_review", run)
 }

@@ -98,6 +98,10 @@ export function CancelActiveTaskProgress(arg1) {
   return window['go']['main']['App']['CancelActiveTaskProgress'](arg1);
 }
 
+export function CancelChatMessage(arg1) {
+  return window['go']['main']['App']['CancelChatMessage'](arg1);
+}
+
 export function CancelPreview() {
   return window['go']['main']['App']['CancelPreview']();
 }
@@ -128,6 +132,10 @@ export function ClearInspectorHistory() {
 
 export function ClearMainTalk() {
   return window['go']['main']['App']['ClearMainTalk']();
+}
+
+export function ClearSessionImages(arg1) {
+  return window['go']['main']['App']['ClearSessionImages'](arg1);
 }
 
 export function ClearSkillContext(arg1, arg2) {
@@ -212,6 +220,10 @@ export function DeactivateRemoteBridgeChannel(arg1) {
 
 export function DeleteAvatarCredential(arg1) {
   return window['go']['main']['App']['DeleteAvatarCredential'](arg1);
+}
+
+export function DeleteLearningRun(arg1) {
+  return window['go']['main']['App']['DeleteLearningRun'](arg1);
 }
 
 export function DeleteScheduledJob(arg1) {
@@ -326,6 +338,10 @@ export function ExportPersonaHandler(arg1, arg2, arg3) {
   return window['go']['main']['App']['ExportPersonaHandler'](arg1, arg2, arg3);
 }
 
+export function ExportProjectBackupHandler(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['ExportProjectBackupHandler'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function ExportSubHandler(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['ExportSubHandler'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -342,12 +358,20 @@ export function FinalizeNativeGoProgramAuthoringExport(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['FinalizeNativeGoProgramAuthoringExport'](arg1, arg2, arg3, arg4);
 }
 
+export function FinalizeNativeLearningRunExport(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['FinalizeNativeLearningRunExport'](arg1, arg2, arg3, arg4);
+}
+
 export function FinalizeNativePersonaExport(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['FinalizeNativePersonaExport'](arg1, arg2, arg3, arg4);
 }
 
 export function FinalizeNativeReferenceFileExport(arg1, arg2, arg3) {
   return window['go']['main']['App']['FinalizeNativeReferenceFileExport'](arg1, arg2, arg3);
+}
+
+export function FinalizeNativeSkillExport(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['FinalizeNativeSkillExport'](arg1, arg2, arg3, arg4);
 }
 
 export function FinalizeNativeSubExport(arg1, arg2, arg3, arg4, arg5) {
@@ -562,6 +586,10 @@ export function GetSummaryModelSettings() {
   return window['go']['main']['App']['GetSummaryModelSettings']();
 }
 
+export function GetTTSPackStatus() {
+  return window['go']['main']['App']['GetTTSPackStatus']();
+}
+
 export function GetTabOrder() {
   return window['go']['main']['App']['GetTabOrder']();
 }
@@ -630,8 +658,20 @@ export function HasOpenStopRecoveryCard() {
   return window['go']['main']['App']['HasOpenStopRecoveryCard']();
 }
 
+export function ImportGoProgramExport(arg1) {
+  return window['go']['main']['App']['ImportGoProgramExport'](arg1);
+}
+
+export function ImportLearningRunExport(arg1) {
+  return window['go']['main']['App']['ImportLearningRunExport'](arg1);
+}
+
 export function ImportMediaVerify(arg1) {
   return window['go']['main']['App']['ImportMediaVerify'](arg1);
+}
+
+export function ImportProjectBackupHandler(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ImportProjectBackupHandler'](arg1, arg2, arg3);
 }
 
 export function ImportReferenceFile(arg1) {
@@ -644,6 +684,14 @@ export function ImportSubHandler(arg1) {
 
 export function ImportVideoFile(arg1) {
   return window['go']['main']['App']['ImportVideoFile'](arg1);
+}
+
+export function InspectProjectBackupHandler(arg1, arg2) {
+  return window['go']['main']['App']['InspectProjectBackupHandler'](arg1, arg2);
+}
+
+export function InstallTTSPack() {
+  return window['go']['main']['App']['InstallTTSPack']();
 }
 
 export function InstallVoiceBaseModel() {
@@ -668,6 +716,10 @@ export function IsLearningModeActive() {
 
 export function IsLivePreviewActive() {
   return window['go']['main']['App']['IsLivePreviewActive']();
+}
+
+export function IsProjectBackupEncryptedHandler(arg1) {
+  return window['go']['main']['App']['IsProjectBackupEncryptedHandler'](arg1);
 }
 
 export function IsReadOnlyMode() {
@@ -770,6 +822,10 @@ export function ListReferenceFiles() {
   return window['go']['main']['App']['ListReferenceFiles']();
 }
 
+export function ListReferenceImages() {
+  return window['go']['main']['App']['ListReferenceImages']();
+}
+
 export function ListRemoteBridgeChannels() {
   return window['go']['main']['App']['ListRemoteBridgeChannels']();
 }
@@ -826,12 +882,20 @@ export function NativeDragExportGoProgramAuthoring(arg1) {
   return window['go']['main']['App']['NativeDragExportGoProgramAuthoring'](arg1);
 }
 
+export function NativeDragExportLearningRun(arg1) {
+  return window['go']['main']['App']['NativeDragExportLearningRun'](arg1);
+}
+
 export function NativeDragExportPersonaHandler(arg1, arg2) {
   return window['go']['main']['App']['NativeDragExportPersonaHandler'](arg1, arg2);
 }
 
 export function NativeDragExportReferenceFile(arg1) {
   return window['go']['main']['App']['NativeDragExportReferenceFile'](arg1);
+}
+
+export function NativeDragExportSkill(arg1) {
+  return window['go']['main']['App']['NativeDragExportSkill'](arg1);
 }
 
 export function NativeDragExportSubHandler(arg1, arg2, arg3, arg4) {
@@ -866,6 +930,10 @@ export function PrepareAvatarGenerateRequest(arg1, arg2) {
   return window['go']['main']['App']['PrepareAvatarGenerateRequest'](arg1, arg2);
 }
 
+export function PrepareCloudTTSText(arg1) {
+  return window['go']['main']['App']['PrepareCloudTTSText'](arg1);
+}
+
 export function PreparePackageInstall(arg1, arg2) {
   return window['go']['main']['App']['PreparePackageInstall'](arg1, arg2);
 }
@@ -876,6 +944,14 @@ export function PreparePackageInstallPayload(arg1, arg2, arg3) {
 
 export function PreviewExternalLink(arg1) {
   return window['go']['main']['App']['PreviewExternalLink'](arg1);
+}
+
+export function PreviewGoProgramExport(arg1) {
+  return window['go']['main']['App']['PreviewGoProgramExport'](arg1);
+}
+
+export function PreviewLearningRunExport(arg1) {
+  return window['go']['main']['App']['PreviewLearningRunExport'](arg1);
 }
 
 export function PreviewSubPackage(arg1) {
@@ -964,6 +1040,10 @@ export function RemoveAllowlistEntry(arg1) {
 
 export function RemoveRemoteBridgeChannel(arg1) {
   return window['go']['main']['App']['RemoveRemoteBridgeChannel'](arg1);
+}
+
+export function RemoveTTSPack() {
+  return window['go']['main']['App']['RemoveTTSPack']();
 }
 
 export function RemoveTabOrder(arg1) {
@@ -1146,12 +1226,24 @@ export function SearchWeb(arg1, arg2) {
   return window['go']['main']['App']['SearchWeb'](arg1, arg2);
 }
 
+export function SearchWebConfirmed(arg1, arg2) {
+  return window['go']['main']['App']['SearchWebConfirmed'](arg1, arg2);
+}
+
 export function SelectFloatingCandidate(arg1) {
   return window['go']['main']['App']['SelectFloatingCandidate'](arg1);
 }
 
 export function SelectPersonaExportDirectory() {
   return window['go']['main']['App']['SelectPersonaExportDirectory']();
+}
+
+export function SelectProjectBackupExportDirectory() {
+  return window['go']['main']['App']['SelectProjectBackupExportDirectory']();
+}
+
+export function SelectProjectBackupFile() {
+  return window['go']['main']['App']['SelectProjectBackupFile']();
 }
 
 export function SelectSubExportDirectory() {
@@ -1222,6 +1314,10 @@ export function SetTrustDomAndClick(arg1) {
   return window['go']['main']['App']['SetTrustDomAndClick'](arg1);
 }
 
+export function StageSessionImages(arg1, arg2) {
+  return window['go']['main']['App']['StageSessionImages'](arg1, arg2);
+}
+
 export function StartDraftSandbox(arg1) {
   return window['go']['main']['App']['StartDraftSandbox'](arg1);
 }
@@ -1272,6 +1368,10 @@ export function StopURLVisualLearning() {
 
 export function StoreAvatarCredential(arg1, arg2) {
   return window['go']['main']['App']['StoreAvatarCredential'](arg1, arg2);
+}
+
+export function SubmitTaskLoopInput(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SubmitTaskLoopInput'](arg1, arg2, arg3);
 }
 
 export function SwitchRemoteBridgeMode(arg1, arg2) {

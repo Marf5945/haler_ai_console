@@ -238,6 +238,16 @@ func (a *App) maybeHandleResourceGate(userText, sessionID, traceID string) (*ski
 	if text == "" {
 		return nil, false
 	}
+	// need_confirm 待確認：使用者回「要/取消」優先由此接手（在 LLM 路由前），
+	// 避免確認回覆被丟回三段式路由造成 skill 權限確認迴圈。
+	if resp, handled := a.maybeHandlePendingSkillConfirm(text, sessionID, traceID); handled {
+		return resp, true
+	}
+	// 電料BOM 互動收集中：每一回合（機台/電料項/要不要補）在 LLM 路由前直接接手，
+	// 避免「料號 數量」這種輸入被三段式路由誤分類。
+	if resp, handled := a.maybeHandlePendingDianliaoBom(text, sessionID, traceID); handled {
+		return resp, true
+	}
 	if resp, handled := a.maybeHandlePendingResourceAction(text, sessionID, traceID); handled {
 		return resp, true
 	}

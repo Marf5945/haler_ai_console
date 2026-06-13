@@ -117,6 +117,8 @@ TASKS*.md
 *AUDIT*.md
 *DECISIONS*.md
 *Spec_Draft.md
+TOKEN_OPTIMIZATION_REPORT.md
+test_dialogues_*.md
 
 # === Python cache artifacts ===
 __pycache__/
@@ -132,8 +134,16 @@ __pycache__/
 
 # === YOLOX 模型權重（改由 GitHub Releases 發布，倉庫只留 model_hashes.json 供 SHA256 驗證）===
 /assets/models/*.onnx
+/assets/models/*.mlmodelc/
+/reference/
 
 # === 2026-06-12 清理補充 ===
 /assets/models/yolox_button_s.mlmodelc/
+# ⚠️ /data/backup/ 是 Go 原始碼目錄,此規則導致套件從未進版控(只在 Mac 開發機上)。
+# 待在 Mac 上補交時:移除下行規則 → git add -f data/backup → 還原 project_backup_binding.go。
 /data/backup/
 REFACTOR_SKILL_FLOW.md
+
+# === Windows 本機測試暫存(go test 用的 cache 與 APPDATA 重導目錄)===
+/.gocache/
+/.test-appdata/

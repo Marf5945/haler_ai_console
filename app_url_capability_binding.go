@@ -231,6 +231,16 @@ var (
 	pendingResourceActions = map[string]pendingResourceAction{} // sessionID → pending
 )
 
+// fileTargetAskTTL 是「你要處理哪個檔案」問句的有效期。問過一次後，
+// 若使用者在這段時間內又送了一句仍沒帶路徑的訊息，就放行到 CLI，
+// 避免 deterministic gate 對同一句反覆攔截、永遠到不了 CLI。
+const fileTargetAskTTL = 2 * time.Minute
+
+var (
+	pendingFileAskMu      sync.Mutex
+	pendingFileTargetAsks = map[string]time.Time{} // sessionID → 問過「哪個檔案」的時間
+)
+
 // maybeHandleResourceGate is the deterministic resource layer in front of LLM routing.
 // It handles concrete resources (URLs and local paths) before fuzzy tool selection.
 func (a *App) maybeHandleResourceGate(userText, sessionID, traceID string) (*skill_step.CLIResponse, bool) {
@@ -265,6 +275,22 @@ func (a *App) maybeHandleResourceGate(userText, sessionID, traceID string) (*ski
 		return resp, true
 	}
 	if asksForFileWithoutTarget(text) {
+		now := time.Now()
+		pendingFileAskMu.Lock()
+		askedAt, asked := pendingFileTargetAsks[sessionID]
+		stillPending := asked && now.Sub(askedAt) <= fileTargetAskTTL
+		if stillPending {
+			// 已問過且仍在效期內，但這句還是沒帶路徑 → 放行到 CLI，別卡死。
+			delete(pendingFileTargetAsks, sessionID)
+			pendingFileAskMu.Unlock()
+			debugtrace.Record("resource_gate.file_target.passthrough", traceID, map[string]interface{}{
+				"session_id": sessionID,
+			})
+			return nil, false
+		}
+		// 第一次詢問：記下時間，讓下一輪可去重。
+		pendingFileTargetAsks[sessionID] = now
+		pendingFileAskMu.Unlock()
 		return &skill_step.CLIResponse{
 			Text: "你要我處理哪個檔案？請貼本機路徑、拖入檔案，或說已引用檔案名稱。",
 		}, true
@@ -616,18 +642,39 @@ func localPathCandidates(raw string) []string {
 	return out
 }
 
+// fileContainerTerms 是「介面/容器」詞：指的是檔案總管這類程式或資料夾介面，
+// 而非「某一份要處理的檔案」。它們本身含有「檔案/file」字樣，若不先剔除會把
+// 「在檔案總管中切換書籤資料夾」這種自動化請求誤判成「你要處理哪個檔案」。
+var fileContainerTerms = []string{
+	"檔案總管", "檔案管理員", "檔案管理器", "檔案管理",
+	"file explorer", "file manager", "windows explorer", "finder",
+}
+
 func asksForFileWithoutTarget(text string) bool {
 	if windowsPathInTextRe.MatchString(text) || urlInTextRe.MatchString(text) {
 		return false
 	}
-	hasFileNoun := strings.Contains(text, "檔案") || strings.Contains(text, "文件") || strings.Contains(text, "檔") ||
-		strings.Contains(strings.ToLower(text), "file") || strings.Contains(strings.ToLower(text), "document")
+	// 先把容器詞剔除，再判斷句中是否還有「檔案」名詞。
+	stripped := text
+	lowerStripped := strings.ToLower(text)
+	for _, term := range fileContainerTerms {
+		stripped = strings.ReplaceAll(stripped, term, "")
+		lowerStripped = strings.ReplaceAll(lowerStripped, strings.ToLower(term), "")
+	}
+	hasFileNoun := strings.Contains(stripped, "檔案") || strings.Contains(stripped, "文件") || strings.Contains(stripped, "檔") ||
+		strings.Contains(lowerStripped, "file") || strings.Contains(lowerStripped, "document")
 	if !hasFileNoun {
 		return false
 	}
-	return fetchIntentRe.MatchString(text) || openIntentRe.MatchString(text) ||
-		strings.Contains(text, "哪個") || strings.Contains(text, "哪一個") || strings.Contains(text, "哪份") ||
-		strings.Contains(text, "什麼")
+	// 意圖只看「針對某份檔案」的動作（讀取/開啟/詢問哪份）。
+	// 不採用 openIntentRe，因為它含「資料夾/位置/前往」等資料夾導航詞，
+	// 那些是針對資料夾而非檔案，不該觸發「你要處理哪個檔案」。
+	hasFileIntent := fetchIntentRe.MatchString(stripped) ||
+		strings.Contains(stripped, "開啟") || strings.Contains(stripped, "打開") ||
+		strings.Contains(lowerStripped, "open") ||
+		strings.Contains(stripped, "哪個") || strings.Contains(stripped, "哪一個") ||
+		strings.Contains(stripped, "哪份") || strings.Contains(stripped, "什麼")
+	return hasFileIntent
 }
 
 func openLocalPathInShell(path string) error {

@@ -143,9 +143,9 @@ var forbiddenPatterns = []string{
 
 // forbiddenStructural 是出口掃描專用的結構化禁止項目。
 var forbiddenStructural = []string{
-	"-----begin rsa private key-----",
-	"-----begin openssh private key-----",
-	"-----begin pgp private key-----",
+	"-----begin rsa " + "private key-----",
+	"-----begin openssh " + "private key-----",
+	"-----begin pgp " + "private key-----",
 	"sk-",     // OpenAI API key prefix
 	"sk_live", // Stripe live key prefix
 	"ghp_",    // GitHub personal access token

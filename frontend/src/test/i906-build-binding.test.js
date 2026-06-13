@@ -120,12 +120,42 @@ describe('I-906 前端 import 一致性檢查', () => {
   let appJsxContent = '';
 
   beforeEach(() => {
-    const appJsxPath = path.resolve(__dirname, '../App.jsx');
+    // App.jsx 拆檔後，binding 的 import 可能位於 App.jsx 本體、
+    // src/lib/ 下的共用模組（例如 lib/appShared.jsx），
+    // 或 src/components/ 下的各元件檔（含子目錄）。
+    // 因此把三處的 js/jsx 全部串接後再檢查，
+    // 後續繼續拆檔也不需要回來改這個測試。
+    const srcDir = path.resolve(__dirname, '..');
+    const parts = [];
     try {
-      appJsxContent = fs.readFileSync(appJsxPath, 'utf-8');
+      parts.push(fs.readFileSync(path.join(srcDir, 'App.jsx'), 'utf-8'));
     } catch {
-      appJsxContent = '';
+      // App.jsx 不存在時由下方測試報錯
     }
+    const collectDir = (dir) => {
+      let entries = [];
+      try {
+        entries = fs.readdirSync(dir, {withFileTypes: true});
+      } catch {
+        // 目錄不存在（尚未拆檔）時忽略
+        return;
+      }
+      for (const e of entries) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          collectDir(full);
+        } else if (e.name.endsWith('.jsx') || e.name.endsWith('.js')) {
+          try {
+            parts.push(fs.readFileSync(full, 'utf-8'));
+          } catch {
+            // 單檔讀取失敗時略過
+          }
+        }
+      }
+    };
+    collectDir(path.join(srcDir, 'lib'));
+    collectDir(path.join(srcDir, 'components'));
+    appJsxContent = parts.join('\n');
   });
 
   it('App.jsx 存在且可讀取', () => {

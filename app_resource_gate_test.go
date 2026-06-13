@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"ui_console/domain/url_source"
 )
@@ -17,6 +18,9 @@ func resetResourceGateForTest(t *testing.T) {
 	pendingResourceMu.Lock()
 	pendingResourceActions = map[string]pendingResourceAction{}
 	pendingResourceMu.Unlock()
+	pendingFileAskMu.Lock()
+	pendingFileTargetAsks = map[string]time.Time{}
+	pendingFileAskMu.Unlock()
 	urlRegistryOnce.Do(func() {})
 	urlRegistry = url_source.NewRegistry(filepath.Join(t.TempDir(), "audit.jsonl"))
 }
@@ -77,6 +81,38 @@ func TestResourceGateAsksWhichFileWhenMissingTarget(t *testing.T) {
 	}
 	if !strings.Contains(resp.Text, "哪個檔案") {
 		t.Fatalf("unexpected response: %q", resp.Text)
+	}
+}
+
+// 回歸測試：File Explorer 自動化請求不該被「你要處理哪個檔案」攔截。
+// 「檔案總管」含有「檔案」二字、「書籤資料夾」命中 openIntentRe，
+// 舊邏輯會誤判並無限迴圈；修正後應放行（handled=false）到 CLI。
+func TestResourceGateDoesNotHijackFileExplorerAutomation(t *testing.T) {
+	resetResourceGateForTest(t)
+	app := &App{}
+	inputs := []string{
+		"幫我啟動在檔案總管中依序切換書籤資料夾",
+		"在檔案總管中依序切換書籤資料夾",
+		"打開 file explorer 然後切到下一個資料夾",
+	}
+	for _, in := range inputs {
+		if resp, handled := app.maybeHandleResourceGate(in, "session-explorer", "trace-explorer"); handled {
+			t.Fatalf("explorer automation should pass through to CLI, got handled=true resp=%q for %q", resp.Text, in)
+		}
+	}
+}
+
+// 回歸測試：同一句沒帶路徑的模糊請求，第一次問、第二次放行，避免無限迴圈。
+func TestResourceGateFileTargetAskDoesNotLoop(t *testing.T) {
+	resetResourceGateForTest(t)
+	app := &App{}
+	resp, handled := app.maybeHandleResourceGate("讀取檔案", "session-loop", "trace-loop")
+	if !handled || !strings.Contains(resp.Text, "哪個檔案") {
+		t.Fatalf("first vague file request should ask which file, got handled=%v resp=%q", handled, resp.Text)
+	}
+	_, handled2 := app.maybeHandleResourceGate("讀取檔案", "session-loop", "trace-loop")
+	if handled2 {
+		t.Fatal("second identical vague request should pass through to CLI, not loop")
 	}
 }
 

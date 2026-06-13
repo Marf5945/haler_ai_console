@@ -24,6 +24,7 @@ import {memory} from '../models';
 import {debugtrace} from '../models';
 import {browser_pref} from '../models';
 import {taborder} from '../models';
+import {skill_eval} from '../models';
 
 export function AcknowledgePendingItem(arg1:string,arg2:string):Promise<void>;
 
@@ -730,3 +731,7 @@ export function VerifyMediaFile(arg1:string):Promise<any>;
 export function WakeLocalAdapter(arg1:string):Promise<any>;
 
 export function WakeOllamaDaemon():Promise<void>;
+
+export function WebChainMonthlyStats():Promise<Array<skill_eval.WebChainSigStats>>;
+
+export function WebChainSkillCandidates():Promise<Array<skill_eval.WebChainSigStats>>;

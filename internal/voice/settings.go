@@ -7,20 +7,44 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
 	"ui_console/data/storage"
+	"ui_console/shared/executil"
 )
 
 const (
-	LanguageFollowApp   = "follow_app"
-	LanguageAuto        = "auto"
-	LanguageManual      = "manual"
-	ManagedModelFile    = "ggml-base.bin"
-	ManagedRunnerFile   = "whisper-cli"
+	LanguageFollowApp = "follow_app"
+	LanguageAuto      = "auto"
+	LanguageManual    = "manual"
+	ManagedModelFile  = "ggml-base.bin"
+	// BundledRunnerSHA256 是 macOS 內建 whisper-cli(whisper.cpp,MIT 授權)的雜湊。
 	BundledRunnerSHA256 = "c01e6dea1165e459d73193a341db9f31e83e4dc01b8b17e169a00b2d396246fa"
+	// BundledRunnerSHA256Windows:Windows 版 whisper-cli.exe 的雜湊。
+	// whisper.cpp 官方提供 Windows 建置;打包進 resources 後把雜湊填入此處即可啟用。
+	// 空字串表示尚未打包,語音轉文字在 Windows 會明確回報暫不支援。
+	BundledRunnerSHA256Windows = ""
 )
+
+// ManagedRunnerFile 是內建語音執行檔的檔名,依平台加上副檔名。
+var ManagedRunnerFile = managedRunnerFileName()
+
+func managedRunnerFileName() string {
+	if runtime.GOOS == "windows" {
+		return "whisper-cli.exe"
+	}
+	return "whisper-cli"
+}
+
+// bundledRunnerSHA256 回傳目前平台內建 runner 的預期雜湊;空字串表示此平台尚未內建。
+func bundledRunnerSHA256() string {
+	if runtime.GOOS == "windows" {
+		return BundledRunnerSHA256Windows
+	}
+	return BundledRunnerSHA256
+}
 
 type Settings struct {
 	DebugMode      bool   `json:"debugMode"`
@@ -233,18 +257,22 @@ func (s *Service) bundledRunnerPath() string {
 }
 
 func (s *Service) ensureManagedRunner() (string, error) {
+	expectedSHA := bundledRunnerSHA256()
+	if expectedSHA == "" {
+		return "", fmt.Errorf("voice: 此平台(%s)尚未內建語音執行檔,語音轉文字暫不支援", runtime.GOOS)
+	}
 	source := s.bundledRunnerPath()
 	if source == "" {
 		return "", fmt.Errorf("voice: bundled runner missing")
 	}
-	if err := verifyFileSHA256(source, BundledRunnerSHA256); err != nil {
+	if err := verifyFileSHA256(source, expectedSHA); err != nil {
 		return "", fmt.Errorf("voice: bundled runner checksum: %w", err)
 	}
 	target := s.ManagedRunnerPath()
 	if filepath.Clean(source) == filepath.Clean(target) {
 		return source, nil
 	}
-	if err := verifyFileSHA256(target, BundledRunnerSHA256); err == nil {
+	if err := verifyFileSHA256(target, expectedSHA); err == nil {
 		_ = os.Chmod(target, 0o700)
 		return target, nil
 	}
@@ -257,7 +285,7 @@ func (s *Service) ensureManagedRunner() (string, error) {
 		_ = os.Remove(tmp)
 		return "", err
 	}
-	if err := verifyFileSHA256(tmp, BundledRunnerSHA256); err != nil {
+	if err := verifyFileSHA256(tmp, expectedSHA); err != nil {
 		_ = os.Remove(tmp)
 		return "", fmt.Errorf("voice: copied runner checksum: %w", err)
 	}
@@ -309,7 +337,7 @@ func firstExistingExecutable(paths []string) string {
 		if path == "" {
 			continue
 		}
-		if info, err := os.Stat(path); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+		if info, err := os.Stat(path); err == nil && !info.IsDir() && executil.IsExecutable(path, info) {
 			return path
 		}
 	}

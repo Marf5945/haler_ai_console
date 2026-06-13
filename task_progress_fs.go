@@ -153,6 +153,9 @@ func fsCheckPath(allowedRoots []string, target string) (string, error) {
 	}
 
 	cleaned := filepath.Clean(target)
+	if runtime.GOOS == "windows" && !filepath.IsAbs(cleaned) && (strings.HasPrefix(cleaned, "/") || strings.HasPrefix(cleaned, `\`)) {
+		return "", fmt.Errorf("fs: path outside allowed roots: %s", target)
+	}
 
 	// 相對路徑：用第一個 allowed root 當 base
 	if !filepath.IsAbs(cleaned) {
@@ -413,6 +416,7 @@ func fsGlob(allowedRoots []string, pattern string) (string, error) {
 		if err != nil {
 			return nil
 		}
+		rel = filepath.ToSlash(rel)
 		matched := false
 		for _, pat := range expanded {
 			if globMatch(pat, rel) {
@@ -433,7 +437,7 @@ func fsGlob(allowedRoots []string, pattern string) (string, error) {
 			return filepath.SkipAll
 		}
 		// SEC-W29.8：path 中的檔名可能含 ㄌ，sanitize 後再回 LLM。
-		out.Matches = append(out.Matches, controlseal.SanitizeForLLM(controlseal.SourceToolOutput, p).LLMText)
+		out.Matches = append(out.Matches, controlseal.SanitizeForLLM(controlseal.SourceToolOutput, filepath.ToSlash(p)).LLMText)
 		return nil
 	})
 	if walkErr != nil && walkErr != filepath.SkipAll {
@@ -596,7 +600,7 @@ func fsGrepSearch(allowedRoots []string, pattern string) (string, error) {
 				truncated = true
 			}
 			hit := fsGrepHit{
-				File:      controlseal.SanitizeForLLM(controlseal.SourceToolOutput, p).LLMText,
+				File:      controlseal.SanitizeForLLM(controlseal.SourceToolOutput, filepath.ToSlash(p)).LLMText,
 				LineNo:    lineNo,
 				Line:      controlseal.SanitizeForLLM(controlseal.SourceDocument, rawLine).LLMText,
 				Truncated: truncated,

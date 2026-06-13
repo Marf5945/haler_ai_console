@@ -179,7 +179,36 @@ func findNodeBinary() string {
 	if path, err := exec.LookPath("node"); err == nil {
 		return path
 	}
+	for _, candidate := range nodeFallbackCandidates() {
+		if info, err := os.Stat(candidate); err == nil && executil.IsExecutable(candidate, info) {
+			log.Printf("cli_manager: found node at candidate path: %s", candidate)
+			return candidate
+		}
+	}
+	// 最後 fallback：回傳 "node"，讓 exec 試 PATH（幾乎一定會失敗）
+	log.Printf("cli_manager: WARNING — node not found in any known path, falling back to bare \"node\"")
+	return "node"
+}
+
+// nodeFallbackCandidates 回傳 PATH 找不到 node 時的常見安裝位置(依平台)。
+func nodeFallbackCandidates() []string {
 	home, _ := os.UserHomeDir()
+	if runtime.GOOS == "windows" {
+		var candidates []string
+		// nvm-windows 的 symlink 目標(通常指向目前啟用的版本)
+		if symlink := os.Getenv("NVM_SYMLINK"); symlink != "" {
+			candidates = append(candidates, filepath.Join(symlink, "node.exe"))
+		}
+		for _, env := range []string{"ProgramFiles", "ProgramFiles(x86)"} {
+			if dir := os.Getenv(env); dir != "" {
+				candidates = append(candidates, filepath.Join(dir, "nodejs", "node.exe"))
+			}
+		}
+		if local := os.Getenv("LOCALAPPDATA"); local != "" {
+			candidates = append(candidates, filepath.Join(local, "Programs", "nodejs", "node.exe"))
+		}
+		return candidates
+	}
 	candidates := []string{
 		"/opt/homebrew/bin/node",
 		"/usr/local/bin/node",
@@ -205,15 +234,7 @@ func findNodeBinary() string {
 			}
 		}
 	}
-	for _, candidate := range candidates {
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
-			log.Printf("cli_manager: found node at candidate path: %s", candidate)
-			return candidate
-		}
-	}
-	// 最後 fallback：回傳 "node"，讓 exec 試 PATH（幾乎一定會失敗）
-	log.Printf("cli_manager: WARNING — node not found in any known path, falling back to bare \"node\"")
-	return "node"
+	return candidates
 }
 
 // buildSidecarEnv 為 sidecar child process 建構環境變數。

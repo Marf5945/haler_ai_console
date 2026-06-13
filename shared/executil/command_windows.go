@@ -4,7 +4,10 @@ package executil
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -29,5 +32,19 @@ func HideWindow(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow:    true,
 		CreationFlags: createNoWindow,
+	}
+}
+
+// IsExecutable 回報檔案是否可執行。
+// Windows 沒有 Unix 執行權限位元(os.Stat 的 mode 不含 0o111),改以副檔名判斷。
+func IsExecutable(path string, info os.FileInfo) bool {
+	if info == nil || info.IsDir() {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".exe", ".cmd", ".bat", ".com":
+		return true
+	default:
+		return false
 	}
 }

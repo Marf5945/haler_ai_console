@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -69,16 +70,34 @@ func resolveOllamaExecutable() string {
 	if path, err := exec.LookPath("ollama"); err == nil {
 		return path
 	}
-	for _, path := range []string{
-		"/opt/homebrew/bin/ollama",
-		"/usr/local/bin/ollama",
-		"/Applications/Ollama.app/Contents/Resources/ollama",
-	} {
-		if info, err := os.Stat(path); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+	for _, path := range ollamaFallbackPaths() {
+		if info, err := os.Stat(path); err == nil && executil.IsExecutable(path, info) {
 			return path
 		}
 	}
 	return ""
+}
+
+// ollamaFallbackPaths 回傳 PATH 找不到 ollama 時的常見安裝位置(依平台)。
+func ollamaFallbackPaths() []string {
+	if runtime.GOOS == "windows" {
+		var paths []string
+		// Windows 版 Ollama 預設裝在使用者目錄
+		if local := os.Getenv("LOCALAPPDATA"); local != "" {
+			paths = append(paths, filepath.Join(local, "Programs", "Ollama", "ollama.exe"))
+		}
+		for _, env := range []string{"ProgramFiles", "ProgramFiles(x86)"} {
+			if dir := os.Getenv(env); dir != "" {
+				paths = append(paths, filepath.Join(dir, "Ollama", "ollama.exe"))
+			}
+		}
+		return paths
+	}
+	return []string{
+		"/opt/homebrew/bin/ollama",
+		"/usr/local/bin/ollama",
+		"/Applications/Ollama.app/Contents/Resources/ollama",
+	}
 }
 
 func parseOllamaListOutput(out string) []SummaryModelOption {

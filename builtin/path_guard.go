@@ -151,6 +151,34 @@ func isSystemPath(resolved string) bool {
 			}
 		}
 	}
-	// Linux / Windows 可依需求擴充
+	if runtime.GOOS == "windows" {
+		// Windows 路徑大小寫不敏感,統一轉小寫比對。
+		// 從環境變數取系統目錄(處理非 C: 安裝),env 缺失時退回常見預設值。
+		prefixes := []string{
+			envOrDefault("SystemRoot", `C:\Windows`),            // 系統核心
+			envOrDefault("ProgramFiles", `C:\Program Files`),    // 已安裝程式
+			os.Getenv("ProgramFiles(x86)"),                      // 32 位元程式(可能不存在)
+			envOrDefault("ProgramData", `C:\ProgramData`),       // 全系統設定資料
+		}
+		lowerResolved := strings.ToLower(resolved)
+		for _, p := range prefixes {
+			if p == "" {
+				continue
+			}
+			lp := strings.ToLower(p)
+			if lowerResolved == lp || strings.HasPrefix(lowerResolved, lp+`\`) {
+				return true
+			}
+		}
+	}
+	// Linux 可依需求擴充
 	return false
+}
+
+// envOrDefault 讀取環境變數,空值時回傳預設。
+func envOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }

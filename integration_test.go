@@ -257,6 +257,18 @@ func TestEventBus_ConstantsExist(t *testing.T) {
 // --- StatusRail integration (existing service, verifying binding works) ---
 
 func TestStatusRail_ViewNotEmpty(t *testing.T) {
+	// 自備資料：把使用者設定目錄重導到暫存，並先註冊一筆 adapter，
+	// 讓本測試在全新機器（還沒有 adapter_registry.json）也能穩定通過，
+	// 同時避免測試碰到真實的使用者設定。
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)            // macOS: UserConfigDir 用 HOME
+	t.Setenv("XDG_CONFIG_HOME", tmp) // Linux: 優先用 XDG
+	t.Setenv("APPDATA", tmp)         // Windows: UserConfigDir 用 %AppData%
+	seed := adapter_registry.NewService(appDataRoot())
+	if err := seed.Register("claude-cli", "Claude", "C"); err != nil {
+		t.Fatalf("seed adapter: %v", err)
+	}
+
 	app := NewApp()
 	state := app.GetConsoleState()
 	if state.StatusRail.Text == "" {

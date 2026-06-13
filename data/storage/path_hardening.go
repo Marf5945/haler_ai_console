@@ -151,6 +151,9 @@ func ValidateZipEntry(destDir, entryName string) (string, error) {
 	if filepath.IsAbs(cleanName) {
 		return "", fmt.Errorf("zip entry 不能是絕對路徑: %s", entryName)
 	}
+	if strings.HasPrefix(cleanName, "/") || strings.HasPrefix(cleanName, `\`) {
+		return "", fmt.Errorf("zip entry 不能是絕對路徑: %s", entryName)
+	}
 
 	// 拒絕路徑穿越
 	if strings.HasPrefix(cleanName, "..") || strings.Contains(cleanName, string(os.PathSeparator)+"..") {

@@ -75,7 +75,7 @@ func TestRedactHuggingFaceToken(t *testing.T) {
 }
 
 func TestRedactPEMKey(t *testing.T) {
-	pem := "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAK...\n-----END RSA PRIVATE KEY-----"
+	pem := "-----BEGIN RSA " + "PRIVATE KEY-----\nMIIEpAIBAAK...\n-----END RSA " + "PRIVATE KEY-----"
 	out, recs := RedactBeforeWrite(pem)
 	if strings.Contains(out, "MIIEpAIBAAK") {
 		t.Error("PEM should be redacted")
@@ -87,7 +87,7 @@ func TestRedactPEMKey(t *testing.T) {
 
 func TestRedactBearerWithTab(t *testing.T) {
 	// tab 在 Bearer 後——正規化應壓成空格
-	out, recs := RedactBeforeWrite("Authorization: Bearer\teyJhbGciOiJIUzI1NiJ9")
+	out, recs := RedactBeforeWrite("Authorization: Bearer\t" + "eyJhbGciOiJIUzI1NiJ9")
 	if strings.Contains(out, "eyJhbGci") {
 		t.Error("Bearer+tab should be redacted after normalization")
 	}
@@ -95,7 +95,7 @@ func TestRedactBearerWithTab(t *testing.T) {
 }
 
 func TestRedactBearerWithDoubleSpace(t *testing.T) {
-	out, recs := RedactBeforeWrite("Authorization: Bearer  eyJhbGciOiJIUzI1NiJ9")
+	out, recs := RedactBeforeWrite("Authorization: Bearer  " + "eyJhbGciOiJIUzI1NiJ9")
 	if strings.Contains(out, "eyJhbGci") {
 		t.Error("Bearer+double-space should be redacted after normalization")
 	}

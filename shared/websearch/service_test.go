@@ -2,6 +2,7 @@ package websearch
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,6 +35,39 @@ func TestSearchTavily(t *testing.T) {
 	}
 	if outcome.Results[0].URL != "https://wails.io/" {
 		t.Fatalf("unexpected result: %#v", outcome.Results[0])
+	}
+}
+
+func TestSearchTavilyIncludeDomainsFiltersResults(t *testing.T) {
+	var gotBody struct {
+		IncludeDomains []string `json:"include_domains"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[{"title":"Weather","url":"https://www.cwa.gov.tw/V8/C/W/County/index.html","content":"Official forecast.","score":0.9},{"title":"Social post","url":"https://www.instagram.com/p/example","content":"Outfit chatter.","score":0.8}]}`))
+	}))
+	defer server.Close()
+
+	service := NewServiceWithClient(rewriteTransportClient(server))
+	outcome, err := service.Search(context.Background(), SearchRequest{
+		Query:          "台北 明天 天氣",
+		Limit:          5,
+		IncludeDomains: []string{"https://www.cwa.gov.tw"},
+	}, ProviderConfig{
+		ProviderID: ProviderTavily,
+		APIKey:     "tvly-test",
+	})
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if len(gotBody.IncludeDomains) != 1 || gotBody.IncludeDomains[0] != "www.cwa.gov.tw" {
+		t.Fatalf("include_domains = %#v", gotBody.IncludeDomains)
+	}
+	if len(outcome.Results) != 1 || !strings.Contains(outcome.Results[0].URL, "cwa.gov.tw") {
+		t.Fatalf("unexpected filtered outcome: %#v", outcome.Results)
 	}
 }
 

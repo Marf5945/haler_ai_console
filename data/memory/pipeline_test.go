@@ -28,7 +28,7 @@ func TestAppendTalkEntryWithRedaction(t *testing.T) {
 	p := NewPipeline(tmpDir)
 
 	// 寫入含 API key 的內容
-	key := testOpenAIKey()
+	key := testPipelineOpenAIKey()
 	records, err := p.AppendTalkEntry("user", "My key is "+key)
 	if err != nil {
 		t.Fatalf("append failed: %v", err)
@@ -46,6 +46,10 @@ func TestAppendTalkEntryWithRedaction(t *testing.T) {
 	if !strings.Contains(content, "[REDACTED") {
 		t.Error("should contain REDACTED marker")
 	}
+}
+
+func testPipelineOpenAIKey() string {
+	return "sk-" + "abc123def456ghi789jkl012mno345pqr678"
 }
 
 // 測試安全內容寫入無 redaction

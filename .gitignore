@@ -121,6 +121,8 @@ TASKS*.md
 *AUDIT*.md
 *DECISIONS*.md
 *Spec_Draft.md
+TOKEN_OPTIMIZATION_REPORT.md
+test_dialogues_*.md
 
 # === Python cache artifacts ===
 __pycache__/
@@ -141,3 +143,12 @@ __pycache__/
 # === Local screenshots / visual notes ===
 /reference/*.png
 /wolf_ui.png
+/reference/
+
+# === 2026-06-12 清理補充 ===
+/assets/models/yolox_button_s.mlmodelc/
+REFACTOR_SKILL_FLOW.md
+
+# === Windows 本機測試暫存(go test 用的 cache 與 APPDATA 重導目錄)===
+/.gocache/
+/.test-appdata/

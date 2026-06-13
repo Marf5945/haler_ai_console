@@ -1871,6 +1871,10 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 			"judge_error":    errorString(judgeErr),
 		})
 		if handled, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID, userText); handled {
+			// 複合意圖 Web Chain（2.5.5.11）：web search 且 next=網路 → 回灌續跑。
+			routedResp = a.maybeContinueWebChain(
+				a.webChainCLIStepCall(adapterID, cliPath, sessionID, modelOverride, traceID),
+				sessionID, traceID, userText, decision.Raw, routedResp)
 			return &routedResp, nil
 		}
 	}
@@ -2267,6 +2271,8 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 			"adapter_kind":   "api",
 		})
 		if handled, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID, userText); handled {
+			// 複合意圖 Web Chain（2.5.5.11）：API 路徑共用同一條迴圈，stepCall 走 callAPI。
+			routedResp = a.maybeContinueWebChain(callAPI, sessionID, traceID, userText, decision.Raw, routedResp)
 			return &routedResp, nil
 		}
 	}
@@ -5143,7 +5149,6 @@ func (a *App) GetReadinessGateState() ReadinessGateState {
 func (a *App) SelectFloatingCandidate(candidateID string) ReadinessGateState {
 	readinessMu.Lock()
 	defer readinessMu.Unlock()
-	// 清除已選擇的候選（前端會消失刷新）
 	currentGateState.FloatingCandidates = nil
 	return currentGateState
 }

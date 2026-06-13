@@ -112,6 +112,36 @@ func TestFormatDocSearchContextEmptyResults(t *testing.T) {
 	}
 }
 
+// 回歸測試:搜尋結果 snippet 必須強制截斷至 referencePromptSummaryRunes,
+// 避免超長段落把 D: 區塊撐爆(token 優化熱點 3)。
+func TestFormatDocSearchContextTruncatesLongSnippet(t *testing.T) {
+	longSnippet := strings.Repeat("長", referencePromptSummaryRunes*3)
+	results := []builtin.DocumentSearchResult{{
+		DocID:       "doc-long",
+		DisplayName: "超長.txt",
+		Snippet:     longSnippet,
+		Score:       0.9,
+		Source:      "document",
+	}}
+	out := formatDocSearchContext([]string{"測試"}, results)
+	maxLen := referencePromptSummaryRunes
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, "檔名=超長.txt") {
+			continue
+		}
+		idx := strings.Index(line, "內容=")
+		if idx < 0 {
+			t.Fatalf("result line should contain 內容= field: %s", line)
+		}
+		content := line[idx+len("內容="):]
+		if got := len([]rune(content)); got > maxLen {
+			t.Fatalf("snippet should be truncated to %d runes, got %d", maxLen, got)
+		}
+		return
+	}
+	t.Fatalf("result line for 超長.txt not found in output: %s", out)
+}
+
 func TestParseReferenceSearchPlan(t *testing.T) {
 	plan := parseReferenceSearchPlan("```json\n{\"search\":true,\"keywords\":[\"甜點\",\"食譜\"]}\n```")
 	if !plan.Search || len(plan.Keywords) != 2 || plan.Keywords[0] != "甜點" || plan.Keywords[1] != "食譜" {

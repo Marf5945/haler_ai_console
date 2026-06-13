@@ -549,10 +549,10 @@ func (a *App) ExecuteNativeLearningReplayStep(payload string) (interface{}, erro
 	}
 	if relocated, ok := a.relocateNativeReplayStep(step); ok {
 		a.emitHookGeneDataProcessed(replayGeneSkillID, invocationID)
-		if relocated.NeedsConfirmation && canAutoConfirmBrowserReplay(step, relocated) {
+		if relocated.NeedsConfirmation && canAutoConfirmLowRiskReplay(step, relocated) {
 			relocated.NeedsConfirmation = false
 			relocated.OK = true
-			relocated.Reason = "browser page replay auto-confirmed for non-dangerous page click"
+			relocated.Reason = "low-risk replay auto-confirmed for non-dangerous click"
 		}
 		if relocated.NeedsConfirmation {
 			previewStep := step
@@ -864,7 +864,7 @@ func saveReplayRelocationDebugInfo(path string, step visual_learning.LearningRep
 	return os.WriteFile(path, data, 0o600)
 }
 
-func canAutoConfirmBrowserReplay(step visual_learning.LearningReplayStep, relocated visual_learning.AnchorRelocationResult) bool {
+func canAutoConfirmLowRiskReplay(step visual_learning.LearningReplayStep, relocated visual_learning.AnchorRelocationResult) bool {
 	if relocated.Confidence < 0.5 {
 		return false
 	}
@@ -874,6 +874,7 @@ func canAutoConfirmBrowserReplay(step visual_learning.LearningReplayStep, reloca
 	case "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe":
 	// macOS 的 process 是 app 名稱而非 .exe（CGWindowList 的 kCGWindowOwnerName）。
 	case "google chrome", "google chrome beta", "microsoft edge", "firefox", "safari", "brave browser", "opera", "vivaldi", "arc":
+	case "explorer.exe":
 	default:
 		return false
 	}
@@ -887,8 +888,10 @@ func canAutoConfirmBrowserReplay(step visual_learning.LearningReplayStep, reloca
 	}, " "))
 	for _, word := range []string{
 		"download", "downloads", "save as", "settings", "system settings", "chrome settings",
-		"delete", "remove", "submit", "pay", "payment", "purchase", "checkout", "transfer",
-		"下載", "另存", "設定", "系統設定", "刪除", "移除", "送出", "提交", "付款", "購買", "結帳", "轉帳",
+		"delete", "remove", "rename", "properties", "recycle bin", "format", "eject",
+		"submit", "pay", "payment", "purchase", "checkout", "transfer",
+		"下載", "另存", "設定", "系統設定", "刪除", "移除", "重新命名", "內容", "資源回收桶", "格式化", "退出",
+		"送出", "提交", "付款", "購買", "結帳", "轉帳",
 	} {
 		if strings.Contains(text, word) {
 			return false

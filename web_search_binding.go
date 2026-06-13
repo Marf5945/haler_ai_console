@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -95,6 +96,7 @@ func (a *App) SearchWebConfirmed(maskedQuery string, limit int) (interface{}, er
 
 func (a *App) searchWebDirect(query string, limit int) (interface{}, error) {
 	req := websearch.SearchRequest{Query: query, Limit: limit}
+	req = a.applyWebSearchAllowlist(req)
 	cfg, err := a.loadWebSearchProviderConfig()
 	if err != nil {
 		a.emitWebSearchConfigRequired()
@@ -140,10 +142,12 @@ func (a *App) maybeHandleWebSearch(userText, sessionID, traceID string) (*skill_
 }
 
 func (a *App) executeWebSearch(req websearch.SearchRequest, traceID string) skill_step.CLIResponse {
+	req = a.applyWebSearchAllowlist(req)
 	a.pushActionStatus("網路", req.Query) // status rail：正在用網路搜尋「…」…
 	debugtrace.Record("web_search.enter", traceID, map[string]interface{}{
-		"query": req.Query,
-		"limit": req.Limit,
+		"query":                 req.Query,
+		"limit":                 req.Limit,
+		"include_domains_count": len(req.IncludeDomains),
 	})
 	cfg, cfgErr := a.loadWebSearchProviderConfig()
 	if cfgErr != nil {
@@ -194,6 +198,67 @@ func (a *App) executeWebSearch(req websearch.SearchRequest, traceID string) skil
 		return skill_step.CLIResponse{Text: summary}
 	}
 	return skill_step.CLIResponse{Text: websearch.FormatSearchOutcome(req, outcome)}
+}
+
+func (a *App) applyWebSearchAllowlist(req websearch.SearchRequest) websearch.SearchRequest {
+	domains := a.webSearchAllowlistDomains()
+	if len(domains) == 0 {
+		return req
+	}
+	seen := map[string]bool{}
+	merged := make([]string, 0, len(req.IncludeDomains)+len(domains))
+	for _, domain := range append(req.IncludeDomains, domains...) {
+		domain = strings.TrimSpace(strings.ToLower(domain))
+		if domain == "" || seen[domain] {
+			continue
+		}
+		seen[domain] = true
+		merged = append(merged, domain)
+	}
+	sort.Strings(merged)
+	req.IncludeDomains = merged
+	return req
+}
+
+func (a *App) webSearchAllowlistDomains() []string {
+	if a == nil || a.allowlistStore == nil {
+		return nil
+	}
+	entries, err := a.allowlistStore.ListActive()
+	if err != nil || len(entries) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var domains []string
+	for _, entry := range entries {
+		host := strings.TrimSpace(strings.ToLower(entry.CanonicalHostname))
+		if host == "" || seen[host] || !webSearchAllowlistEntryApplies(entry.AllowedFor, entry.NotAllowedFor) {
+			continue
+		}
+		seen[host] = true
+		domains = append(domains, host)
+	}
+	sort.Strings(domains)
+	return domains
+}
+
+func webSearchAllowlistEntryApplies(allowedFor, notAllowedFor []string) bool {
+	for _, item := range notAllowedFor {
+		switch strings.ToLower(strings.TrimSpace(item)) {
+		case "web_search", "search_web", "web", "internet":
+			return false
+		}
+	}
+	if len(allowedFor) == 0 {
+		return true
+	}
+	for _, item := range allowedFor {
+		switch strings.ToLower(strings.TrimSpace(item)) {
+		case "web_search", "search_web", "web", "internet", "lookup", "research", "research_reference", "rag_ranking":
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) webSearchConfigPublic() websearch.ConfigPublic {

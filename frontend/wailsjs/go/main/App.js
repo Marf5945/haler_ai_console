@@ -1413,3 +1413,11 @@ export function WakeLocalAdapter(arg1) {
 export function WakeOllamaDaemon() {
   return window['go']['main']['App']['WakeOllamaDaemon']();
 }
+
+export function WebChainMonthlyStats() {
+  return window['go']['main']['App']['WebChainMonthlyStats']();
+}
+
+export function WebChainSkillCandidates() {
+  return window['go']['main']['App']['WebChainSkillCandidates']();
+}

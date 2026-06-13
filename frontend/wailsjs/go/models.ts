@@ -1,4 +1,4 @@
-export namespace browser_pref {
+﻿export namespace browser_pref {
 
 	export class RuntimeNoticeResult {
 	    show_notice: boolean;
@@ -2289,6 +2289,31 @@ export namespace settings {
 
 }
 
+export namespace skill_eval {
+
+	export class WebChainSigStats {
+	    signature: string;
+	    total_runs: number;
+	    clean_runs: number;
+	    drift_runs: number;
+	    total_drifts: number;
+
+	    static createFrom(source: any = {}) {
+	        return new WebChainSigStats(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.signature = source["signature"];
+	        this.total_runs = source["total_runs"];
+	        this.clean_runs = source["clean_runs"];
+	        this.drift_runs = source["drift_runs"];
+	        this.total_drifts = source["total_drifts"];
+	    }
+	}
+
+}
+
 export namespace skill_step {
 
 	export class CLIResponse {
@@ -3418,4 +3443,3 @@ export namespace w3a_media {
 	}
 
 }
-

@@ -7,7 +7,7 @@ import (
 
 // 測試入口粗篩：移除 API key
 func TestEntryFilterAPIKey(t *testing.T) {
-	input := "Here is my key: " + testContextOpenAIKey()
+	input := "Here is my key: " + "sk-" + "abc123def456ghi789jkl012mno345pqr678"
 	cleaned, removed := EntryFilter(input)
 
 	if strings.Contains(cleaned, "sk-abc123") {
@@ -20,7 +20,7 @@ func TestEntryFilterAPIKey(t *testing.T) {
 
 // 測試入口粗篩：移除 bearer token
 func TestEntryFilterBearerToken(t *testing.T) {
-	input := "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.test.signature"
+	input := "Authorization: Bearer " + "eyJhbGciOiJIUzI1NiJ9.test.signature"
 	cleaned, removed := EntryFilter(input)
 
 	if strings.Contains(cleaned, "eyJhbGci") {
@@ -61,7 +61,7 @@ func TestEntryFilterSafeContent(t *testing.T) {
 func TestExitValidatePrivateKey(t *testing.T) {
 	payload := &ContextPayload{
 		ContentBlocks: []ContentBlock{
-			{Source: "test", Content: "-----BEGIN " + "RSA PRIVATE KEY-----\nMIIE....\n-----END " + "RSA PRIVATE KEY-----"},
+			{Source: "test", Content: "-----BEGIN RSA " + "PRIVATE KEY-----\nMIIE....\n-----END RSA " + "PRIVATE KEY-----"},
 		},
 	}
 	// 入口粗篩應已移除，但測試出口兜底
@@ -188,22 +188,22 @@ func TestRenderSourceToken(t *testing.T) {
 // ── §3.4.1 NormalizeForSecurityCheck 測試 ──
 
 func TestNormalizeCollapseTab(t *testing.T) {
-	got := NormalizeForSecurityCheck("Bearer\teyJhbGci")
-	if got != "Bearer eyJhbGci" {
+	got := NormalizeForSecurityCheck("Bearer\t" + "eyJhbGci")
+	if got != "Bearer "+"eyJhbGci" {
 		t.Errorf("tab not collapsed, got: %q", got)
 	}
 }
 
 func TestNormalizeCollapseMultiSpace(t *testing.T) {
-	got := NormalizeForSecurityCheck("Bearer   eyJhbGci")
-	if got != "Bearer eyJhbGci" {
+	got := NormalizeForSecurityCheck("Bearer   " + "eyJhbGci")
+	if got != "Bearer "+"eyJhbGci" {
 		t.Errorf("multi-space not collapsed, got: %q", got)
 	}
 }
 
 func TestNormalizeMixedWhitespace(t *testing.T) {
-	got := NormalizeForSecurityCheck("Bearer \t \n eyJhbGci")
-	if got != "Bearer eyJhbGci" {
+	got := NormalizeForSecurityCheck("Bearer \t \n " + "eyJhbGci")
+	if got != "Bearer "+"eyJhbGci" {
 		t.Errorf("mixed whitespace not collapsed, got: %q", got)
 	}
 }
@@ -226,7 +226,7 @@ func TestNormalizePreservesNormalText(t *testing.T) {
 // ── 入口粗篩 + 正規化整合 ──
 
 func TestEntryFilterBearerTab(t *testing.T) {
-	input := "Authorization: Bearer\teyJhbGciOiJIUzI1NiJ9.test.sig"
+	input := "Authorization: Bearer\t" + "eyJhbGciOiJIUzI1NiJ9.test.sig"
 	cleaned, removed := EntryFilter(input)
 	if strings.Contains(cleaned, "eyJhbGci") {
 		t.Error("Bearer+tab should be caught by entry filter after normalization")
@@ -237,7 +237,7 @@ func TestEntryFilterBearerTab(t *testing.T) {
 }
 
 func TestEntryFilterAnthropicKey(t *testing.T) {
-	input := "My key is " + testContextAnthropicKey()
+	input := "My key is " + "sk-ant-api03-" + "abcdefghijklmnopqrstuvwx"
 	cleaned, removed := EntryFilter(input)
 	if strings.Contains(cleaned, "sk-ant-api03") {
 		t.Error("Anthropic key should be caught by entry filter")
@@ -248,7 +248,7 @@ func TestEntryFilterAnthropicKey(t *testing.T) {
 }
 
 func TestEntryFilterOpenRouterKey(t *testing.T) {
-	input := "My key is " + testContextOpenRouterKey()
+	input := "My key is " + "sk-or-v1-" + "abcdefghijklmnopqrstuvwx"
 	cleaned, removed := EntryFilter(input)
 	if strings.Contains(cleaned, "sk-or-v1") {
 		t.Error("OpenRouter key should be caught by entry filter")
@@ -256,18 +256,6 @@ func TestEntryFilterOpenRouterKey(t *testing.T) {
 	if len(removed) == 0 {
 		t.Error("should record removed item")
 	}
-}
-
-func testContextOpenAIKey() string {
-	return "sk-" + "abc123def456ghi789jkl012mno345pqr678"
-}
-
-func testContextAnthropicKey() string {
-	return "sk-" + "ant-api03-" + "abcdefghijklmnopqrstuvwx"
-}
-
-func testContextOpenRouterKey() string {
-	return "sk-" + "or-v1-" + "abcdefghijklmnopqrstuvwx"
 }
 
 func TestEntryFilterReplicateKey(t *testing.T) {

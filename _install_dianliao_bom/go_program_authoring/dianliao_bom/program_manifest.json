@@ -1,0 +1,29 @@
+{
+  "program_id": "dianliao_bom",
+  "display_name": "產出電料Bom",
+  "purpose": "查電料編碼紀錄 → 欄位對應 → 輸出多工作表電料BOM xlsx",
+  "source_dir": "",
+  "permissions": {
+    "read_app_data": true,
+    "read_outputs": true,
+    "write_outputs_scratch": true,
+    "read_mounted_paths": [],
+    "read_db_as_json": false,
+    "network": false,
+    "shell_subprocess": false
+  },
+  "input_schema": {
+    "required": ["machine", "date", "sheets"]
+  },
+  "output_schema": {
+    "required": ["output_path"]
+  },
+  "data_sources": [
+    { "kind": "xlsx", "name": "電料編碼紀錄", "path": "電料編碼紀錄_260428_M1.xlsx" }
+  ],
+  "metadata": {
+    "skill_id": "dianliao.bom",
+    "entrypoint": "builtin.BuildDianliaoBOM",
+    "dag": "產出電料Bom"
+  }
+}

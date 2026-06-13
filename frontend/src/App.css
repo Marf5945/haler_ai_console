@@ -1,0 +1,11 @@
+/* Kept for compatibility with the Wails React template. Main styles live in style.css. */
+
+/* v3.1.6 節點內 loop：輪次顯示與 inline 補充輸入 */
+.dag-loop-round { color: var(--accent, #7ad); display: block; }
+.dag-loop-reply { display: block; margin-top: 4px; }
+.dag-loop-reply input {
+  width: 100%; box-sizing: border-box; padding: 4px 8px;
+  font-size: 12px; border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px; background: rgba(0, 0, 0, 0.2); color: inherit;
+}
+.dag-loop-error { color: #e66; display: block; }

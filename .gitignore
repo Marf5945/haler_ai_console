@@ -1,0 +1,149 @@
+# ──────────────────────────────────────────────
+# AI Console .gitignore — 加寬排除
+# ──────────────────────────────────────────────
+
+# === Go 建置產物 ===
+.gocache/
+/ui_console
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/build/
+/bin/
+
+# === Wails ===
+/build/bin/
+
+# === Frontend 依賴 ===
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/vite.config.*.timestamp-*.mjs
+
+# === 備份檔 / 歷史殘留 ===
+# SEC-W11 第二刀（2026-05-24）：避免 *.bak2 等備份檔再被 commit
+*.bak
+*.bak2
+*.backup
+*.orig
+
+# === IDE / 編輯器 ===
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
+.settings/
+
+# === OS 檔案 ===
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# === Spec 禁止外流檔案 ===
+# §9 來源信任日誌（含敏感 hash）
+source_trust_logs/
+allowlist_audit/
+
+# §11 LLM context 暫存
+llm_context_cache/
+context_payloads/
+
+# 記憶系統暫存
+memory/talk_full_archive/
+memory/*.tmp
+threat_log.jsonl
+
+# DAG 執行暫存
+dag_runs/
+dag_critical_nodes/
+
+# 憑證存放（絕對不得提交）
+credential_store/
+*.credential
+*.keystore
+
+# 沙盒草稿
+draft_sandbox_runs/
+
+# Purge manifest（本地審計用）
+purge_manifests/
+
+# === Runtime 暫存 ===
+runtime/
+*.tmp
+*.log
+outputs/
+tmp_*.png
+crash_recovery/
+temp_sessions/
+
+# === 測試產物 ===
+coverage.out
+coverage.html
+*.test.log
+**/_perm_test_*
+
+# === 環境設定 ===
+.env
+.env.local
+.env.*.local
+
+# === Visual Learning 暫存 ===
+visual_learning/processed_temp/
+
+# === 跨平台移植後補上(Go 測試快取 / ONNX runtime 二進位)===
+.gocache-test/
+/assets/runtimes/
+/assets/models/*.onnx
+assets/models/yolox_button_s.onnx
+
+# === Local development notes / sensitive drafts ===
+TASKS*.md
+*AUDIT*.md
+*DECISIONS*.md
+*Spec_Draft.md
+TOKEN_OPTIMIZATION_REPORT.md
+test_dialogues_*.md
+
+# === Python cache artifacts ===
+__pycache__/
+*.py[cod]
+
+# === Device-local secrets and runtime history ===
+/data/secrets/
+/data/status_rail/
+/remote_bridge/remote_bridge_credentials.json
+/remote_bridge/remote_bridge_credentials.json.migrated
+*.enc
+*.dpapi
+
+# === YOLOX 模型權重（改由 GitHub Releases 發布，倉庫只留 model_hashes.json 供 SHA256 驗證）===
+/assets/models/*.onnx
+/assets/models/*.mlmodelc/
+/reference/
+
+# === 2026-06-12 清理補充 ===
+/assets/models/yolox_button_s.mlmodelc/
+# ⚠️ /data/backup/ 是 Go 原始碼目錄,此規則導致套件從未進版控(只在 Mac 開發機上)。
+# 待在 Mac 上補交時:移除下行規則 → git add -f data/backup → 還原 project_backup_binding.go。
+/data/backup/
+REFACTOR_SKILL_FLOW.md
+
+# === Windows 本機測試暫存(go test 用的 cache 與 APPDATA 重導目錄)===
+/.gocache/
+/.test-appdata/

@@ -1,0 +1,66 @@
+{
+  "title": "產出電料Bom",
+  "nodes": [
+    {
+      "id": "confirm_intent",
+      "title": "確認是否輸出電料BOM ｜ confirm intent",
+      "executor_type": "cli_task",
+      "action_code": "confirm_intent",
+      "action": "確認",
+      "target": "是否輸出電料BOM",
+      "risk_class": "low",
+      "parallel_root": true,
+      "dependencies": []
+    },
+    {
+      "id": "collect_fields",
+      "title": "引導補足必填欄位 ｜ collect fields",
+      "executor_type": "cli_task",
+      "action_code": "collect_fields",
+      "action": "詢問",
+      "target": "機台名稱/日期/分區/料號/數量/註解",
+      "risk_class": "low",
+      "dependencies": ["confirm_intent"]
+    },
+    {
+      "id": "lookup_db",
+      "title": "查電料編碼紀錄 ｜ lookup db",
+      "executor_type": "tool_call",
+      "action_code": "lookup_db",
+      "action": "查詢",
+      "target": "電料編碼紀錄(Materials)",
+      "risk_class": "low",
+      "dependencies": ["collect_fields"]
+    },
+    {
+      "id": "fill_mapping",
+      "title": "欄位對應填值 ｜ fill mapping",
+      "executor_type": "tool_call",
+      "action_code": "fill_mapping",
+      "action": "對應",
+      "target": "DB欄位→BOM欄位(品名/料號/廠商料號/規格)",
+      "risk_class": "low",
+      "dependencies": ["lookup_db"]
+    },
+    {
+      "id": "generate_xlsx",
+      "title": "產生電料BOM xlsx ｜ generate xlsx",
+      "executor_type": "tool_call",
+      "action_code": "generate_xlsx",
+      "action": "產生",
+      "target": "電料BOM.xlsx",
+      "risk_class": "medium",
+      "dependencies": ["fill_mapping"]
+    },
+    {
+      "id": "verify_output",
+      "title": "驗證輸出與缺漏回報 ｜ verify output",
+      "executor_type": "tool_call",
+      "action_code": "verify_output",
+      "action": "驗證",
+      "target": "工作表數/必填數量/查無料號warnings",
+      "risk_class": "low",
+      "dependencies": ["generate_xlsx"]
+    }
+  ]
+}

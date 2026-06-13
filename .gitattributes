@@ -1,0 +1,26 @@
+* text=auto eol=lf
+
+# Windows scripts should keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Shell scripts should keep LF.
+*.sh text eol=lf
+
+# Binary assets.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.dll binary
+*.exe binary
+*.dylib binary
+*.so binary
+*.onnx binary
+*.bin binary
+*.weights binary
+*.mlmodelc/** binary

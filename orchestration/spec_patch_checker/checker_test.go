@@ -15,7 +15,7 @@ func TestImportedSkillNoAbsolutePath(t *testing.T) {
 		t.Errorf("expected no error for relative refs, got: %v", err)
 	}
 	// 違規情境：injection 含絕對路徑
-	bad := `{"resource_refs":{"programs":["/Users/tester/data/skills/weather/programs/fetcher"]}}`
+	bad := `{"resource_refs":{"programs":["/home/tester/data/skills/weather/programs/fetcher"]}}`
 	if err := CheckSkillContextNotExposingAbsolutePaths(bad); err == nil {
 		t.Error("expected error for absolute path in injection, got nil")
 	}

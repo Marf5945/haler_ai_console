@@ -60,4 +60,4 @@ env GOCACHE=/private/tmp/go-build-cache go test ./orchestration/replan/... ./orc
 - **活線（flag 開）的實機 runtime 驗證**：build 綠只代表編譯過，活線行為需跑真任務確認。
 - `GoalContract.OutputPredicate` / `Scope` 的更精準推導（目前 v1 從 plan 只抓 goal summary）。
 
-詳見 `TASKS_3_1_5.md` §3.1.6。
+後續工作以程式碼註解、測試與 issue/PR 追蹤為準。

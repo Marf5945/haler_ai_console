@@ -19,6 +19,19 @@ const (
 	EventSchedulerJobCancelled = "scheduler:job_cancelled"
 
 	// EventSchedulerActionRequested 當 LLM 輸出排程相關 action chain 時發送。
+	// 注意：task loop 來源（IsTaskLoopTrace）不發此事件——loop 自己持有動作生命週期
+	// （PendingInput / schema gate / risk review），再發工具卡會雙重提示（v3.1.8 收斂）。
 	// Controller 解析後由 app.go 接手做實際排程操作。
 	EventSchedulerActionRequested = "scheduler:action_requested"
 )
+
+// IsTaskLoopTrace 判斷 trace 是否來自節點內 tool loop（chat_route / cli_task）。
+// loop 來源不該再開 scheduler 工具卡：動作的確認與風險把關由 loop 與 review card 負責。
+func IsTaskLoopTrace(traceID string) bool {
+	for _, prefix := range []string{"chatroute-", "clitask-"} {
+		if len(traceID) >= len(prefix) && traceID[:len(prefix)] == prefix {
+			return true
+		}
+	}
+	return false
+}

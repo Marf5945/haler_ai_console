@@ -294,11 +294,12 @@ func (a *SidecarCLIAdapter) RunSummarizationNow(adapterID, cliPath, model string
 	}
 	now := time.Now()
 	sum := conversation.Summary{
-		Tag:         fmt.Sprintf("S-%d", now.Unix()%100000),
-		Content:     summaryText,
-		SentenceIDs: ids,
-		Timestamp:   now,
-		Valid:       true,
+		Tag:             fmt.Sprintf("S-%d", now.Unix()%100000),
+		Content:         summaryText,
+		SentenceIDs:     ids,
+		Timestamp:       now,
+		Valid:           true,
+		OriginalContent: content.String(), // 給 caller 落 deep_memory，防摘要喪失
 	}
 	a.addSummaryToContinuity(continuityKey, sum)
 	state.counter.Subtract(origChars)
@@ -586,8 +587,9 @@ func (a *SidecarCLIAdapter) SendMessage(opts skill_step.CLIMessageOptions) (skil
 			})
 		} else if validation.Code == actionchain.ValidationOK {
 			// Non-builtin valid action: extract display text and emit routing event.
+			// v3.1.8：loop 來源不出工具卡，同 app.go API 路徑的收斂。
 			displayText = chain.Target
-			if a.eventBus != nil {
+			if a.eventBus != nil && !eventbus.IsTaskLoopTrace(opts.TraceID) {
 				a.eventBus.Emit(eventbus.EventSchedulerActionRequested, map[string]string{
 					"action":     chain.Action,
 					"target":     chain.Target,

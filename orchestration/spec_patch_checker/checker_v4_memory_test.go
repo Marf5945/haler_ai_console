@@ -48,9 +48,9 @@ func TestV4Memory_AbsolutePath_Clean(t *testing.T) {
 }
 
 func TestV4Memory_AbsolutePath_Users(t *testing.T) {
-	payload := `{"target":"/Users/tester/memory/talk_full.md"}`
+	payload := `{"target":"/home/tester/memory/talk_full.md"}`
 	if err := CheckNoAbsolutePathInPayload(payload); err == nil {
-		t.Error("/Users/ path should fail")
+		t.Error("/home/ path should fail")
 	}
 }
 

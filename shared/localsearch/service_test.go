@@ -32,17 +32,16 @@ func TestSearchFindsContentAndPath(t *testing.T) {
 }
 
 func TestSearchRedactsSnippet(t *testing.T) {
-	secret := "sk-" + "abcdefghijklmnopqrstuvwxyz123456"
 	svc := NewService(nil, []Item{{
 		Source:  "document", // 預設會搜的本機檔案來源（記憶搜尋另有專測）
 		Title:   "secret",
-		Content: "token " + secret + " should not show",
+		Content: "token " + testSearchOpenAIKey() + " should not show",
 	}})
 	results, err := svc.Search(SearchRequest{Query: "token"})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
-	if len(results) != 1 || strings.Contains(results[0].Snippet, "sk-"+"abcdefghijklmnopqrstuvwxyz") {
+	if len(results) != 1 || strings.Contains(results[0].Snippet, testSearchOpenAIKey()[:18]) {
 		t.Fatalf("snippet not redacted: %#v", results)
 	}
 }
@@ -52,18 +51,18 @@ func TestFormatSearchOutcomeOnlyShowsContentSnippets(t *testing.T) {
 		{
 			Source:  "document",
 			Title:   "試試看.txt",
-			Path:    "/Users/tester/Library/Application Support/ai-console/data/references/files/試試看.txt",
+			Path:    "/home/tester/.local/share/ai-console/data/references/files/試試看.txt",
 			Snippet: "試試看，很好玩的文件",
 		},
 		{
 			Source:  "memory",
 			Title:   "talk_full.md",
-			Path:    "/Users/tester/Library/Application Support/ai-console/data/projects/default/memory/talk_full.md",
+			Path:    "/home/tester/.local/share/ai-console/data/projects/default/memory/talk_full.md",
 			Snippet: "## [2026-05-24 01:00:12] user\n你能找到試試看文檔嗎？",
 		},
 	}})
 
-	for _, forbidden := range []string{"路徑：", "[文件]", "[記憶]", "試試看.txt", "talk_full.md", "/Users/tester"} {
+	for _, forbidden := range []string{"路徑：", "[文件]", "[記憶]", "試試看.txt", "talk_full.md", "/home/tester"} {
 		if strings.Contains(out, forbidden) {
 			t.Fatalf("formatted result leaked location metadata %q: %s", forbidden, out)
 		}
@@ -71,6 +70,10 @@ func TestFormatSearchOutcomeOnlyShowsContentSnippets(t *testing.T) {
 	if !strings.Contains(out, "有找到 2 筆") || !strings.Contains(out, "內容：試試看，很好玩的文件") {
 		t.Fatalf("formatted result should say found and show content snippets: %s", out)
 	}
+}
+
+func testSearchOpenAIKey() string {
+	return "sk-" + "abcdefghijklmnopqrstuvwxyz123456"
 }
 
 func TestParseUserQueryAcceptsExplicitLocalCommands(t *testing.T) {

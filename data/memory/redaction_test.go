@@ -11,24 +11,27 @@ import (
 // ── Layer 1: 各供應商 pattern ──
 
 func TestRedactOpenAIKey(t *testing.T) {
-	out, recs := RedactBeforeWrite("key: " + "sk-" + "abc123def456ghi789jkl012mno345pqr678")
-	if strings.Contains(out, "sk-abc123") {
+	key := testOpenAIKey()
+	out, recs := RedactBeforeWrite("key: " + key)
+	if strings.Contains(out, key[:9]) {
 		t.Error("OpenAI key should be redacted")
 	}
 	assertHasProvider(t, recs, "OpenAI")
 }
 
 func TestRedactAnthropicKey(t *testing.T) {
-	out, recs := RedactBeforeWrite("key: " + "sk-ant-api03-" + "abcdefghijklmnopqrstuvwx")
-	if strings.Contains(out, "sk-ant-api03") {
+	key := testAnthropicKey()
+	out, recs := RedactBeforeWrite("key: " + key)
+	if strings.Contains(out, "sk-"+"ant-api03") {
 		t.Error("Anthropic key should be redacted")
 	}
 	assertHasProvider(t, recs, "Anthropic")
 }
 
 func TestRedactOpenRouterKey(t *testing.T) {
-	out, recs := RedactBeforeWrite("key: " + "sk-or-v1-" + "abcdefghijklmnopqrstuvwx")
-	if strings.Contains(out, "sk-or-v1") {
+	key := testOpenRouterKey()
+	out, recs := RedactBeforeWrite("key: " + key)
+	if strings.Contains(out, "sk-"+"or-v1") {
 		t.Error("OpenRouter key should be redacted")
 	}
 	assertHasProvider(t, recs, "OpenRouter")
@@ -43,39 +46,43 @@ func TestRedactReplicateKey(t *testing.T) {
 }
 
 func TestRedactAWSKey(t *testing.T) {
-	out, recs := RedactBeforeWrite("aws: " + "AKIA" + "IOSFODNN7EXAMPLE")
-	if strings.Contains(out, "AKIAIOSF") {
+	key := testAWSKey()
+	out, recs := RedactBeforeWrite("aws: " + key)
+	if strings.Contains(out, "AKIA"+"IOSF") {
 		t.Error("AWS key should be redacted")
 	}
 	assertHasProvider(t, recs, "AWS")
 }
 
 func TestRedactStripeKey(t *testing.T) {
-	out, recs := RedactBeforeWrite("stripe: " + "sk_live_" + "abcdefghijklmnopqrstuvwxyz")
-	if strings.Contains(out, "sk_live_") {
+	key := testStripeKey()
+	out, recs := RedactBeforeWrite("stripe: " + key)
+	if strings.Contains(out, "sk_"+"live_") {
 		t.Error("Stripe key should be redacted")
 	}
 	assertHasProvider(t, recs, "Stripe")
 }
 
 func TestRedactGoogleAIKey(t *testing.T) {
-	out, recs := RedactBeforeWrite("google: " + "AIzaSy" + "A1234567890abcdefghijklmnopqrstuv")
-	if strings.Contains(out, "AIzaSy") {
+	key := testGoogleAIKey()
+	out, recs := RedactBeforeWrite("google: " + key)
+	if strings.Contains(out, "AIza"+"Sy") {
 		t.Error("Google AI key should be redacted")
 	}
 	assertHasProvider(t, recs, "Google_AI")
 }
 
 func TestRedactHuggingFaceToken(t *testing.T) {
-	out, recs := RedactBeforeWrite("hf: hf_abcdefghijklmnopqrstuvwxyzABCDEFGHIJ")
-	if strings.Contains(out, "hf_abcdef") {
+	key := testHuggingFaceToken()
+	out, recs := RedactBeforeWrite("hf: " + key)
+	if strings.Contains(out, "hf_"+"abcdef") {
 		t.Error("HuggingFace token should be redacted")
 	}
 	assertHasProvider(t, recs, "HuggingFace")
 }
 
 func TestRedactPEMKey(t *testing.T) {
-	pem := "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAK...\n-----END RSA PRIVATE KEY-----"
+	pem := "-----BEGIN " + "RSA PRIVATE KEY-----\nMIIEpAIBAAK...\n-----END " + "RSA PRIVATE KEY-----"
 	out, recs := RedactBeforeWrite(pem)
 	if strings.Contains(out, "MIIEpAIBAAK") {
 		t.Error("PEM should be redacted")
@@ -223,8 +230,9 @@ func TestLoadUserPatternsMissingFile(t *testing.T) {
 
 	LoadUserPatterns(t.TempDir()) // 不應 panic，靜默使用內建
 	// 內建仍有效
-	out, _ := RedactBeforeWrite("key: " + "sk-" + "abc123def456ghi789jkl012mno345pqr678")
-	if strings.Contains(out, "sk-abc123") {
+	key := testOpenAIKey()
+	out, _ := RedactBeforeWrite("key: " + key)
+	if strings.Contains(out, key[:9]) {
 		t.Error("built-in should still work without user config")
 	}
 }
@@ -243,8 +251,9 @@ func TestUserPatternCannotDisableBuiltin(t *testing.T) {
 
 	LoadUserPatterns(dir)
 
-	out, _ := RedactBeforeWrite("key: " + "sk-" + "abc123def456ghi789jkl012mno345pqr678")
-	if strings.Contains(out, "sk-abc123") {
+	key := testOpenAIKey()
+	out, _ := RedactBeforeWrite("key: " + key)
+	if strings.Contains(out, key[:9]) {
 		t.Error("built-in OpenAI pattern must remain active")
 	}
 }
@@ -263,4 +272,32 @@ func assertHasProvider(t *testing.T, recs []RedactionRecord, provider string) {
 		return // 被 kv pattern 吃掉也算通過
 	}
 	t.Errorf("expected record with provider %q, got %+v", provider, recs)
+}
+
+func testOpenAIKey() string {
+	return "sk-" + "abc123def456ghi789jkl012mno345pqr678"
+}
+
+func testAnthropicKey() string {
+	return "sk-" + "ant-api03-" + "abcdefghijklmnopqrstuvwx"
+}
+
+func testOpenRouterKey() string {
+	return "sk-" + "or-v1-" + "abcdefghijklmnopqrstuvwx"
+}
+
+func testAWSKey() string {
+	return "AKIA" + "IOSFODNN7EXAMPLE"
+}
+
+func testStripeKey() string {
+	return "sk_" + "live_" + "abcdefghijklmnopqrstuvwxyz"
+}
+
+func testGoogleAIKey() string {
+	return "AIza" + "SyA1234567890abcdefghijklmnopqrstuv"
+}
+
+func testHuggingFaceToken() string {
+	return "hf_" + "abcdefghijklmnopqrstuvwxyzABCDEFGHIJ"
 }

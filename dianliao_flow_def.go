@@ -9,8 +9,8 @@ import (
 
 // dianliao_flow_def.go — 「產出電料Bom」的流程宣告（FlowDef）與 Resolver 轉接。
 //
-// Step 1：FlowDef 先由 Go 程式碼定義；Step 2 將序列化進 skill_manifest.json 的
-// flow 區段，由 manifest 載入，本檔屆時移除。見 REFACTOR_SKILL_FLOW.md。
+// FlowDef 先由 Go 程式碼定義；未來可序列化進 skill_manifest.json 的 flow 區段，
+// 再由 manifest 載入。
 
 var (
 	dianliaoDoneWords   = []string{"不要", "輸出", "好了", "ok", "結束", "完成", "不用了", "不補了"}

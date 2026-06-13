@@ -85,6 +85,8 @@ purge_manifests/
 
 # === Runtime 暫存 ===
 runtime/
+!/frontend/wailsjs/runtime/
+!/frontend/wailsjs/runtime/**
 *.tmp
 *.log
 outputs/
@@ -111,6 +113,8 @@ visual_learning/processed_temp/
 /assets/runtimes/
 /assets/models/*.onnx
 assets/models/yolox_button_s.onnx
+/assets/models/*.mlmodelc/
+/assets/models/__dummy_test__
 
 # === Local development notes / sensitive drafts ===
 TASKS*.md
@@ -132,8 +136,8 @@ __pycache__/
 
 # === YOLOX 模型權重（改由 GitHub Releases 發布，倉庫只留 model_hashes.json 供 SHA256 驗證）===
 /assets/models/*.onnx
+/assets/models/*.mlmodelc/
 
-# === 2026-06-12 清理補充 ===
-/assets/models/yolox_button_s.mlmodelc/
-/data/backup/
-REFACTOR_SKILL_FLOW.md
+# === Local screenshots / visual notes ===
+/reference/*.png
+/wolf_ui.png

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +33,22 @@ const (
 	taskLoopEmitTargetMaxBytes = 120
 )
 
+// taskLoopMaxRoundsValue / taskLoopBudgetValue：上限可由 env 覆寫（預設 8 輪 / 8KB）。
+// AI_CONSOLE_TASK_LOOP_MAX_ROUNDS=12、AI_CONSOLE_TASK_LOOP_BUDGET_KB=16。
+func taskLoopMaxRoundsValue() int {
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("AI_CONSOLE_TASK_LOOP_MAX_ROUNDS"))); err == nil && v >= 1 && v <= 50 {
+		return v
+	}
+	return taskLoopMaxRounds
+}
+
+func taskLoopBudgetValue() int {
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("AI_CONSOLE_TASK_LOOP_BUDGET_KB"))); err == nil && v >= 1 && v <= 256 {
+		return v * 1024
+	}
+	return taskLoopObservationBudget
+}
+
 // taskLoopEnabled 回報節點內 loop feature flag。預設關 → 行為與舊版完全相同。
 func taskLoopEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("AI_CONSOLE_TASK_LOOP"))) {
@@ -50,9 +67,10 @@ var errTaskLoopNeedsUser = errors.New("task_loop_needs_user")
 // Loop 主體
 // ──────────────────────────────────────────────
 
-// executeChatRouteLoop 在單一 chat_route 節點內跑多輪「模型提議 → 路由執行 → 觀察回饋」。
+// executeTaskNodeLoop 在單一節點內跑多輪「模型提議 → 路由執行 → 觀察回饋」。
+// chat_route 與 cli_task 共用（M2）：goal 由呼叫端決定（cli_task 會帶前置依賴 context）。
 // 路由真相仍只有一套：每輪走 routeUserIntentOnce，本函式不另立路由器。
-func (a *App) executeChatRouteLoop(run *dag.DAGRun, node dag.DAGNode, adapterID, sessionID, traceID string) (string, error) {
+func (a *App) executeTaskNodeLoop(run *dag.DAGRun, node dag.DAGNode, goal, adapterID, sessionID, traceID string) (string, error) {
 	projectRoot := storage.ProjectRoot(appDataRoot(), "default")
 	state := dag.LoadLoopState(projectRoot, run.ID, node.ID)
 	state.TraceID = traceID
@@ -60,13 +78,13 @@ func (a *App) executeChatRouteLoop(run *dag.DAGRun, node dag.DAGNode, adapterID,
 	for {
 		// 雙上限：先到先停，轉提問交人，不無限燒 token。
 		// 使用者補充過資訊會追加 ExtraRounds，避免回覆後立刻又撞上限。
-		if state.Iteration >= taskLoopMaxRounds+state.ExtraRounds || state.SanitizedBytes() >= taskLoopObservationBudget {
+		if state.Iteration >= taskLoopMaxRoundsValue()+state.ExtraRounds || state.SanitizedBytes() >= taskLoopBudgetValue() {
 			_ = dag.SaveLoopStateLocked(projectRoot, state)
 			return "已達本步驟的嘗試上限，請補充指示或確認目前結果是否足夠。", errTaskLoopNeedsUser
 		}
 		state.Iteration++
 
-		prompt := buildTaskLoopPrompt(node.Target, state)
+		prompt := buildTaskLoopPrompt(goal, state)
 		roundTrace := fmt.Sprintf("%s-r%d", traceID, state.Iteration)
 		resp, err := a.routeUserIntentOnce(adapterID, sessionID, prompt, roundTrace)
 		if err != nil {
@@ -109,6 +127,11 @@ func (a *App) executeChatRouteLoop(run *dag.DAGRun, node dag.DAGNode, adapterID,
 
 		// 終局：模型給出最終回答（輸出/聊天/無 action 純文字）→ 節點完成。
 		if action == "" || action == "輸出" || action == "聊天" {
+			// M2：完成宣告先過 critic（觸發式，每節點最多 1 次反問）；反問進觀察、actor 修正。
+			if a.maybeRunLoopCritic(run, node, goal, "完成宣告："+truncateRunes(text, 300), adapterID, sessionID, state) {
+				_ = dag.SaveLoopStateLocked(projectRoot, state)
+				continue
+			}
 			_ = dag.SaveLoopStateLocked(projectRoot, state)
 			if text == "" {
 				text = "（此步驟無文字輸出）"
@@ -157,14 +180,18 @@ func (a *App) executeChatRouteLoop(run *dag.DAGRun, node dag.DAGNode, adapterID,
 		count := state.RecordSignature(loopSignature(action, resp.Target))
 		switch {
 		case count >= taskLoopSignatureStopAt:
-			// 原地打轉 → 停下交人，不靠模型自己醒。
+			// M2：打轉先讓 critic 點出具體缺口（最多 1 次）；critic 用完或通過仍打轉 → 停下交人。
+			if a.maybeRunLoopCritic(run, node, goal, fmt.Sprintf("重複嘗試「%s %s」無新進展", action, truncateRunes(resp.Target, 60)), adapterID, sessionID, state) {
+				_ = dag.SaveLoopStateLocked(projectRoot, state)
+				continue
+			}
 			_ = dag.SaveLoopStateLocked(projectRoot, state)
 			return fmt.Sprintf("已重複嘗試「%s %s」仍無進展，請補充指示。", action, truncateRunes(resp.Target, 60)), errTaskLoopNeedsUser
 		case count == taskLoopSignatureHintAt:
 			appendLoopObservation(state, newLoopObservation("system", action, resp.Target, "你已重複過這個動作，請換方法或直接輸出結論。"))
 		}
 		appendLoopObservation(state, newLoopObservation("tool", action, resp.Target, text))
-		state.TrimToBudget(taskLoopObservationBudget)
+		state.CompressToBudget(taskLoopBudgetValue())
 		_ = dag.SaveLoopStateLocked(projectRoot, state)
 	}
 }
@@ -324,8 +351,8 @@ func (a *App) SubmitTaskLoopInput(runID, nodeID, text string) (*dag.DAGRun, erro
 	} else {
 		appendLoopObservation(state, newLoopObservation("user_input", "提問回覆", "", text))
 	}
-	state.TrimToBudget(taskLoopObservationBudget)
-	if state.Iteration >= taskLoopMaxRounds+state.ExtraRounds {
+	state.CompressToBudget(taskLoopBudgetValue())
+	if state.Iteration >= taskLoopMaxRoundsValue()+state.ExtraRounds {
 		state.ExtraRounds += 2 // 補充資訊换 2 輪額度，不無限展延
 	}
 	if err := dag.SaveLoopStateLocked(projectRoot, state); err != nil {

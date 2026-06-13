@@ -343,7 +343,7 @@ func (a *App) planTaskProgress(userText, adapterID, modelID, sessionID, traceID 
 	if raw, normalized, ok := buildDeterministicFileSearchPlan(userText); ok {
 		return raw, normalized, 0, nil
 	}
-	prompt := buildTaskPlanPrompt(userText)
+	prompt := buildTaskPlanPrompt(userText) + a.taskExperienceDigest(userText)
 	resp, err := a.callPlannerAdapter(adapterID, modelID, sessionID, prompt, traceID)
 	if err != nil {
 		return "", dag.NormalizeResult{}, 0, err
@@ -1624,6 +1624,11 @@ func sanitizeTaskOutputFileName(name, ext string) string {
 }
 
 func (a *App) executeAdapterTaskNode(run *dag.DAGRun, node dag.DAGNode, adapterID, sessionID, traceID string) (string, error) {
+	// M2：flag 開啟 → cli_task 也走節點內 loop；goal 帶前置依賴 context。
+	// trace 用非 task 前綴，loop 內每輪才會走完整路由（與 chat_route 一致）。
+	if taskLoopEnabled() {
+		return a.executeTaskNodeLoop(run, node, buildTaskNodePrompt(run, node), adapterID, sessionID, "clitask-"+run.ID+"-"+node.ID)
+	}
 	prompt := buildTaskNodePrompt(run, node)
 	resp, err := a.callPlannerAdapter(adapterID, run.Planner.PlannerModelID, sessionID, prompt, traceID)
 	if err != nil {
@@ -1740,8 +1745,13 @@ func buildTaskDependencyContext(run *dag.DAGRun, node dag.DAGNode) string {
 	for _, n := range run.Nodes {
 		byID[n.ID] = n
 	}
-	var b strings.Builder
-	truncated := false
+	// 先組完整 chunk，總量沒超限就原樣輸出。
+	type depChunk struct {
+		full   string
+		digest string
+	}
+	var chunks []depChunk
+	total := 0
 	for _, depID := range node.Dependencies {
 		dep, ok := byID[depID]
 		if !ok {
@@ -1751,27 +1761,46 @@ func buildTaskDependencyContext(run *dag.DAGRun, node dag.DAGNode) string {
 		if summary == "" && dep.Error == "" {
 			continue
 		}
-		chunk := fmt.Sprintf("- %s %s [%s]\naction_code: %s\ntarget: %s\nresult:\n%s",
+		full := fmt.Sprintf("- %s %s [%s]\naction_code: %s\ntarget: %s\nresult:\n%s",
 			dep.ID, dep.Title, dep.Status, dep.ActionCode, dep.Target, summary)
 		if dep.Error != "" {
-			chunk += "\nerror:\n" + dep.Error
+			full += "\nerror:\n" + dep.Error
 		}
-		if b.Len() > 0 {
-			chunk = "\n\n" + chunk
+		// v3.1.8 摘要式壓縮：超限時舊依賴用 digest 行（保留狀態與結果開頭），
+		// 只有最後一個依賴保留全文——取代以前「中途硬剁」的截斷。
+		digest := fmt.Sprintf("- %s %s [%s] result(摘): %s", dep.ID, dep.Title, dep.Status, truncateRunes(summary, 160))
+		if dep.Error != "" {
+			digest += " error(摘): " + truncateRunes(dep.Error, 120)
 		}
-		if b.Len()+len(chunk) > taskDependencyContextLimit {
-			remaining := taskDependencyContextLimit - b.Len()
-			if remaining > 0 {
-				b.WriteString(truncateRunes(chunk, remaining))
+		chunks = append(chunks, depChunk{full: full, digest: digest})
+		total += len(full) + 2
+	}
+	var b strings.Builder
+	if total <= taskDependencyContextLimit {
+		for _, c := range chunks {
+			if b.Len() > 0 {
+				b.WriteString("\n\n")
 			}
-			truncated = true
-			break
+			b.WriteString(c.full)
 		}
-		b.WriteString(chunk)
+		return strings.TrimSpace(b.String())
 	}
-	if truncated {
-		b.WriteString("\n\n[dependency results truncated]")
+	for i, c := range chunks {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		if i == len(chunks)-1 {
+			// 最後一個依賴最可能被本步驟直接使用 → 在剩餘預算內保留全文。
+			remaining := taskDependencyContextLimit - b.Len()
+			if remaining <= 0 {
+				remaining = 256
+			}
+			b.WriteString(truncateRunes(c.full, remaining))
+		} else {
+			b.WriteString(c.digest)
+		}
 	}
+	b.WriteString("\n\n[older dependency results digested]")
 	return strings.TrimSpace(b.String())
 }
 
@@ -1817,6 +1846,8 @@ func (a *App) finishTaskIfDone(projectRoot string, run *dag.DAGRun) {
 	run.UpdatedAt = now
 	_ = dag.SaveFullRunLocked(projectRoot, run)
 	_ = dag.UpdateRunIndex(projectRoot, run.ID, run.Status, now, 0, len(run.Nodes), 0, "")
+	// v3.1.8：終局寫一筆任務經驗，供之後規劃注入（取消的不記，那是使用者選擇）。
+	recordTaskExperience(projectRoot, run)
 	a.appendTaskResultMessage(run, hasFailed)
 	a.clearActiveTask(run.ID)
 	a.emitTaskRun("task:progress_completed", run)
@@ -2093,7 +2124,7 @@ func decomposeHasCycle(steps []decomposeStep) bool {
 
 // planDecompose 呼叫模型拿拆解結果，回傳 (title, chat_route 節點, raw, err)。
 func (a *App) planDecompose(userText, adapterID, modelID, sessionID, traceID string) (string, []dag.DAGNode, string, error) {
-	resp, err := a.callPlannerAdapter(adapterID, modelID, sessionID, buildDecomposePrompt(userText), traceID)
+	resp, err := a.callPlannerAdapter(adapterID, modelID, sessionID, buildDecomposePrompt(userText)+a.taskExperienceDigest(userText), traceID)
 	if err != nil {
 		return "", nil, "", err
 	}
@@ -2164,7 +2195,7 @@ func chatRouteNeedsUser(resp *skill_step.CLIResponse) bool {
 func (a *App) executeChatRouteTaskNode(run *dag.DAGRun, node dag.DAGNode, adapterID, sessionID, traceID string) (string, error) {
 	// v3.1.6 M1：flag 開啟 → 節點內 tool loop（多輪觀察）；預設關，行為與舊版相同。
 	if taskLoopEnabled() {
-		return a.executeChatRouteLoop(run, node, adapterID, sessionID, "chatroute-"+run.ID+"-"+node.ID)
+		return a.executeTaskNodeLoop(run, node, node.Target, adapterID, sessionID, "chatroute-"+run.ID+"-"+node.ID)
 	}
 	resp, err := a.routeUserIntentOnce(adapterID, sessionID, node.Target, "chatroute-"+run.ID+"-"+node.ID)
 	if err != nil {

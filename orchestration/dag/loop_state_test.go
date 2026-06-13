@@ -84,3 +84,31 @@ func TestDeleteLoopStatesForRun(t *testing.T) {
 		t.Fatalf("expected only run2 sidecar left, got %v", left)
 	}
 }
+
+// v3.1.8 摘要式壓縮：最舊一批合併成單筆 digest，新觀察保留全文。
+func TestLoopStateCompressToBudget(t *testing.T) {
+	state := &LoopState{RunID: "r", NodeID: "n"}
+	for i := 0; i < 6; i++ {
+		state.Observations = append(state.Observations, ObservationRecord{
+			Kind: "tool", Action: "搜尋", Target: "目標", SanitizedText: strings.Repeat("甲", 300),
+		})
+	}
+	state.Observations[5].SanitizedText = "最新觀察重點"
+	state.CompressToBudget(1500)
+	if state.SanitizedBytes() > 1500 {
+		t.Fatalf("over budget: %d", state.SanitizedBytes())
+	}
+	if state.Observations[0].Kind != "digest" || !strings.Contains(state.Observations[0].SanitizedText, "搜尋") {
+		t.Fatalf("oldest should merge into digest: %+v", state.Observations[0])
+	}
+	last := state.Observations[len(state.Observations)-1]
+	if last.SanitizedText != "最新觀察重點" {
+		t.Fatalf("newest must keep full text: %+v", last)
+	}
+	// 未超限 → 不動
+	small := &LoopState{Observations: []ObservationRecord{{SanitizedText: "ok"}, {SanitizedText: "ok2"}, {SanitizedText: "ok3"}}}
+	small.CompressToBudget(1024)
+	if len(small.Observations) != 3 {
+		t.Fatal("under budget must not compress")
+	}
+}

@@ -17,7 +17,7 @@ import (
 
 // dianliao_bom_flow.go — 「產出電料Bom」接通用流程引擎（skill_flow）的轉接層。
 //
-// Step 1 重構（見 REFACTOR_SKILL_FLOW.md）：原本寫死在這裡的多輪狀態機
+// 原本寫死在這裡的多輪狀態機
 // （機台 → 逐項電料 → 模糊比對 → 補數量 → 修正 → review → 輸出）已泛型化搬入
 // orchestration/skill_flow。本檔只剩：
 //   1. 路由起點／LLM 路由前攔截 → 引擎 Handle → Outcome 轉 CLIResponse。

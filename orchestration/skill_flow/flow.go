@@ -2,11 +2,11 @@ package skill_flow
 
 import "time"
 
-// Package skill_flow — 通用多輪互動收集引擎（Step 1：FlowDef 先由 Go 程式碼定義）。
+// Package skill_flow — 通用多輪互動收集引擎。
 //
 // 設計目標：skill 宣告流程（欄位、提問文案、控制詞），app 提供狀態機執行；
 // 引擎不認識任何特定 skill，所有 skill 專屬內容（文案、比對、輸出）由
-// FlowDef 與 Resolver/呼叫端注入。詳見 REFACTOR_SKILL_FLOW.md。
+// FlowDef 與 Resolver/呼叫端注入。
 
 // Candidate 是 lookup 比對的一個候選。
 type Candidate struct {

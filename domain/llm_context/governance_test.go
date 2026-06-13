@@ -7,7 +7,7 @@ import (
 
 // 測試入口粗篩：移除 API key
 func TestEntryFilterAPIKey(t *testing.T) {
-	input := "Here is my key: " + "sk-" + "abc123def456ghi789jkl012mno345pqr678"
+	input := "Here is my key: " + testContextOpenAIKey()
 	cleaned, removed := EntryFilter(input)
 
 	if strings.Contains(cleaned, "sk-abc123") {
@@ -61,7 +61,7 @@ func TestEntryFilterSafeContent(t *testing.T) {
 func TestExitValidatePrivateKey(t *testing.T) {
 	payload := &ContextPayload{
 		ContentBlocks: []ContentBlock{
-			{Source: "test", Content: "-----BEGIN RSA PRIVATE KEY-----\nMIIE....\n-----END RSA PRIVATE KEY-----"},
+			{Source: "test", Content: "-----BEGIN " + "RSA PRIVATE KEY-----\nMIIE....\n-----END " + "RSA PRIVATE KEY-----"},
 		},
 	}
 	// 入口粗篩應已移除，但測試出口兜底
@@ -237,7 +237,7 @@ func TestEntryFilterBearerTab(t *testing.T) {
 }
 
 func TestEntryFilterAnthropicKey(t *testing.T) {
-	input := "My key is " + "sk-ant-api03-" + "abcdefghijklmnopqrstuvwx"
+	input := "My key is " + testContextAnthropicKey()
 	cleaned, removed := EntryFilter(input)
 	if strings.Contains(cleaned, "sk-ant-api03") {
 		t.Error("Anthropic key should be caught by entry filter")
@@ -248,7 +248,7 @@ func TestEntryFilterAnthropicKey(t *testing.T) {
 }
 
 func TestEntryFilterOpenRouterKey(t *testing.T) {
-	input := "My key is " + "sk-or-v1-" + "abcdefghijklmnopqrstuvwx"
+	input := "My key is " + testContextOpenRouterKey()
 	cleaned, removed := EntryFilter(input)
 	if strings.Contains(cleaned, "sk-or-v1") {
 		t.Error("OpenRouter key should be caught by entry filter")
@@ -256,6 +256,18 @@ func TestEntryFilterOpenRouterKey(t *testing.T) {
 	if len(removed) == 0 {
 		t.Error("should record removed item")
 	}
+}
+
+func testContextOpenAIKey() string {
+	return "sk-" + "abc123def456ghi789jkl012mno345pqr678"
+}
+
+func testContextAnthropicKey() string {
+	return "sk-" + "ant-api03-" + "abcdefghijklmnopqrstuvwx"
+}
+
+func testContextOpenRouterKey() string {
+	return "sk-" + "or-v1-" + "abcdefghijklmnopqrstuvwx"
 }
 
 func TestEntryFilterReplicateKey(t *testing.T) {

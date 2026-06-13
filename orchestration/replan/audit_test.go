@@ -6,7 +6,7 @@ import (
 )
 
 func TestSafeSummary_RedactsPathAndToken(t *testing.T) {
-	in := "no match at /Users/tester/secret/creds.json token ABCDEFGHIJKLMNOPQRSTUVWXYZ012345xyz"
+	in := "no match at /home/tester/secret/creds.json token ABCDEFGHIJKLMNOPQRSTUVWXYZ012345xyz"
 	out := SafeSummary(in)
 	if strings.Contains(out, "secret") || strings.Contains(out, "creds.json") {
 		t.Errorf("path not redacted: %q", out)
@@ -28,7 +28,7 @@ func TestAuditLog_AppendAndRead(t *testing.T) {
 	log := NewAuditLog(dir)
 	err := AppendAuditEntry(log, ReplanAuditEntry{
 		RunID:         "dag-1",
-		TriggerReason: "no match at /Users/tester/secret/x",
+		TriggerReason: "no match at /home/tester/secret/x",
 		Decision:      DecisionSilent,
 		Silent:        true,
 	})

@@ -11,7 +11,7 @@ import (
 )
 
 func TestEgressDetectsAPIKeyInQuery(t *testing.T) {
-	secret := "sk-" + "abcdefghijklmnopqrstuvwxyz123456"
+	secret := fakeSearchOpenAIKey()
 	masked, records := memory.RedactBeforeWrite("幫我查 " + secret + " 是哪家的金鑰")
 	if len(records) == 0 {
 		t.Fatal("API 金鑰應被偵測")
@@ -32,7 +32,7 @@ func TestEgressCleanQueryPasses(t *testing.T) {
 }
 
 func TestDescribeEgressHitsNoLeak(t *testing.T) {
-	secret := "sk-" + "abcdefghijklmnopqrstuvwxyz123456"
+	secret := fakeSearchOpenAIKey()
 	_, records := memory.RedactBeforeWrite("query with " + secret)
 	desc := describeEgressHits(records)
 	if desc == "" {
@@ -44,6 +44,10 @@ func TestDescribeEgressHitsNoLeak(t *testing.T) {
 	if !strings.Contains(desc, "×") {
 		t.Fatalf("描述應含數量，got %q", desc)
 	}
+}
+
+func fakeSearchOpenAIKey() string {
+	return "sk-" + "abcdefghijklmnopqrstuvwxyz123456"
 }
 
 func TestPendingSearchEgressLifecycle(t *testing.T) {

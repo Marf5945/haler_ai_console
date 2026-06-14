@@ -1,13 +1,32 @@
 param(
-    [string]$YoloxRoot = "$env:USERPROFILE\Desktop\yolo_adjust\external\YOLOX",
-    [string]$ExpFile = "$env:USERPROFILE\Desktop\yolo_adjust\external\YOLOX\exps\example\custom\yolox_button_s.py",
-    [string]$Checkpoint = "$env:USERPROFILE\Desktop\yolo_adjust\external\YOLOX\YOLOX_outputs\yolox_button_s\best_ckpt.pth",
-    [string]$Output = "$env:USERPROFILE\Desktop\ui_console\ui_console_wails_v_3.1.1\assets\models\yolox_button_s.onnx",
-    [string]$Python = "$env:USERPROFILE\Desktop\yolo_adjust\.venv-yolox\Scripts\python.exe",
+    [string]$YoloxRoot,
+    [string]$ExpFile,
+    [string]$Checkpoint,
+    [string]$Output,
+    [string]$Python,
     [switch]$NoOnnxSim
 )
 
 $ErrorActionPreference = "Stop"
+
+$ScriptDir = $PSScriptRoot
+$ProjectRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
+
+if (-not $YoloxRoot) {
+    $YoloxRoot = Join-Path $ScriptDir "external\YOLOX"
+}
+if (-not $ExpFile) {
+    $ExpFile = Join-Path $YoloxRoot "exps\example\custom\yolox_button_s.py"
+}
+if (-not $Checkpoint) {
+    $Checkpoint = Join-Path $YoloxRoot "YOLOX_outputs\yolox_button_s\best_ckpt.pth"
+}
+if (-not $Output) {
+    $Output = Join-Path $ProjectRoot "assets\models\yolox_button_s.onnx"
+}
+if (-not $Python) {
+    $Python = Join-Path $ScriptDir ".venv-yolox\Scripts\python.exe"
+}
 
 if (-not (Test-Path -LiteralPath $YoloxRoot -PathType Container)) {
     throw "YOLOX root not found: $YoloxRoot"
@@ -27,7 +46,7 @@ New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
 
 Push-Location $YoloxRoot
 try {
-    $compatExporter = "$env:USERPROFILE\Desktop\ui_console\ui_console_wails_v_3.1.1\tools\yolo_adjust\export_yolox_onnx_compat.py"
+    $compatExporter = Join-Path $ScriptDir "export_yolox_onnx_compat.py"
     $args = @(
         $compatExporter,
         "--yolox-root", $YoloxRoot,
@@ -54,7 +73,7 @@ if (-not (Test-Path -LiteralPath $Output -PathType Leaf)) {
 }
 
 $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $Output).Hash.ToLowerInvariant()
-$manifestPath = "$env:USERPROFILE\Desktop\ui_console\ui_console_wails_v_3.1.1\adapter\visual_learning\model_hashes.json"
+$manifestPath = Join-Path $ProjectRoot "adapter\visual_learning\model_hashes.json"
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if ($null -eq $manifest.models) {
     $manifest | Add-Member -MemberType NoteProperty -Name "models" -Value ([pscustomobject]@{})

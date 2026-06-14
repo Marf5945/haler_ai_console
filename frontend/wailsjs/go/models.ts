@@ -1,4 +1,4 @@
-﻿export namespace browser_pref {
+export namespace browser_pref {
 
 	export class RuntimeNoticeResult {
 	    show_notice: boolean;
@@ -1390,6 +1390,28 @@ export namespace main {
 	        this.detail = source["detail"];
 	    }
 	}
+	export class SchedulerClockSnapshot {
+	    now: string;
+	    local_time: string;
+	    unix_millis: number;
+	    timezone: string;
+	    utc_offset: string;
+	    utc_offset_minutes: number;
+
+	    static createFrom(source: any = {}) {
+	        return new SchedulerClockSnapshot(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.now = source["now"];
+	        this.local_time = source["local_time"];
+	        this.unix_millis = source["unix_millis"];
+	        this.timezone = source["timezone"];
+	        this.utc_offset = source["utc_offset"];
+	        this.utc_offset_minutes = source["utc_offset_minutes"];
+	    }
+	}
 	export class SessionAnalysis {
 	    total_actions: number;
 	    main_direct_actions: number;
@@ -2285,31 +2307,6 @@ export namespace settings {
 		    }
 		    return a;
 		}
-	}
-
-}
-
-export namespace skill_eval {
-
-	export class WebChainSigStats {
-	    signature: string;
-	    total_runs: number;
-	    clean_runs: number;
-	    drift_runs: number;
-	    total_drifts: number;
-
-	    static createFrom(source: any = {}) {
-	        return new WebChainSigStats(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.signature = source["signature"];
-	        this.total_runs = source["total_runs"];
-	        this.clean_runs = source["clean_runs"];
-	        this.drift_runs = source["drift_runs"];
-	        this.total_drifts = source["total_drifts"];
-	    }
 	}
 
 }

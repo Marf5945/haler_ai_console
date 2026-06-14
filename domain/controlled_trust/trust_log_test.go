@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"ui_console/audit_log"
@@ -145,9 +144,6 @@ func TestTrustLogGenesisHash(t *testing.T) {
 
 // TestTrustLogFilePermission verifies the log file is created with 0600 permission.
 func TestTrustLogFilePermission(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows does not report Unix permission bits reliably")
-	}
 	dir := tmpTrustDir(t)
 	tl := NewTrustLog(dir)
 
@@ -168,9 +164,6 @@ func TestTrustLogFilePermission(t *testing.T) {
 
 // TestTrustLogDirPermission verifies the directory is created with 0700.
 func TestTrustLogDirPermission(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows does not report Unix permission bits reliably")
-	}
 	dir := tmpTrustDir(t)
 	subDir := filepath.Join(dir, "nested_trust")
 	tl := NewTrustLog(subDir)

@@ -8,6 +8,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -17,6 +19,19 @@ import (
 	"ui_console/domain/controlled_trust"
 	"ui_console/orchestration/skill_step"
 	"ui_console/shared/eventbus"
+	"ui_console/shared/executil"
+)
+
+type pendingLearningTextEvent struct {
+	Event     visual_learning.MouseEventTrace
+	CreatedAt time.Time
+}
+
+var sensitiveLearningTextPattern = regexp.MustCompile(`(?i)(password|passwd|token|api[_ -]?key|secret|bearer|sk-[a-z0-9_-]{16,}|xox[baprs]-|gh[pousr]_[a-z0-9_]{20,})`)
+
+const (
+	nativeScreenRegionAnchorWidth  = 520
+	nativeScreenRegionAnchorHeight = 240
 )
 
 func visualLearningModelBasePath(cwd string) string {
@@ -119,6 +134,20 @@ func compactLearningReplayStepForPrompt(step visual_learning.LearningReplayStep)
 		process = strings.TrimSpace(step.Tag)
 	}
 	process = filepath.Base(process)
+	if action == string(visual_learning.MouseEventText) {
+		textNote := "saved text"
+		if step.Sensitive {
+			textNote = "sensitive placeholder"
+		}
+		return fmt.Sprintf("%s via %s, target=%q, content=%s", action, method, target, textNote)
+	}
+	if action == string(visual_learning.MouseEventShortcut) || action == string(visual_learning.MouseEventKey) {
+		keys := append(append([]string{}, step.Modifiers...), step.Key)
+		return fmt.Sprintf("%s %s via %s, target=%q", action, strings.Join(keys, "+"), method, target)
+	}
+	if action == string(visual_learning.MouseEventSensitive) {
+		return fmt.Sprintf("sensitive text placeholder via %s, target=%q", method, target)
+	}
 	if process != "." && process != string(filepath.Separator) && process != "" {
 		return fmt.Sprintf("%s via %s at (%d,%d), target=%q, process=%s", action, method, step.X, step.Y, target, process)
 	}
@@ -268,6 +297,10 @@ func (a *App) StartLearningMode(activeWindowHash string) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	debugtrace.Record("go.learning.start", run.ID, map[string]interface{}{
+		"run_id":             run.ID,
+		"active_window_hash": activeWindowHash,
+	})
 	if a.nativeInput != nil {
 		if err := a.nativeInput.Start(func(event visual_learning.NativeClickEvent) {
 			eventType := visual_learning.MouseEventClick
@@ -299,10 +332,80 @@ func (a *App) StartLearningMode(activeWindowHash string) (interface{}, error) {
 			trace.WindowsAnchor = a.recordedNativeWindowsAnchor(event, trace.Viewport)
 			if err := a.learningService.RecordEvent(trace); err != nil {
 				log.Printf("visual learning native click ignored: %v", err)
+				debugtrace.Record("go.learning.native_click.record_error", run.ID, map[string]interface{}{
+					"run_id": run.ID,
+					"error":  err.Error(),
+				})
+				return
 			}
+			debugtrace.Record("go.learning.native_click.recorded", run.ID, map[string]interface{}{
+				"run_id":         run.ID,
+				"window_title":   event.WindowTitle,
+				"window_process": event.WindowProcess,
+				"x":              event.X,
+				"y":              event.Y,
+			})
+		}, func(event visual_learning.NativeKeyboardEvent) {
+			eventType := visual_learning.MouseEventType(event.Action)
+			if eventType == "" {
+				eventType = visual_learning.MouseEventKey
+			}
+			trace := visual_learning.MouseEventTrace{
+				Timestamp:       event.Timestamp,
+				EventType:       eventType,
+				Text:            event.Text,
+				Key:             event.Key,
+				Modifiers:       append([]string(nil), event.Modifiers...),
+				Playback:        "paste_safe",
+				Source:          "native",
+				CoordinateSpace: "screen",
+				TargetRegionID:  fmt.Sprintf("native-key-%d-%d", event.Timestamp.UnixNano(), event.KeyCode),
+				TargetLabel:     strings.TrimSpace(event.WindowTitle),
+				TargetRole:      "native-window",
+				TargetTag:       filepath.Base(event.WindowProcess),
+				Viewport: &visual_learning.EventViewport{
+					Width:       event.ScreenWidth,
+					Height:      event.ScreenHeight,
+					DeviceScale: 1,
+				},
+				WindowTitle:   event.WindowTitle,
+				WindowProcess: event.WindowProcess,
+				WindowHandle:  event.WindowHandle,
+				WindowRect:    event.WindowRect,
+			}
+			if eventType == visual_learning.MouseEventText {
+				trace.RequiresConfirm = true
+			}
+			if err := a.recordLearningKeyboardEvent(trace); err != nil {
+				log.Printf("visual learning native keyboard ignored: %v", err)
+				debugtrace.Record("go.learning.native_keyboard.record_error", run.ID, map[string]interface{}{
+					"run_id": run.ID,
+					"action": event.Action,
+					"key":    event.Key,
+					"error":  err.Error(),
+				})
+				return
+			}
+			debugtrace.Record("go.learning.native_keyboard.received", run.ID, map[string]interface{}{
+				"run_id":         run.ID,
+				"action":         event.Action,
+				"key":            event.Key,
+				"modifiers":      event.Modifiers,
+				"text_len":       len([]rune(event.Text)),
+				"window_title":   event.WindowTitle,
+				"window_process": event.WindowProcess,
+			})
 		}); err != nil {
 			log.Printf("visual learning native recorder degraded: %v", err)
+			debugtrace.Record("go.learning.native_recorder.degraded", run.ID, map[string]interface{}{
+				"run_id": run.ID,
+				"error":  err.Error(),
+			})
 			a.eventBus.Emit("visual_learning:native_recorder_degraded", map[string]string{"error": err.Error()})
+		} else {
+			debugtrace.Record("go.learning.native_recorder.started", run.ID, map[string]interface{}{
+				"run_id": run.ID,
+			})
 		}
 	}
 	a.eventBus.Emit("visual_learning:recording_started", map[string]string{"run_id": run.ID})
@@ -332,6 +435,49 @@ func (a *App) IsLearningModeActive() bool {
 // GetActiveLearningRun 回傳目前錄製中的 run（無錄製回傳 nil）。
 func (a *App) GetActiveLearningRun() interface{} {
 	return frontendDTO(a.learningService.ActiveRun())
+}
+
+func (a *App) GetVisualLearningPermissionStatus() interface{} {
+	if a == nil || a.nativeInput == nil {
+		return map[string]interface{}{"message": "native input is not available"}
+	}
+	return frontendDTO(a.nativeInput.PermissionStatus())
+}
+
+func (a *App) RequestVisualLearningPermissions() interface{} {
+	if a == nil || a.nativeInput == nil {
+		return map[string]interface{}{"message": "native input is not available"}
+	}
+	status := a.nativeInput.RequestPermissions()
+	debugtrace.Record("go.learning.permissions.request", "", map[string]interface{}{
+		"accessibility":    status.Accessibility,
+		"input_monitoring": status.InputMonitoring,
+		"screen_recording": status.ScreenRecording,
+		"missing":          status.Missing,
+		"needs_restart":    status.NeedsRestart,
+	})
+	return frontendDTO(status)
+}
+
+func (a *App) OpenVisualLearningPermissionSettings(kind string) error {
+	key := strings.ToLower(strings.TrimSpace(kind))
+	targets := map[string]string{
+		"accessibility":    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+		"input_monitoring": "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",
+		"screen_recording": "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+	}
+	target, ok := targets[key]
+	if !ok {
+		return fmt.Errorf("visual learning permission settings: unknown permission %q", kind)
+	}
+	if runtime.GOOS != "darwin" {
+		return fmt.Errorf("visual learning permission settings: only macOS supports this settings link")
+	}
+	cmd := executil.Command("open", target)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("open macOS permission settings: %w", err)
+	}
+	return nil
 }
 
 // RecordLearningMouseEvent records one explicit user demonstration click.
@@ -367,12 +513,136 @@ func (a *App) RecordLearningMouseEvent(payload string) error {
 	return nil
 }
 
+// RecordLearningKeyboardEvent records a keyboard, shortcut, or text-input
+// action. Raw external text is held in memory until the frontend confirms it.
+func (a *App) RecordLearningKeyboardEvent(payload string) error {
+	var event visual_learning.MouseEventTrace
+	if err := json.Unmarshal([]byte(payload), &event); err != nil {
+		return fmt.Errorf("visual learning keyboard event: invalid payload: %w", err)
+	}
+	return a.recordLearningKeyboardEvent(event)
+}
+
+func (a *App) recordLearningKeyboardEvent(event visual_learning.MouseEventTrace) error {
+	if event.Timestamp.IsZero() {
+		event.Timestamp = time.Now()
+	}
+	if event.EventType == "" {
+		if strings.TrimSpace(event.Text) != "" {
+			event.EventType = visual_learning.MouseEventText
+		} else {
+			event.EventType = visual_learning.MouseEventKey
+		}
+	}
+	if strings.TrimSpace(event.Source) == "" {
+		event.Source = "webview"
+	}
+	if strings.TrimSpace(event.TargetRegionID) == "" {
+		event.TargetRegionID = fmt.Sprintf("keyboard-%d", event.Timestamp.UnixNano())
+	}
+	event.Text = strings.TrimRight(event.Text, "\x00")
+	if event.Playback == "" && event.EventType == visual_learning.MouseEventText {
+		event.Playback = "paste_safe"
+	}
+	if shouldTreatLearningTextAsSensitive(event) {
+		event.Text = ""
+		event.Sensitive = true
+		event.EventType = visual_learning.MouseEventSensitive
+		event.RequiresConfirm = false
+		event.TargetLabel = firstNonEmpty(event.TargetLabel, "sensitive text input")
+		return a.learningService.RecordEvent(event)
+	}
+	if event.EventType == visual_learning.MouseEventText && event.RequiresConfirm {
+		pendingID := event.TargetRegionID
+		a.pendingLearningTextMu.Lock()
+		if a.pendingLearningText == nil {
+			a.pendingLearningText = make(map[string]pendingLearningTextEvent)
+		}
+		a.pendingLearningText[pendingID] = pendingLearningTextEvent{Event: event, CreatedAt: time.Now()}
+		a.pendingLearningTextMu.Unlock()
+		if a.eventBus != nil {
+			a.eventBus.Emit("visual_learning:text_confirmation_requested", map[string]interface{}{
+				"id":             pendingID,
+				"source":         event.Source,
+				"window_title":   event.WindowTitle,
+				"window_process": event.WindowProcess,
+				"label":          event.TargetLabel,
+				"length":         len([]rune(event.Text)),
+				"preview":        learningTextPreview(event.Text),
+			})
+		}
+		return nil
+	}
+	return a.learningService.RecordEvent(event)
+}
+
+// ConfirmLearningTextEvent commits or redacts a pending raw text action.
+func (a *App) ConfirmLearningTextEvent(pendingID, action string) error {
+	key := strings.TrimSpace(pendingID)
+	if key == "" {
+		return fmt.Errorf("learning text confirmation: id is required")
+	}
+	a.pendingLearningTextMu.Lock()
+	pending, ok := a.pendingLearningText[key]
+	if ok {
+		delete(a.pendingLearningText, key)
+	}
+	a.pendingLearningTextMu.Unlock()
+	if !ok {
+		return fmt.Errorf("learning text confirmation: pending event not found")
+	}
+	event := pending.Event
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "save", "allow", "confirm":
+		return a.learningService.RecordEvent(event)
+	case "redact", "sensitive":
+		event.Text = ""
+		event.Sensitive = true
+		event.EventType = visual_learning.MouseEventSensitive
+		event.RequiresConfirm = false
+		event.TargetLabel = firstNonEmpty(event.TargetLabel, "sensitive text input")
+		return a.learningService.RecordEvent(event)
+	case "drop", "deny", "cancel", "":
+		return nil
+	default:
+		return fmt.Errorf("learning text confirmation: unknown action %q", action)
+	}
+}
+
+func shouldTreatLearningTextAsSensitive(event visual_learning.MouseEventTrace) bool {
+	if event.Sensitive || event.EventType == visual_learning.MouseEventSensitive {
+		return true
+	}
+	haystack := strings.Join([]string{
+		event.Text,
+		event.Key,
+		event.TargetLabel,
+		event.TargetRole,
+		event.TargetTag,
+		event.CSSSelector,
+		event.WindowTitle,
+		event.WindowProcess,
+	}, " ")
+	return sensitiveLearningTextPattern.MatchString(haystack)
+}
+
+func learningTextPreview(text string) string {
+	runes := []rune(strings.TrimSpace(text))
+	if len(runes) == 0 {
+		return ""
+	}
+	if len(runes) > 24 {
+		runes = append(runes[:24], '…')
+	}
+	return string(runes)
+}
+
 func (a *App) recordedNativeWindowsAnchor(event visual_learning.NativeClickEvent, fallbackViewport *visual_learning.EventViewport) *visual_learning.WindowsClickAnchorResult {
-	if a == nil || a.nativeInput == nil || event.WindowHandle == 0 {
+	if a == nil || a.nativeInput == nil {
 		return visual_learning.RecordedClickWindowsAnchor(event.X, event.Y, nil, fallbackViewport)
 	}
-	capture, err := a.nativeInput.CaptureWindow(event.WindowHandle)
-	if err != nil || capture.Width <= 0 || capture.Height <= 0 || len(capture.ImageData) == 0 {
+	capture, ok := a.captureNativeClickContext(event, fallbackViewport)
+	if !ok {
 		return visual_learning.RecordedClickWindowsAnchor(event.X, event.Y, nil, fallbackViewport)
 	}
 	// 螢幕座標是 point，截圖是 pixel（Retina 為 2x）；anchor 一律存在截圖
@@ -396,6 +666,101 @@ func (a *App) recordedNativeWindowsAnchor(event visual_learning.NativeClickEvent
 		return visual_learning.RecordedClickWindowsAnchor(event.X, event.Y, nil, fallbackViewport)
 	}
 	return &anchor
+}
+
+func (a *App) captureNativeClickContext(event visual_learning.NativeClickEvent, fallbackViewport *visual_learning.EventViewport) (visual_learning.WindowCapture, bool) {
+	if a == nil || a.nativeInput == nil {
+		return visual_learning.WindowCapture{}, false
+	}
+	if event.WindowHandle != 0 {
+		if capture, err := a.nativeInput.CaptureWindow(event.WindowHandle); isUsableNativeCapture(capture, err) {
+			return capture, true
+		}
+	}
+	screenWidth := event.ScreenWidth
+	screenHeight := event.ScreenHeight
+	if fallbackViewport != nil {
+		if screenWidth <= 0 {
+			screenWidth = fallbackViewport.Width
+		}
+		if screenHeight <= 0 {
+			screenHeight = fallbackViewport.Height
+		}
+	}
+	region := nativeScreenRegionAroundPoint(event.X, event.Y, screenWidth, screenHeight)
+	if capture, err := a.nativeInput.CaptureScreenRegion(region); isUsableNativeCapture(capture, err) {
+		return capture, true
+	}
+	return visual_learning.WindowCapture{}, false
+}
+
+func (a *App) captureNativeReplayContext(step visual_learning.LearningReplayStep) (visual_learning.WindowCapture, bool) {
+	if a == nil || a.nativeInput == nil {
+		return visual_learning.WindowCapture{}, false
+	}
+	if step.WindowHandle != 0 {
+		if capture, err := a.nativeInput.CaptureWindow(step.WindowHandle); isUsableNativeCapture(capture, err) {
+			return capture, true
+		}
+	}
+	screenWidth, screenHeight := 0, 0
+	if step.Viewport != nil {
+		screenWidth = step.Viewport.Width
+		screenHeight = step.Viewport.Height
+	}
+	region := nativeScreenRegionAroundPoint(step.X, step.Y, screenWidth, screenHeight)
+	if capture, err := a.nativeInput.CaptureScreenRegion(region); isUsableNativeCapture(capture, err) {
+		return capture, true
+	}
+	return visual_learning.WindowCapture{}, false
+}
+
+func isUsableNativeCapture(capture visual_learning.WindowCapture, err error) bool {
+	return err == nil && capture.Width > 0 && capture.Height > 0 && len(capture.ImageData) > 0
+}
+
+func nativeScreenRegionAroundPoint(x, y, screenWidth, screenHeight int) visual_learning.PixelBBox {
+	if screenWidth <= 0 {
+		screenWidth = x + nativeScreenRegionAnchorWidth
+	}
+	if screenHeight <= 0 {
+		screenHeight = y + nativeScreenRegionAnchorHeight
+	}
+	width := nativeScreenRegionAnchorWidth
+	height := nativeScreenRegionAnchorHeight
+	if width > screenWidth {
+		width = screenWidth
+	}
+	if height > screenHeight {
+		height = screenHeight
+	}
+	if width < 1 {
+		width = 1
+	}
+	if height < 1 {
+		height = 1
+	}
+	regionX := x - width/2
+	regionY := y - height/2
+	if regionX < 0 {
+		regionX = 0
+	}
+	if regionY < 0 {
+		regionY = 0
+	}
+	if regionX+width > screenWidth {
+		regionX = screenWidth - width
+	}
+	if regionY+height > screenHeight {
+		regionY = screenHeight - height
+	}
+	if regionX < 0 {
+		regionX = 0
+	}
+	if regionY < 0 {
+		regionY = 0
+	}
+	return visual_learning.PixelBBox{X: regionX, Y: regionY, W: width, H: height}
 }
 
 // GetLastLearningReplayPlan returns a safe plan-only replay of the last stopped
@@ -549,10 +914,10 @@ func (a *App) ExecuteNativeLearningReplayStep(payload string) (interface{}, erro
 	}
 	if relocated, ok := a.relocateNativeReplayStep(step); ok {
 		a.emitHookGeneDataProcessed(replayGeneSkillID, invocationID)
-		if relocated.NeedsConfirmation && canAutoConfirmLowRiskReplay(step, relocated) {
+		if relocated.NeedsConfirmation && canAutoConfirmBrowserReplay(step, relocated) {
 			relocated.NeedsConfirmation = false
 			relocated.OK = true
-			relocated.Reason = "low-risk replay auto-confirmed for non-dangerous click"
+			relocated.Reason = "browser page replay auto-confirmed for non-dangerous page click"
 		}
 		if relocated.NeedsConfirmation {
 			previewStep := step
@@ -614,7 +979,7 @@ func (a *App) ExecuteNativeLearningReplayStep(payload string) (interface{}, erro
 }
 
 func (a *App) relocateNativeReplayStep(step visual_learning.LearningReplayStep) (visual_learning.AnchorRelocationResult, bool) {
-	if a == nil || a.nativeInput == nil || step.WindowsAnchor == nil || step.WindowHandle == 0 {
+	if a == nil || a.nativeInput == nil || step.WindowsAnchor == nil {
 		return visual_learning.AnchorRelocationResult{}, false
 	}
 	// anchor 座標存在「錄製當下截圖」的 pixel 空間；優先用 anchor 自記的影像
@@ -635,8 +1000,8 @@ func (a *App) relocateNativeReplayStep(step visual_learning.LearningReplayStep) 
 	if recordedWidth <= 0 || recordedHeight <= 0 {
 		return visual_learning.AnchorRelocationResult{}, false
 	}
-	capture, err := a.nativeInput.CaptureWindow(step.WindowHandle)
-	if err != nil || capture.Width <= 0 || capture.Height <= 0 || len(capture.ImageData) == 0 {
+	capture, ok := a.captureNativeReplayContext(step)
+	if !ok {
 		return visual_learning.AnchorRelocationResult{}, false
 	}
 	if isSuspiciousReplayCapture(capture) {
@@ -864,7 +1229,7 @@ func saveReplayRelocationDebugInfo(path string, step visual_learning.LearningRep
 	return os.WriteFile(path, data, 0o600)
 }
 
-func canAutoConfirmLowRiskReplay(step visual_learning.LearningReplayStep, relocated visual_learning.AnchorRelocationResult) bool {
+func canAutoConfirmBrowserReplay(step visual_learning.LearningReplayStep, relocated visual_learning.AnchorRelocationResult) bool {
 	if relocated.Confidence < 0.5 {
 		return false
 	}
@@ -874,7 +1239,6 @@ func canAutoConfirmLowRiskReplay(step visual_learning.LearningReplayStep, reloca
 	case "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe":
 	// macOS 的 process 是 app 名稱而非 .exe（CGWindowList 的 kCGWindowOwnerName）。
 	case "google chrome", "google chrome beta", "microsoft edge", "firefox", "safari", "brave browser", "opera", "vivaldi", "arc":
-	case "explorer.exe":
 	default:
 		return false
 	}
@@ -888,10 +1252,8 @@ func canAutoConfirmLowRiskReplay(step visual_learning.LearningReplayStep, reloca
 	}, " "))
 	for _, word := range []string{
 		"download", "downloads", "save as", "settings", "system settings", "chrome settings",
-		"delete", "remove", "rename", "properties", "recycle bin", "format", "eject",
-		"submit", "pay", "payment", "purchase", "checkout", "transfer",
-		"下載", "另存", "設定", "系統設定", "刪除", "移除", "重新命名", "內容", "資源回收桶", "格式化", "退出",
-		"送出", "提交", "付款", "購買", "結帳", "轉帳",
+		"delete", "remove", "submit", "pay", "payment", "purchase", "checkout", "transfer",
+		"下載", "另存", "設定", "系統設定", "刪除", "移除", "送出", "提交", "付款", "購買", "結帳", "轉帳",
 	} {
 		if strings.Contains(text, word) {
 			return false

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 )
@@ -116,9 +115,6 @@ func TestAuditLogSkipCorruptLines(t *testing.T) {
 
 // TestAuditLogFilePermission verifies the log file is created with 0600.
 func TestAuditLogFilePermission(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows does not report Unix permission bits reliably")
-	}
 	dir := tmpAuditDir(t)
 	al := NewAuditLog(dir)
 
@@ -137,9 +133,6 @@ func TestAuditLogFilePermission(t *testing.T) {
 
 // TestAuditLogDirPermission verifies the directory is created with 0700.
 func TestAuditLogDirPermission(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows does not report Unix permission bits reliably")
-	}
 	dir := tmpAuditDir(t)
 	al := NewAuditLog(dir)
 

@@ -294,11 +294,12 @@ func (a *SidecarCLIAdapter) RunSummarizationNow(adapterID, cliPath, model string
 	}
 	now := time.Now()
 	sum := conversation.Summary{
-		Tag:         fmt.Sprintf("S-%d", now.Unix()%100000),
-		Content:     summaryText,
-		SentenceIDs: ids,
-		Timestamp:   now,
-		Valid:       true,
+		Tag:             fmt.Sprintf("S-%d", now.Unix()%100000),
+		Content:         summaryText,
+		SentenceIDs:     ids,
+		Timestamp:       now,
+		Valid:           true,
+		OriginalContent: content.String(), // 給 caller 落 deep_memory，防摘要喪失
 	}
 	a.addSummaryToContinuity(continuityKey, sum)
 	state.counter.Subtract(origChars)
@@ -388,13 +389,8 @@ func (a *SidecarCLIAdapter) SendMessage(opts skill_step.CLIMessageOptions) (skil
 	synthesizedPrompt := opts.UserText
 	rawSentenceCount := 0
 	validSummaryCount := 0
-	windowElided := 0
 	if isToolJudge {
 		validSummaries, rawSentences := a.promptHistorySnapshot(state)
-		// 滑動視窗(熱點 1):tool judge 只需近期脈絡,套用同一視窗。
-		windowed := conversation.ApplyPromptWindow(rawSentences, conversation.DefaultPromptWindowConfig())
-		rawSentences = windowed.Sentences
-		windowElided = windowed.Elided
 		rawSentenceCount = len(rawSentences)
 		validSummaryCount = len(validSummaries)
 		judgePrompt := systemPrompt + "\n\n工具判斷規則：只能輸出兩種格式之一：\n1. 需要工具\n2. 閒聊ㄌ<回答>\n若需要搜尋本機文件、讀取資料、開啟/寫入/匯出、排程、已保存螢幕操作、DAG/自動流程或任何系統工具，只輸出「需要工具」。\nReplay / 重現 / 操作 / 開啟 / 關閉 / 點擊 / 已保存示範相關請求必須輸出「需要工具」。\n不要輸出動作清單，不要猜工具名稱，不要直接輸出無前綴自然語言。"
@@ -424,11 +420,7 @@ func (a *SidecarCLIAdapter) SendMessage(opts skill_step.CLIMessageOptions) (skil
 				filteredRawSentences = append(filteredRawSentences, sent)
 			}
 		}
-		// 滑動視窗(熱點 1):讀取時套用,SentenceStore 不動,
-		// 出問題設 conversation.PromptWindowEnabled = false 即退回全量。
-		windowed := conversation.ApplyPromptWindow(filteredRawSentences, conversation.DefaultPromptWindowConfig())
-		rawSentences = windowed.Sentences
-		windowElided = windowed.Elided
+		rawSentences = filteredRawSentences
 		rawSentenceCount = len(rawSentences)
 		validSummaryCount = len(validSummaries)
 
@@ -449,8 +441,8 @@ func (a *SidecarCLIAdapter) SendMessage(opts skill_step.CLIMessageOptions) (skil
 		})
 	}
 
-	log.Printf("[CONV] 合成 prompt: key=%s sentences=%d summaries=%d window_elided=%d chars=%d input_id=%s control=%v system_prompt_len=%d",
-		continuityKey, rawSentenceCount, validSummaryCount, windowElided, state.counter.Count(), inputSentenceID, isControlMessage, len([]rune(systemPrompt)))
+	log.Printf("[CONV] 合成 prompt: key=%s sentences=%d summaries=%d chars=%d input_id=%s control=%v system_prompt_len=%d",
+		continuityKey, rawSentenceCount, validSummaryCount, state.counter.Count(), inputSentenceID, isControlMessage, len([]rune(systemPrompt)))
 
 	// 組裝 IPC 參數——使用合成後的 prompt 取代原始 userText
 	workspaceDir, err := a.ensureWorkspaceDir(opts.AdapterID, continuityKey)
@@ -595,8 +587,9 @@ func (a *SidecarCLIAdapter) SendMessage(opts skill_step.CLIMessageOptions) (skil
 			})
 		} else if validation.Code == actionchain.ValidationOK {
 			// Non-builtin valid action: extract display text and emit routing event.
+			// v3.1.8：loop 來源不出工具卡，同 app.go API 路徑的收斂。
 			displayText = chain.Target
-			if a.eventBus != nil {
+			if a.eventBus != nil && !eventbus.IsTaskLoopTrace(opts.TraceID) {
 				a.eventBus.Emit(eventbus.EventSchedulerActionRequested, map[string]string{
 					"action":     chain.Action,
 					"target":     chain.Target,

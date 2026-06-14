@@ -11,7 +11,7 @@ import (
 // ── Layer 1: 各供應商 pattern ──
 
 func TestRedactOpenAIKey(t *testing.T) {
-	out, recs := RedactBeforeWrite("key: " + "sk-" + "abc123def456ghi789jkl012mno345pqr678")
+	out, recs := RedactBeforeWrite("key: sk-abc123def456ghi789jkl012mno345pqr678")
 	if strings.Contains(out, "sk-abc123") {
 		t.Error("OpenAI key should be redacted")
 	}
@@ -19,7 +19,7 @@ func TestRedactOpenAIKey(t *testing.T) {
 }
 
 func TestRedactAnthropicKey(t *testing.T) {
-	out, recs := RedactBeforeWrite("key: " + "sk-ant-api03-" + "abcdefghijklmnopqrstuvwx")
+	out, recs := RedactBeforeWrite("key: sk-ant-api03-abcdefghijklmnopqrstuvwx")
 	if strings.Contains(out, "sk-ant-api03") {
 		t.Error("Anthropic key should be redacted")
 	}
@@ -27,7 +27,7 @@ func TestRedactAnthropicKey(t *testing.T) {
 }
 
 func TestRedactOpenRouterKey(t *testing.T) {
-	out, recs := RedactBeforeWrite("key: " + "sk-or-v1-" + "abcdefghijklmnopqrstuvwx")
+	out, recs := RedactBeforeWrite("key: sk-or-v1-abcdefghijklmnopqrstuvwx")
 	if strings.Contains(out, "sk-or-v1") {
 		t.Error("OpenRouter key should be redacted")
 	}
@@ -43,7 +43,7 @@ func TestRedactReplicateKey(t *testing.T) {
 }
 
 func TestRedactAWSKey(t *testing.T) {
-	out, recs := RedactBeforeWrite("aws: " + "AKIA" + "IOSFODNN7EXAMPLE")
+	out, recs := RedactBeforeWrite("aws: AKIAIOSFODNN7EXAMPLE")
 	if strings.Contains(out, "AKIAIOSF") {
 		t.Error("AWS key should be redacted")
 	}
@@ -51,7 +51,7 @@ func TestRedactAWSKey(t *testing.T) {
 }
 
 func TestRedactStripeKey(t *testing.T) {
-	out, recs := RedactBeforeWrite("stripe: " + "sk_live_" + "abcdefghijklmnopqrstuvwxyz")
+	out, recs := RedactBeforeWrite("stripe: sk_live_abcdefghijklmnopqrstuvwxyz")
 	if strings.Contains(out, "sk_live_") {
 		t.Error("Stripe key should be redacted")
 	}
@@ -59,7 +59,7 @@ func TestRedactStripeKey(t *testing.T) {
 }
 
 func TestRedactGoogleAIKey(t *testing.T) {
-	out, recs := RedactBeforeWrite("google: " + "AIzaSy" + "A1234567890abcdefghijklmnopqrstuv")
+	out, recs := RedactBeforeWrite("google: AIzaSyA1234567890abcdefghijklmnopqrstuv")
 	if strings.Contains(out, "AIzaSy") {
 		t.Error("Google AI key should be redacted")
 	}
@@ -75,7 +75,7 @@ func TestRedactHuggingFaceToken(t *testing.T) {
 }
 
 func TestRedactPEMKey(t *testing.T) {
-	pem := "-----BEGIN RSA " + "PRIVATE KEY-----\nMIIEpAIBAAK...\n-----END RSA " + "PRIVATE KEY-----"
+	pem := "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAK...\n-----END RSA PRIVATE KEY-----"
 	out, recs := RedactBeforeWrite(pem)
 	if strings.Contains(out, "MIIEpAIBAAK") {
 		t.Error("PEM should be redacted")
@@ -87,7 +87,7 @@ func TestRedactPEMKey(t *testing.T) {
 
 func TestRedactBearerWithTab(t *testing.T) {
 	// tab 在 Bearer 後——正規化應壓成空格
-	out, recs := RedactBeforeWrite("Authorization: Bearer\t" + "eyJhbGciOiJIUzI1NiJ9")
+	out, recs := RedactBeforeWrite("Authorization: Bearer\teyJhbGciOiJIUzI1NiJ9")
 	if strings.Contains(out, "eyJhbGci") {
 		t.Error("Bearer+tab should be redacted after normalization")
 	}
@@ -95,7 +95,7 @@ func TestRedactBearerWithTab(t *testing.T) {
 }
 
 func TestRedactBearerWithDoubleSpace(t *testing.T) {
-	out, recs := RedactBeforeWrite("Authorization: Bearer  " + "eyJhbGciOiJIUzI1NiJ9")
+	out, recs := RedactBeforeWrite("Authorization: Bearer  eyJhbGciOiJIUzI1NiJ9")
 	if strings.Contains(out, "eyJhbGci") {
 		t.Error("Bearer+double-space should be redacted after normalization")
 	}
@@ -223,7 +223,7 @@ func TestLoadUserPatternsMissingFile(t *testing.T) {
 
 	LoadUserPatterns(t.TempDir()) // 不應 panic，靜默使用內建
 	// 內建仍有效
-	out, _ := RedactBeforeWrite("key: " + "sk-" + "abc123def456ghi789jkl012mno345pqr678")
+	out, _ := RedactBeforeWrite("key: sk-abc123def456ghi789jkl012mno345pqr678")
 	if strings.Contains(out, "sk-abc123") {
 		t.Error("built-in should still work without user config")
 	}
@@ -243,7 +243,7 @@ func TestUserPatternCannotDisableBuiltin(t *testing.T) {
 
 	LoadUserPatterns(dir)
 
-	out, _ := RedactBeforeWrite("key: " + "sk-" + "abc123def456ghi789jkl012mno345pqr678")
+	out, _ := RedactBeforeWrite("key: sk-abc123def456ghi789jkl012mno345pqr678")
 	if strings.Contains(out, "sk-abc123") {
 		t.Error("built-in OpenAI pattern must remain active")
 	}

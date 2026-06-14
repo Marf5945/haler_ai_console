@@ -174,6 +174,10 @@ export function ConfirmCredentialMigration() {
   return window['go']['main']['App']['ConfirmCredentialMigration']();
 }
 
+export function ConfirmLearningTextEvent(arg1, arg2) {
+  return window['go']['main']['App']['ConfirmLearningTextEvent'](arg1, arg2);
+}
+
 export function ConfirmPackageInstall(arg1) {
   return window['go']['main']['App']['ConfirmPackageInstall'](arg1);
 }
@@ -558,6 +562,10 @@ export function GetSafariRuntimeNotice() {
   return window['go']['main']['App']['GetSafariRuntimeNotice']();
 }
 
+export function GetSchedulerClock() {
+  return window['go']['main']['App']['GetSchedulerClock']();
+}
+
 export function GetSettingsState() {
   return window['go']['main']['App']['GetSettingsState']();
 }
@@ -612,6 +620,10 @@ export function GetUISettings() {
 
 export function GetURLProvenance(arg1) {
   return window['go']['main']['App']['GetURLProvenance'](arg1);
+}
+
+export function GetVisualLearningPermissionStatus() {
+  return window['go']['main']['App']['GetVisualLearningPermissionStatus']();
 }
 
 export function GetVoiceSettings() {
@@ -914,6 +926,10 @@ export function OpenExternalURL(arg1) {
   return window['go']['main']['App']['OpenExternalURL'](arg1);
 }
 
+export function OpenVisualLearningPermissionSettings(arg1) {
+  return window['go']['main']['App']['OpenVisualLearningPermissionSettings'](arg1);
+}
+
 export function PauseScheduledJob(arg1) {
   return window['go']['main']['App']['PauseScheduledJob'](arg1);
 }
@@ -984,6 +1000,10 @@ export function ReadDocumentContent(arg1) {
 
 export function RecognizeNativeOCR(arg1) {
   return window['go']['main']['App']['RecognizeNativeOCR'](arg1);
+}
+
+export function RecordLearningKeyboardEvent(arg1) {
+  return window['go']['main']['App']['RecordLearningKeyboardEvent'](arg1);
 }
 
 export function RecordLearningMouseEvent(arg1) {
@@ -1088,6 +1108,10 @@ export function ReorderPersonas(arg1) {
 
 export function ReorderTabs(arg1) {
   return window['go']['main']['App']['ReorderTabs'](arg1);
+}
+
+export function RequestVisualLearningPermissions() {
+  return window['go']['main']['App']['RequestVisualLearningPermissions']();
 }
 
 export function ResolveAndExecuteDestructiveReviewCard(arg1, arg2) {
@@ -1412,12 +1436,4 @@ export function WakeLocalAdapter(arg1) {
 
 export function WakeOllamaDaemon() {
   return window['go']['main']['App']['WakeOllamaDaemon']();
-}
-
-export function WebChainMonthlyStats() {
-  return window['go']['main']['App']['WebChainMonthlyStats']();
-}
-
-export function WebChainSkillCandidates() {
-  return window['go']['main']['App']['WebChainSkillCandidates']();
 }

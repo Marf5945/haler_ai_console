@@ -219,9 +219,7 @@ func buildToolRoutingDecisionPrompt(systemPrompt string, userText string, lookup
 		fmt.Sprintf("本app預設本機搜尋；只有即時/今天/最新/現在/網路等變動資料才輸出 網路%s<搜尋關鍵字>%s%s。local_matches none 且使用者像在找本機資料時，輸出 %s%s<query>%s%s。", actionchain.Separator, actionchain.Separator, actionchain.StandbyNext, "\u641c\u5c0b", actionchain.Separator, actionchain.Separator, "\u6587\u4ef6"),
 		"若 loaded_files 不是 none，使用者問剛剛/最近/拉進來/拖進來/已載入/引用的檔案時，不要問檔名或路徑；輸出 搜尋ㄌ引用文件ㄌ文件。",
 		"勿呼叫任何工具；「工具」僅是分類標籤。",
-		"格式只能是：閒聊ㄌ<回答> | 操作ㄌ<候選tag/名稱/關鍵詞>ㄌ待命 | 程式ㄌ<程式名稱>ㄌ輸出 | 流程ㄌ<skill名稱>ㄌ輸出 | 查詢ㄌ<關鍵詞>ㄌ操作 | 搜尋ㄌ<關鍵詞>ㄌ文件 | 網路ㄌ<搜尋關鍵字>ㄌ<待命|網路> | 提問ㄌ<問題>ㄌ待命 | 需要工具",
-		// 複合意圖 chain plan（2.5.5.11）：第一行立即執行，後續行是期望鏈；占位 <依結果> 待回灌後補。
-		"複合網路問題(需先查A才能查B)：輸出多行，一行一步，第一行 next=網路，最後一行 next=待命。例：問天氣加穿搭→ 網路ㄌ台北 明天 天氣預報ㄌ網路(換行)網路ㄌ<依結果>ㄌ待命。單一問題仍只輸出一行 next=待命。",
+		"格式只能是：閒聊ㄌ<回答> | 操作ㄌ<候選tag/名稱/關鍵詞>ㄌ待命 | 程式ㄌ<程式名稱>ㄌ輸出 | 流程ㄌ<skill名稱>ㄌ輸出 | 查詢ㄌ<關鍵詞>ㄌ操作 | 搜尋ㄌ<關鍵詞>ㄌ文件 | 網路ㄌ<搜尋關鍵字>ㄌ待命 | 提問ㄌ<問題>ㄌ待命 | 需要工具",
 		"需要工具：需要其他工具，或候選不足但不像閒聊。",
 		"網路路由：凡需網路搜尋才能判斷的變動資料，如網路、即時、今天、今日、最新、現在等關鍵字→網路。",
 		"操作：明確重現/回放/照做/執行已保存操作且 saved_operations 明確→操作；只有 recent_operations 不算明確。",
@@ -402,6 +400,11 @@ func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sess
 			localResp.Target = decision.Target
 			localResp.Next = decision.Next
 			return true, localResp
+		}
+		// 展開：撈回 deep_memory 細節（v3.1.7）。
+		if handled, memResp := a.maybeExpandMemory(decision.Action, decision.Target, traceID); handled {
+			memResp.Next = decision.Next
+			return true, memResp
 		}
 	}
 	return false, skill_step.CLIResponse{}

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -133,9 +132,6 @@ func TestReadAllEmpty(t *testing.T) {
 // ──────────────────────────────────────────────
 
 func TestDefaultPermissions(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows does not report Unix permission bits reliably")
-	}
 	dir := tmpDir(t)
 	subDir := filepath.Join(dir, "sub")
 	log := New[testEntry](filepath.Join(subDir, "test.jsonl"))
@@ -162,9 +158,6 @@ func TestDefaultPermissions(t *testing.T) {
 }
 
 func TestCustomPermissions(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows does not report Unix permission bits reliably")
-	}
 	dir := tmpDir(t)
 	subDir := filepath.Join(dir, "custom")
 	log := New[testEntry](

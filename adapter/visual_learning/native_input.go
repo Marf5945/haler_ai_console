@@ -20,6 +20,36 @@ type NativeClickEvent struct {
 	WindowRect    PixelBBox `json:"window_rect,omitempty"`
 }
 
+// NativeKeyboardEvent is recorded by the platform recorder when the user types
+// outside the Wails WebView. Text is committed text only; shortcuts are stored
+// as key/modifier pairs.
+type NativeKeyboardEvent struct {
+	Timestamp     time.Time `json:"timestamp"`
+	Action        string    `json:"action"`
+	Text          string    `json:"text,omitempty"`
+	Key           string    `json:"key,omitempty"`
+	KeyCode       int       `json:"key_code,omitempty"`
+	Modifiers     []string  `json:"modifiers,omitempty"`
+	WindowTitle   string    `json:"window_title,omitempty"`
+	WindowProcess string    `json:"window_process,omitempty"`
+	WindowHandle  uintptr   `json:"window_handle,omitempty"`
+	ScreenWidth   int       `json:"screen_width,omitempty"`
+	ScreenHeight  int       `json:"screen_height,omitempty"`
+	WindowRect    PixelBBox `json:"window_rect,omitempty"`
+}
+
+type NativePermissionStatus struct {
+	Accessibility   bool     `json:"accessibility"`
+	InputMonitoring bool     `json:"input_monitoring"`
+	ScreenRecording bool     `json:"screen_recording"`
+	Requested       bool     `json:"requested,omitempty"`
+	NeedsRestart    bool     `json:"needs_restart,omitempty"`
+	Missing         []string `json:"missing,omitempty"`
+	MissingKeys     []string `json:"missing_keys,omitempty"`
+	Platform        string   `json:"platform,omitempty"`
+	Message         string   `json:"message,omitempty"`
+}
+
 type WindowCapture struct {
 	ImageData     []byte    `json:"image_data,omitempty"`
 	Width         int       `json:"width"`
@@ -55,28 +85,32 @@ type ResolvedWindow struct {
 
 // NativeReplayResult is returned for one OS-level replay step.
 type NativeReplayResult struct {
-	OK                   bool    `json:"ok"`
-	Skipped              bool    `json:"skipped,omitempty"`
-	NeedsConfirmation    bool    `json:"needs_confirmation,omitempty"`
-	Method               string  `json:"method"`
-	Index                int     `json:"index,omitempty"`
-	Label                string  `json:"label,omitempty"`
-	Selector             string  `json:"selector,omitempty"`
-	X                    int     `json:"x"`
-	Y                    int     `json:"y"`
-	OriginalX            int     `json:"original_x,omitempty"`
-	OriginalY            int     `json:"original_y,omitempty"`
-	Error                string  `json:"error,omitempty"`
-	Warning              string  `json:"warning,omitempty"`
-	WindowTitle          string  `json:"window_title,omitempty"`
-	WindowProcess        string  `json:"window_process,omitempty"`
-	ForegroundOK         bool    `json:"foreground_ok,omitempty"`
-	ForegroundTitle      string  `json:"foreground_title,omitempty"`
-	ForegroundProcess    string  `json:"foreground_process,omitempty"`
-	Relocated            bool    `json:"relocated,omitempty"`
-	RelocationMethod     string  `json:"relocation_method,omitempty"`
-	RelocationConfidence float64 `json:"relocation_confidence,omitempty"`
-	RelocationReason     string  `json:"relocation_reason,omitempty"`
-	DebugImagePath       string  `json:"debug_image_path,omitempty"`
-	DebugInfoPath        string  `json:"debug_info_path,omitempty"`
+	OK                   bool     `json:"ok"`
+	Skipped              bool     `json:"skipped,omitempty"`
+	NeedsConfirmation    bool     `json:"needs_confirmation,omitempty"`
+	Method               string   `json:"method"`
+	Index                int      `json:"index,omitempty"`
+	Label                string   `json:"label,omitempty"`
+	Selector             string   `json:"selector,omitempty"`
+	X                    int      `json:"x"`
+	Y                    int      `json:"y"`
+	OriginalX            int      `json:"original_x,omitempty"`
+	OriginalY            int      `json:"original_y,omitempty"`
+	Error                string   `json:"error,omitempty"`
+	Warning              string   `json:"warning,omitempty"`
+	WindowTitle          string   `json:"window_title,omitempty"`
+	WindowProcess        string   `json:"window_process,omitempty"`
+	ForegroundOK         bool     `json:"foreground_ok,omitempty"`
+	ForegroundTitle      string   `json:"foreground_title,omitempty"`
+	ForegroundProcess    string   `json:"foreground_process,omitempty"`
+	Relocated            bool     `json:"relocated,omitempty"`
+	RelocationMethod     string   `json:"relocation_method,omitempty"`
+	RelocationConfidence float64  `json:"relocation_confidence,omitempty"`
+	RelocationReason     string   `json:"relocation_reason,omitempty"`
+	DebugImagePath       string   `json:"debug_image_path,omitempty"`
+	DebugInfoPath        string   `json:"debug_info_path,omitempty"`
+	Text                 string   `json:"text,omitempty"`
+	Key                  string   `json:"key,omitempty"`
+	Modifiers            []string `json:"modifiers,omitempty"`
+	Sensitive            bool     `json:"sensitive,omitempty"`
 }

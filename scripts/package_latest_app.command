@@ -1,8 +1,10 @@
 #!/bin/zsh
 set -euo pipefail
 
-PROJECT="$(cd "$(dirname "$0")/.." && pwd)"
-WAILS="${WAILS:-$HOME/go/bin/wails}"
+SCRIPT_DIR="${0:A:h}"
+PROJECT="${SCRIPT_DIR:h}"
+export PATH="$PATH:/usr/local/go/bin:/opt/homebrew/bin:$HOME/go/bin"
+WAILS="${WAILS:-$(command -v wails || true)}"
 APP="$PROJECT/build/bin/ai-console.app"
 LOG_DIR="$PROJECT/build/logs"
 LOG_FILE="$LOG_DIR/package-latest-$(date '+%Y%m%d-%H%M%S').log"
@@ -41,8 +43,8 @@ if [[ ! -d "$PROJECT" ]]; then
   exit 1
 fi
 
-if [[ ! -x "$WAILS" ]]; then
-  echo "Wails executable not found or not executable: $WAILS"
+if [[ -z "$WAILS" || ! -x "$WAILS" ]]; then
+  echo "Wails executable not found. Install Wails or set WAILS=/path/to/wails before running."
   exit 1
 fi
 

@@ -12,7 +12,17 @@ func NewNativeInput() *NativeInput {
 	return &NativeInput{}
 }
 
-func (n *NativeInput) Start(onClick func(NativeClickEvent)) error {
+func (n *NativeInput) PermissionStatus() NativePermissionStatus {
+	return NativePermissionStatus{Platform: "unsupported", Message: "native input permissions are not available on this platform"}
+}
+
+func (n *NativeInput) RequestPermissions() NativePermissionStatus {
+	status := n.PermissionStatus()
+	status.Requested = true
+	return status
+}
+
+func (n *NativeInput) Start(onClick func(NativeClickEvent), onKeyboard func(NativeKeyboardEvent)) error {
 	return fmt.Errorf("native input recorder is not implemented on this platform")
 }
 
@@ -48,6 +58,10 @@ func (n *NativeInput) MoveCursorOnly(step LearningReplayStep) NativeReplayResult
 
 func (n *NativeInput) CaptureWindow(hwnd uintptr) (WindowCapture, error) {
 	return WindowCapture{}, fmt.Errorf("native window capture is not implemented on this platform")
+}
+
+func (n *NativeInput) CaptureScreenRegion(rect PixelBBox) (WindowCapture, error) {
+	return WindowCapture{}, fmt.Errorf("native screen region capture is not implemented on this platform")
 }
 
 func (n *NativeInput) ResolveWindow(handle uintptr, process, title string) (ResolvedWindow, bool) {

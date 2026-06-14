@@ -104,7 +104,7 @@ func TestFSCheckPath_BoundaryAndSensitive(t *testing.T) {
 func TestFSCheckPath_SymlinkEscape(t *testing.T) {
 	root, allowed := makeFSFixture(t)
 
-	// 建一個 root 內的 symlink 指向 root 外的 /tmp（macOS 上 /tmp 通常是 /private/tmp）
+	// 建一個 root 內的 symlink 指向 root 外的暫存目錄。
 	outside := t.TempDir() // 完全獨立的 tempdir，不在 root 內
 	mustWrite(t, filepath.Join(outside, "secret.md"), "outside content")
 

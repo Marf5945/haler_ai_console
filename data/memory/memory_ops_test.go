@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -94,9 +93,6 @@ func TestMemoryOps_SchemaVersion(t *testing.T) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 func TestMemoryOps_FilePermission0600(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows does not report Unix permission bits reliably")
-	}
 	tmpDir := t.TempDir()
 
 	_ = appendMemoryOp(tmpDir, "append", "b", "a")

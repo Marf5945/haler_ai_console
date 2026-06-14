@@ -6,7 +6,7 @@ import (
 )
 
 func TestPrepareCloudTTSTextRedactsSecrets(t *testing.T) {
-	secret := "sk-" + "abcdefghijklmnopqrstuvwxyz123456"
+	secret := "sk-abcdefghijklmnopqrstuvwxyz123456"
 	preview := prepareCloudTTSEgressPreview("請朗讀這段 key: " + secret)
 	if preview.Allowed {
 		t.Fatal("cloud TTS text with secrets must not be allowed directly")

@@ -2,6 +2,7 @@ import React from 'react'
 import {createRoot} from 'react-dom/client'
 import App from './App'
 import { getCurrentLanguage } from './locales/useI18n'
+import { injectFontFaces } from './fontFaces'
 
 function ErrorScreen({error, title = 'AI Console error'}) {
     const message = error?.stack || error?.message || String(error || 'Unknown startup error')
@@ -47,6 +48,7 @@ const container = document.getElementById('root')
 const root = createRoot(container)
 
 try {
+    injectFontFaces()
     const startupLang = getCurrentLanguage()
     document.documentElement.lang = startupLang
     root.render(

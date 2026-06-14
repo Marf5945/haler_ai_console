@@ -95,6 +95,11 @@ func (p plannerProposer) Propose(ctx context.Context, pc replan.ProposerContext)
 // callAndParse 呼叫 planner 後解析。回傳 (提案, 解析錯, 傳輸錯)；
 // 傳輸錯=adapter 失敗，解析錯=格式不對（可由呼叫端決定是否重試）。
 func (p plannerProposer) callAndParse(prompt, traceID string) (replan.ReplanProposal, error, error) {
+	recordPromptSynthesisTrace("go.replan.synthesis", traceID, prompt, map[string]interface{}{
+		"adapter_id": p.adapterID,
+		"model_id":   p.modelID,
+		"session_id": p.sessionID,
+	})
 	resp, err := p.app.callPlannerAdapter(p.adapterID, p.modelID, p.sessionID, prompt, traceID)
 	if err != nil {
 		return replan.ReplanProposal{}, nil, err

@@ -310,7 +310,7 @@ int CoreML_Infer(CoreMLHandle handle,
         }
 
         // 根據 MLMultiArray 的資料型別轉換。
-        // YOLOv5 CoreML 模型通常輸出 Float32 或 Float16。
+        // CoreML 偵測模型通常輸出 Float32 或 Float16。
         MLMultiArrayDataType dtype = outputArray.dataType;
         const void* srcPtr = outputArray.dataPointer;
 

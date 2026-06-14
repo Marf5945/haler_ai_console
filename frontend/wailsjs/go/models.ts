@@ -1412,6 +1412,78 @@ export namespace main {
 	        this.utc_offset_minutes = source["utc_offset_minutes"];
 	    }
 	}
+	export class SchedulerDraftNormalization {
+	    intent: string;
+	    title: string;
+	    summary: string;
+	    time_text: string;
+	    cron_expr: string;
+	    action_text: string;
+	    question: string;
+	    target_job_no: number;
+	    confidence: string;
+	    raw?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new SchedulerDraftNormalization(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.intent = source["intent"];
+	        this.title = source["title"];
+	        this.summary = source["summary"];
+	        this.time_text = source["time_text"];
+	        this.cron_expr = source["cron_expr"];
+	        this.action_text = source["action_text"];
+	        this.question = source["question"];
+	        this.target_job_no = source["target_job_no"];
+	        this.confidence = source["confidence"];
+	        this.raw = source["raw"];
+	    }
+	}
+	export class SchedulerSkillBootstrapResult {
+	    job_id: string;
+	    skill_id: string;
+	    source_sub_id: string;
+	    action_target: string;
+	    action_payload: string;
+	    manifest?: skill_step.SkillManifest;
+	    problems?: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new SchedulerSkillBootstrapResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.job_id = source["job_id"];
+	        this.skill_id = source["skill_id"];
+	        this.source_sub_id = source["source_sub_id"];
+	        this.action_target = source["action_target"];
+	        this.action_payload = source["action_payload"];
+	        this.manifest = this.convertValues(source["manifest"], skill_step.SkillManifest);
+	        this.problems = source["problems"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class SessionAnalysis {
 	    total_actions: number;
 	    main_direct_actions: number;
@@ -2115,6 +2187,7 @@ export namespace scheduler {
 
 	export class Job {
 	    id: string;
+	    schedule_no: number;
 	    name: string;
 	    cron_expr: string;
 	    enabled: boolean;
@@ -2127,6 +2200,12 @@ export namespace scheduler {
 	    risk_class: string;
 	    payload_hash: string;
 	    project_id: string;
+	    skill_id?: string;
+	    source_sub_id?: string;
+	    flow_hash?: string;
+	    last_output_date?: string;
+	    notify_on_fire: boolean;
+	    auto_run_skill: boolean;
 
 	    static createFrom(source: any = {}) {
 	        return new Job(source);
@@ -2135,6 +2214,7 @@ export namespace scheduler {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
+	        this.schedule_no = source["schedule_no"];
 	        this.name = source["name"];
 	        this.cron_expr = source["cron_expr"];
 	        this.enabled = source["enabled"];
@@ -2147,6 +2227,12 @@ export namespace scheduler {
 	        this.risk_class = source["risk_class"];
 	        this.payload_hash = source["payload_hash"];
 	        this.project_id = source["project_id"];
+	        this.skill_id = source["skill_id"];
+	        this.source_sub_id = source["source_sub_id"];
+	        this.flow_hash = source["flow_hash"];
+	        this.last_output_date = source["last_output_date"];
+	        this.notify_on_fire = source["notify_on_fire"];
+	        this.auto_run_skill = source["auto_run_skill"];
 	    }
 	}
 	export class JobExecution {

@@ -59,11 +59,11 @@ func TestURLFetchPendingUsesLowestTrustSource(t *testing.T) {
 func TestResourceGateAsksBeforeOpeningLocalURL(t *testing.T) {
 	resetResourceGateForTest(t)
 	app := &App{}
-	resp, handled := app.maybeHandleResourceGate("開啟 http://127.0.0.1:48765", "session-url-open", "trace-url-open")
+	resp, handled := app.maybeHandleResourceGate("開啟 http://127.0.0.1:3000", "session-url-open", "trace-url-open")
 	if !handled {
 		t.Fatal("local URL open should be handled by resource gate")
 	}
-	if !strings.Contains(resp.Text, "要我開啟 http://127.0.0.1:48765 嗎") {
+	if !strings.Contains(resp.Text, "要我開啟 http://127.0.0.1:3000 嗎") {
 		t.Fatalf("unexpected response: %q", resp.Text)
 	}
 }

@@ -204,6 +204,7 @@ type App struct {
 	toolReadinessMu        sync.Mutex
 	pendingToolQuestions   map[string]pendingToolQuestion
 	toolBackgroundContexts map[string][]toolBackgroundAnswer
+	clarRoots              map[string]*clarificationRoot // Step 3：跨輪澄清根（count/AskedSlots/TTL）
 
 	// #I-801: Node Sidecar 生命週期管理器
 	sidecar *cli_manager.SidecarManager
@@ -321,6 +322,7 @@ func NewApp() *App {
 		referencePromptTargets: make(map[string][]string),
 		pendingToolQuestions:   make(map[string]pendingToolQuestion),
 		toolBackgroundContexts: make(map[string][]toolBackgroundAnswer),
+		clarRoots:              make(map[string]*clarificationRoot),
 
 		// #I-1002: Review Archive — rejected card 持久化
 		reviewArchive: review.NewArchiveService(hookRoot),
@@ -407,6 +409,7 @@ func NewApp() *App {
 		DataRoot:  hookRoot,
 		EventBus:  a.eventBus,
 		SkillExec: schedulerSkillExecutor{app: a},
+		Notifier:  schedulerNotifier{app: a},
 	})
 	skill_step.RegisterDocumentBuiltins(a.skillRouter)
 	return a
@@ -1674,10 +1677,12 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 			})
 			return resp, nil
 		}
-		if decision, handled := a.consumePendingToolAnswer(sessionID, userText, traceID); handled {
-			if routed, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID, decision.Raw); routed {
-				return &routedResp, nil
-			}
+		if rejudgeText, handled := a.consumePendingToolAnswer(sessionID, userText, traceID); handled {
+			// Step 2：補答後不沿用舊 decision，改用乾淨 re-judge 文字重跑完整 routing（第二次 judge）。
+			userText = rejudgeText
+			debugtrace.Record("go.SendCLIMessage.rejudge_after_clarification", traceID, map[string]interface{}{
+				"rejudge_text": rejudgeText,
+			})
 		}
 		if resp, handled := a.maybeHandleWebSearch(userText, sessionID, traceID); handled {
 			debugtrace.Record("go.SendCLIMessage.web_search.direct", traceID, map[string]interface{}{
@@ -1803,7 +1808,7 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 		routingLookup := a.lookupToolRoutingContext(terms, userText, traceID)
 		// SEC-06: 若上一輪系統發過確認問句，judge prompt 帶 pending 摘要，
 		// 讓「我要取消」這類回應不被誤判成操作/查詢。
-		routingContextForToolPrompt = formatToolRoutingLookupContext(routingLookup) + pendingConfirmPromptContext(sessionID)
+		routingContextForToolPrompt = formatToolRoutingLookupContext(routingLookup) + pendingConfirmPromptContext(sessionID) + a.formatAvailableSkillsContext(terms) + a.formatRoutingMemoryContext(terms) // Step 4/6：注入候選 + 低敏記憶
 		judgeResp, judgeErr := a.cliAdapter.SendMessage(skill_step.CLIMessageOptions{
 			AdapterID:      adapterID,
 			CLIPath:        cliPath,
@@ -1859,6 +1864,8 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 				}
 			}
 		}
+		// Step 1：確定性硬閘。語意已由 normalize 決定，這裡只清 target、收斂 next、擋非法 action。
+		decision = a.validateRoutingDecisionWithRepick(decision, routingLookup)
 		debugtrace.Record("go.toolRouting.judge", traceID, map[string]interface{}{
 			"text":           judgeResp.Text,
 			"error":          judgeResp.Error,
@@ -1959,10 +1966,8 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 	if handled, programResp := a.maybeHandleGoProgramAuthoring(decision, sessionID, traceID, userText); handled {
 		return &programResp, nil
 	}
+	// Step 2：背景只進 judge/composer context，不再拼進搜尋 query。
 	target := resp.Target
-	if resp.Action == "網路" {
-		target = a.targetWithBackground(sessionID, target)
-	}
 	if req, ok := websearch.RequestFromAction(resp.Action, target); ok {
 		webResp := a.executeWebSearch(req, traceID)
 		return &webResp, nil
@@ -2066,10 +2071,12 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 			})
 			return resp, nil
 		}
-		if decision, handled := a.consumePendingToolAnswer(sessionID, userText, traceID); handled {
-			if routed, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID); routed {
-				return &routedResp, nil
-			}
+		if rejudgeText, handled := a.consumePendingToolAnswer(sessionID, userText, traceID); handled {
+			// Step 2：補答後重跑完整 routing（第二次 judge），不沿用舊 decision。
+			userText = rejudgeText
+			debugtrace.Record("go.SendAPIMessage.rejudge_after_clarification", traceID, map[string]interface{}{
+				"rejudge_text": rejudgeText,
+			})
 		}
 		if resp, handled := a.maybeHandleWebSearch(userText, sessionID, traceID); handled {
 			debugtrace.Record("go.SendAPIMessage.web_search.direct", traceID, map[string]interface{}{
@@ -2222,7 +2229,7 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 		terms := parseSearchTerms(keywordText, userText)
 		routingLookup := a.lookupToolRoutingContext(terms, userText, traceID)
 		// SEC-06: judge prompt 帶 pending 確認摘要（同 CLI 路徑）。
-		routingContextForToolPrompt = formatToolRoutingLookupContext(routingLookup) + pendingConfirmPromptContext(sessionID)
+		routingContextForToolPrompt = formatToolRoutingLookupContext(routingLookup) + pendingConfirmPromptContext(sessionID) + a.formatAvailableSkillsContext(terms) + a.formatRoutingMemoryContext(terms) // Step 4/6：注入候選 + 低敏記憶
 		judgeText, judgeErr := callAPI(buildToolRoutingDecisionPrompt("", userText, routingContextForToolPrompt, recentHistory))
 		if judgeErr != nil {
 			// judge 失敗：先用本機候選做保底路由，撈不到才把錯誤丟回。
@@ -2255,6 +2262,8 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 				}
 			}
 		}
+		// Step 1：確定性硬閘（API 路徑），與 CLI 路徑共用 validateRoutingDecision。
+		decision = a.validateRoutingDecisionWithRepick(decision, routingLookup)
 		debugtrace.Record("go.toolRouting.judge", traceID, map[string]interface{}{
 			"text":           judgeText,
 			"error":          errorString(judgeErr),
@@ -2450,12 +2459,14 @@ const (
 )
 
 type toolRoutingDecision struct {
-	Kind   string
-	Text   string
-	Action string
-	Target string
-	Next   string
-	Raw    string
+	Kind    string
+	Text    string
+	Action  string
+	Target  string
+	Next    string
+	Raw     string
+	Title   string
+	Summary string
 }
 
 // fallbackDecisionFromLookup 在 judge 呼叫失敗（配額耗盡、CLI 逾時、Gemini 嘗試
@@ -2696,10 +2707,8 @@ func (a *App) resolveActionChainResponse(rawText string, actionTags []string, tr
 	if handled, resp := a.maybeHandleGoProgramAuthoring(decision, sessionID, traceID, rawText); handled {
 		return resp
 	}
+	// Step 2：背景只進 judge/composer context，不再拼進搜尋 query。
 	target := chain.Target
-	if chain.Action == "網路" {
-		target = a.targetWithBackground(sessionID, target)
-	}
 	if req, ok := websearch.RequestFromAction(chain.Action, target); ok {
 		resp := a.executeWebSearch(req, traceID)
 		resp.Action = chain.Action

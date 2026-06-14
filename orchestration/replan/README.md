@@ -47,8 +47,8 @@ UICONSOLE_BOUNDED_REPLAN=1   # 啟用；未設 / 其他值 = 關
 ## 驗收
 
 ```bash
-env GOCACHE=/tmp/go-build-cache go build ./...
-env GOCACHE=/tmp/go-build-cache go test ./orchestration/replan/... ./orchestration/dag/... -v
+env GOCACHE="${TMPDIR:-/tmp}/go-build-cache" go build ./...
+env GOCACHE="${TMPDIR:-/tmp}/go-build-cache" go test ./orchestration/replan/... ./orchestration/dag/... -v
 ```
 
 計數常數（`counter.go`）：`MaxConsecutiveNoProgress=5`、`MaxRunTotal=8`、`OscillationPenalty=2`。

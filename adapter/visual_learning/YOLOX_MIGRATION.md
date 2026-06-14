@@ -16,21 +16,19 @@
 - `model_hashes.json`：清空 `models`，待你填入自行匯出模型的 SHA256。
 - 測試 fixture 改為 `testdata/yolox_nano_output.json`（anchor-free）。
 - 標註工具 `tools/yolo_adjust`：移除 `ultralytics` / `yolo` CLI 探測，輸出仍為通用 YOLO txt 格式。
-- 全 repo 內的 `yolo_nano.mlmodelc` 權重已清為 0 位元組（AGPL 內容已移除）。
+- 全 repo 內已刪除 `yolo_nano.mlmodelc`，不保留空殼或 0-byte 權重檔，避免授權掃描誤判。
 
 ## 你還需要做的兩件事
 
-### 1) 手動刪除殘留空資料夾（沙箱無法 unlink）
+### 1) 確認舊模型殘留不存在
 
-權重內容已清空，但空目錄需你在 Finder 手動刪除：
+目前 v3.1 checkout 不應再出現任何 `yolo_nano.mlmodelc` 路徑。若從舊版本或 build artifact 複製資料，請確認下列舊路徑已不存在：
 
 ```
 ui_console/ui_console_wails_v_3.0/assets/models/yolo_nano.mlmodelc/
-ui_console/ui_console_wails_v_3.0/assets/models/__dummy_test__
 ui_console/ui_console_wails_v_3.0/build/bin/.../assets/models/yolo_nano.mlmodelc/
 old/ui_console_wails_v_2.4/.../yolo_nano.mlmodelc/
 old/ui_console_wails_v_2.5/.../yolo_nano.mlmodelc/
-adapter/visual_learning/testdata/yolo_nano_output.json   (舊 fixture，已清空)
 ```
 
 ### 2) 自行訓練 / 匯出 YOLOX 模型並接入

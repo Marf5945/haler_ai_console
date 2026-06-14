@@ -31,6 +31,15 @@ type SchedulerAuthChecker interface {
 	IsAuthorizedForJob(jobID string) bool
 }
 
+// SchedulerNotifier 在排程觸發/完成時推送通知（避免 scheduler 直接依賴 remote_bridge）。
+// 由 app 層實作，內部接到使用者綁定的通訊軟體；未綁定時應自行 no-op。
+type SchedulerNotifier interface {
+	// NotifyJobFired 在 job 即將執行時呼叫：提醒使用者「系統要開始做事」。
+	NotifyJobFired(job *Job)
+	// NotifyJobResult 在 job 真正產生結果後呼叫（Phase E/F 接上後使用）。
+	NotifyJobResult(job *Job, ok bool, summary string)
+}
+
 // --------------------------------------------------------------------------
 // 常數定義
 // --------------------------------------------------------------------------
@@ -66,6 +75,9 @@ type ServiceConfig struct {
 
 	// AuthChecker 檢查排程授權（可為 nil，無授權檢查時）。
 	AuthChecker SchedulerAuthChecker
+
+	// Notifier 在觸發/完成時推送通知（可為 nil，無通知時）。
+	Notifier SchedulerNotifier
 
 	// ProjectID 目前專案 ID。
 	ProjectID string
@@ -115,6 +127,9 @@ type Service struct {
 	// authChecker 檢查排程授權（風險閘門使用）。
 	authChecker SchedulerAuthChecker
 
+	// notifier 在觸發/完成時推送通知。
+	notifier SchedulerNotifier
+
 	// cancel 用於停止 Ticker goroutine。
 	cancel context.CancelFunc
 
@@ -144,6 +159,7 @@ func NewService(cfg ServiceConfig) *Service {
 		eventBus:      cfg.EventBus,
 		reviewCreator: cfg.ReviewCreator,
 		authChecker:   cfg.AuthChecker,
+		notifier:      cfg.Notifier,
 	}
 }
 
@@ -171,6 +187,9 @@ func (s *Service) Start(ctx context.Context) error {
 	for i := range loaded {
 		job := loaded[i]
 		s.jobs[i] = &job
+	}
+	if s.ensureScheduleNumbersLocked() {
+		_ = s.persistJobsLocked()
 	}
 	s.mu.Unlock()
 
@@ -232,6 +251,7 @@ func (s *Service) CreateJob(name, cronExpr string, actionType ActionType, action
 	}
 
 	s.mu.Lock()
+	job.ScheduleNo = s.nextScheduleNoLocked()
 	s.jobs = append(s.jobs, job)
 	err = s.persistJobsLocked()
 	s.mu.Unlock()
@@ -246,6 +266,9 @@ func (s *Service) CreateJob(name, cronExpr string, actionType ActionType, action
 func (s *Service) ListJobs() []Job {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.ensureScheduleNumbersLocked() {
+		_ = s.persistJobsLocked()
+	}
 
 	result := make([]Job, len(s.jobs))
 	for i, j := range s.jobs {
@@ -305,6 +328,43 @@ func (s *Service) ResumeJob(id string) error {
 	}
 
 	return s.persistJobsLocked()
+}
+
+// UpdateJob 更新指定排程任務的主要欄位，並重新計算 NextFire 與 payload hash。
+func (s *Service) UpdateJob(id, name, cronExpr string, actionType ActionType, actionPayload string) (*Job, error) {
+	if !IsValidActionType(actionType) {
+		return nil, fmt.Errorf("scheduler: 不支援的動作類型: %q", actionType)
+	}
+	parsed, err := ParseCron(cronExpr)
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: cron 表達式無效: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	idx := s.findJobIndexLocked(id)
+	if idx == -1 {
+		return nil, fmt.Errorf("scheduler: 找不到任務 %q", id)
+	}
+
+	job := s.jobs[idx]
+	job.Name = name
+	job.CronExpr = cronExpr
+	job.ActionType = actionType
+	job.ActionPayload = actionPayload
+	job.PayloadHash = computePayloadHash(actionPayload)
+	if next := parsed.NextAfter(time.Now()); !next.IsZero() {
+		job.NextFire = next.Format(time.RFC3339)
+	} else {
+		job.NextFire = ""
+	}
+
+	if err := s.persistJobsLocked(); err != nil {
+		return nil, err
+	}
+	copy := *job
+	return &copy, nil
 }
 
 // GetJobHistory 查詢指定任務的執行歷史紀錄。
@@ -435,6 +495,11 @@ func (s *Service) executeJob(ctx context.Context, job *Job, firedAt time.Time) {
 	if err != nil {
 		s.recordFailure(job, firedAt, 0, err, false)
 		return
+	}
+
+	// Phase D：到點先通知使用者「系統要開始做事」（透過 remote_bridge，未綁定則 no-op）。
+	if s.notifier != nil && job.NotifyOnFire {
+		s.notifier.NotifyJobFired(job)
 	}
 
 	// 第一次執行
@@ -578,6 +643,11 @@ func (s *Service) recordSuccess(job *Job, firedAt time.Time, durationMs int64, r
 			"retried":     retried,
 		})
 	}
+
+	// Phase E：技能型排程真正產生結果後才送「完成」通知（event 型空跑不送，避免誤報）。
+	if s.notifier != nil && job.NotifyOnFire && job.ActionType == ActionSkill {
+		s.notifier.NotifyJobResult(job, true, "")
+	}
 }
 
 // recordFailure 記錄失敗的執行結果，更新 Job 狀態並持久化。
@@ -618,6 +688,36 @@ func (s *Service) recordFailure(job *Job, firedAt time.Time, durationMs int64, e
 			"retried":              retried,
 		})
 	}
+
+	// Phase E：技能型排程失敗通知（含已嘗試完所有 failover 後端仍失敗）。
+	if s.notifier != nil && job.NotifyOnFire && job.ActionType == ActionSkill {
+		s.notifier.NotifyJobResult(job, false, execErr.Error())
+	}
+}
+
+// BindJobSkill 在第一次跑完做成 skill 後，把 job 轉成「直接跑 skill」模式並持久化。
+// 之後到點由 executeJob → SkillAction → schedulerSkillExecutor（含 failover）直接跑 skill。
+func (s *Service) BindJobSkill(id, skillID, actionPayload string) error {
+	return s.BindJobSkillInSub(id, skillID, "", actionPayload)
+}
+
+// BindJobSkillInSub 與 BindJobSkill 相同，但會一併記錄第一次建立流程的可見 sub。
+func (s *Service) BindJobSkillInSub(id, skillID, sourceSubID, actionPayload string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, job := range s.jobs {
+		if job.ID == id {
+			job.SkillID = skillID
+			job.SourceSubID = sourceSubID
+			job.ActionType = ActionSkill
+			job.ActionPayload = actionPayload
+			job.AutoRunSkill = true
+			job.PayloadHash = computePayloadHash(actionPayload)
+			job.FlowHash = computeFlowHash(job.Name, actionPayload, skillID)
+			return s.persistJobsLocked()
+		}
+	}
+	return fmt.Errorf("scheduler: job %q not found for BindJobSkillInSub", id)
 }
 
 // recordSkipped 記錄因重疊而跳過的執行。
@@ -703,6 +803,34 @@ func (s *Service) findJobIndexLocked(id string) int {
 		}
 	}
 	return -1
+}
+
+func (s *Service) nextScheduleNoLocked() int {
+	maxNo := 0
+	for _, job := range s.jobs {
+		if job != nil && job.ScheduleNo > maxNo {
+			maxNo = job.ScheduleNo
+		}
+	}
+	return maxNo + 1
+}
+
+func (s *Service) ensureScheduleNumbersLocked() bool {
+	changed := false
+	nextNo := s.nextScheduleNoLocked()
+	used := make(map[int]bool)
+	for _, job := range s.jobs {
+		if job == nil {
+			continue
+		}
+		if job.ScheduleNo <= 0 || used[job.ScheduleNo] {
+			job.ScheduleNo = nextNo
+			nextNo++
+			changed = true
+		}
+		used[job.ScheduleNo] = true
+	}
+	return changed
 }
 
 // persistJobsLocked 將目前的 jobs 切片持久化至磁碟。

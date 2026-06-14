@@ -12,7 +12,7 @@ from tkinter import ttk
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 
 
-APP_DIR = Path(__file__).resolve().parent
+APP_DIR = Path.home() / "Desktop" / "yolo_adjust"
 DATASET_DIR = APP_DIR / "dataset"
 IMAGES_DIR = DATASET_DIR / "images" / "train"
 LABELS_DIR = DATASET_DIR / "labels" / "train"

@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"ui_console/orchestration/skill_step"
 )
 
 // TestSkillConfirmMatcherInvariants 鎖住迴圈修復所依賴的關鍵不變量：
@@ -85,5 +87,72 @@ func TestSkillConfirmPromptNoFiles(t *testing.T) {
 	// 測試環境通常無引用檔目錄 → 應帶「先拖入或引用檔案」提醒；若環境剛好有檔案則略過此斷言。
 	if !strings.Contains(msg, "回覆「要」") {
 		t.Fatalf("提示應包含確認指引：%q", msg)
+	}
+}
+
+func TestFindManifestForExecIncludesBuiltin(t *testing.T) {
+	archive := skill_step.NewArchiveService(t.TempDir())
+	router := skill_step.NewRouter(archive)
+	skill_step.RegisterDocumentBuiltins(router)
+	a := &App{skillArchive: archive, skillRouter: router}
+
+	manifest := a.findManifestForExec("builtin.scheduler")
+	if manifest == nil || manifest.SkillID != "builtin.scheduler" {
+		t.Fatalf("builtin scheduler manifest should be visible to execution lookup, got %#v", manifest)
+	}
+}
+
+func TestSchedulerConfirmPromptDoesNotClaimLoadedFiles(t *testing.T) {
+	archive := skill_step.NewArchiveService(t.TempDir())
+	router := skill_step.NewRouter(archive)
+	skill_step.RegisterDocumentBuiltins(router)
+	a := &App{skillArchive: archive, skillRouter: router}
+
+	msg := a.skillConfirmPrompt("builtin.scheduler")
+	if strings.Contains(msg, "已載入檔案") || strings.Contains(msg, "資料檔") {
+		t.Fatalf("scheduler prompt should not mention loaded files: %q", msg)
+	}
+}
+
+func TestSchedulerBuiltinFlowBypassesGenericSkillConfirm(t *testing.T) {
+	archive := skill_step.NewArchiveService(t.TempDir())
+	router := skill_step.NewRouter(archive)
+	skill_step.RegisterDocumentBuiltins(router)
+	a := &App{skillArchive: archive, skillRouter: router}
+
+	handled, resp := a.maybeHandleSkillFlow(
+		toolRoutingDecision{Kind: toolRoutingDecisionAction, Action: "流程", Target: "builtin.scheduler", Next: "輸出"},
+		"scheduler-test-session",
+		"trace",
+		"幫我排一個提醒我喝水的任務",
+	)
+	if !handled {
+		t.Fatal("builtin.scheduler flow should be handled by scheduler bridge")
+	}
+	if strings.Contains(resp.Text, "要用 skill") || strings.Contains(resp.Text, "已載入檔案") {
+		t.Fatalf("scheduler bridge should not show generic skill confirm, got %q", resp.Text)
+	}
+	if !resp.NeedsUser {
+		t.Fatalf("scheduler bridge should mark NeedsUser while collecting schedule slots: %#v", resp)
+	}
+}
+
+func TestSchedulerBuiltinFlowAsksMissingTime(t *testing.T) {
+	archive := skill_step.NewArchiveService(t.TempDir())
+	router := skill_step.NewRouter(archive)
+	skill_step.RegisterDocumentBuiltins(router)
+	a := &App{skillArchive: archive, skillRouter: router}
+
+	handled, resp := a.maybeHandleSkillFlow(
+		toolRoutingDecision{Kind: toolRoutingDecisionAction, Action: "流程", Target: "builtin.scheduler", Next: "輸出"},
+		"scheduler-test-session",
+		"trace",
+		"幫我規劃一個澆水的提醒",
+	)
+	if !handled {
+		t.Fatal("builtin.scheduler flow should be handled")
+	}
+	if !strings.Contains(resp.Text, "目前缺少「時間」") || !strings.Contains(resp.Text, "請幫我補齊") {
+		t.Fatalf("scheduler response should use the generic missing-slot prompt, got %q", resp.Text)
 	}
 }

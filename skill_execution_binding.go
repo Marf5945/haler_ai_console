@@ -42,6 +42,14 @@ func (a *App) findManifestForExec(skillID string) *skill_step.SkillManifest {
 	if skillID == "" {
 		return nil
 	}
+	if a != nil && a.skillRouter != nil {
+		if m, ok := a.skillRouter.ManifestBySkillID(skillID); ok {
+			return &m
+		}
+	}
+	if a == nil || a.skillArchive == nil {
+		return nil
+	}
 	manifests, err := a.skillArchive.ListArchived()
 	if err != nil {
 		return nil
@@ -185,8 +193,10 @@ func (a *App) ConfirmSkillExecution(resolveID, sessionID, choice string) (*Skill
 		skill_eval.GrantOnce(a.skillGrants, manifest) // 帶 TTL，不改 manifest
 	case "always":
 		skill_eval.PromoteToEnabled(manifest) // lifecycle → enabled_skill
-		if err := a.skillArchive.UpdateManifest(manifest); err != nil {
-			return nil, err
+		if manifest.Source.SourceType != skill_step.SourceBuiltin {
+			if err := a.skillArchive.UpdateManifest(manifest); err != nil {
+				return nil, err
+			}
 		}
 	case "cancel":
 		out.Decision = "cancelled"
@@ -413,6 +423,9 @@ func clearPendingSkillConfirm(sessionID string) {
 func (a *App) skillConfirmPrompt(target string) string {
 	var b strings.Builder
 	b.WriteString("要用 skill「" + target + "」執行這次任務嗎？回覆「要」開始，或「取消」放棄。")
+	if !a.skillUsesLoadedReferenceFiles(target) {
+		return b.String()
+	}
 	refs := a.recentReferenceFilesForRouting(6)
 	if len(refs) == 0 {
 		b.WriteString("\n（目前沒有偵測到已載入的資料檔。若這個 skill 需要表格，請先拖入或引用檔案再確認。）")
@@ -424,6 +437,21 @@ func (a *App) skillConfirmPrompt(target string) string {
 	}
 	b.WriteString("\n將使用這些已載入檔案作為輸入：" + strings.Join(names, "、") + "。")
 	return b.String()
+}
+
+func (a *App) skillUsesLoadedReferenceFiles(target string) bool {
+	if a == nil {
+		return false
+	}
+	m := a.findManifestForExec(strings.TrimSpace(target))
+	if m == nil {
+		return false
+	}
+	fs := strings.ToLower(strings.TrimSpace(m.Permissions.Filesystem))
+	if strings.Contains(fs, "read") {
+		return true
+	}
+	return len(m.Resources.Examples) > 0 || len(m.Resources.Programs) > 0 || len(m.Resources.CLIMd) > 0
 }
 
 // maybeHandlePendingSkillConfirm 在 LLM 路由前攔截「使用者正在回應上一輪 skill 權限確認」。
@@ -501,6 +529,31 @@ func (a *App) maybeHandlePendingSkillConfirm(userText, sessionID, traceID string
 func (a *App) maybeHandleSkillFlow(decision toolRoutingDecision, sessionID, traceID, userText string) (bool, skill_step.CLIResponse) {
 	if strings.TrimSpace(decision.Action) != "流程" {
 		return false, skill_step.CLIResponse{}
+	}
+	if strings.TrimSpace(decision.Target) == "builtin.scheduler" {
+		if a.eventBus != nil && !eventbus.IsTaskLoopTrace(traceID) {
+			a.eventBus.Emit(eventbus.EventSchedulerActionRequested, map[string]string{
+				"action":     "排程",
+				"target":     userText,
+				"next":       "",
+				"title":      strings.TrimSpace(decision.Title),
+				"summary":    strings.TrimSpace(decision.Summary),
+				"trace_id":   traceID,
+				"session_id": sessionID,
+				"raw":        userText,
+			})
+		}
+		debugtrace.Record("go.skillFlow.scheduler_builtin", traceID, map[string]interface{}{
+			"target": decision.Target,
+			"raw":    userText,
+		})
+		return true, skill_step.CLIResponse{
+			Text:      schedulerBridgePrompt(userText),
+			Action:    "流程",
+			Target:    decision.Target,
+			Next:      decision.Next,
+			NeedsUser: true,
+		}
 	}
 	actionChain := a.existingSkillActionChain(decision.Target)
 	if actionChain == "" {
@@ -604,6 +657,58 @@ func (a *App) maybeHandleSkillFlow(decision toolRoutingDecision, sessionID, trac
 	}
 }
 
+func schedulerBridgePrompt(userText string) string {
+	missing := schedulerBridgeMissingSlots(userText)
+	if len(missing) == 0 {
+		return "排程資訊已補齊，我會開始處理排程設定。"
+	}
+	return "目前缺少「" + strings.Join(missing, "、") + "」，請幫我補齊。"
+}
+
+func schedulerBridgeMissingSlots(userText string) []string {
+	var missing []string
+	if !schedulerBridgeHasTime(userText) {
+		missing = append(missing, "時間")
+	}
+	if !schedulerBridgeHasAction(userText) {
+		missing = append(missing, "動作")
+	}
+	return missing
+}
+
+func schedulerBridgeHasTime(text string) bool {
+	raw := strings.ToLower(strings.TrimSpace(text))
+	if raw == "" {
+		return false
+	}
+	if containsAny(raw, []string{"@hourly", "@daily", "@weekly", "@monthly", "@yearly", "hourly", "daily", "weekly"}) {
+		return true
+	}
+	if containsAny(text, []string{"每小時", "一小時", "個小時"}) {
+		return true
+	}
+	hasClock := containsAny(text, []string{"點", ":", "："})
+	if !hasClock {
+		return false
+	}
+	return containsAny(text, []string{"每天", "每日", "每週", "每周", "星期", "禮拜", "每月", "早上", "上午", "中午", "下午", "晚上"})
+}
+
+func schedulerBridgeHasAction(text string) bool {
+	cleaned := strings.TrimSpace(text)
+	replacer := strings.NewReplacer(
+		"我要", "", "我想", "", "請", "", "幫我", "", "幫忙", "",
+		"新增", "", "建立", "", "規劃", "", "排程", "", "排定", "", "安排", "",
+		"任務", "", "提醒", "", "定時", "", "一個", "", "的", "", "一下", "",
+	)
+	cleaned = replacer.Replace(cleaned)
+	for _, token := range []string{"每天", "每日", "每週", "每周", "星期", "禮拜", "每月", "早上", "上午", "中午", "下午", "晚上", "點", ":", "："} {
+		cleaned = strings.ReplaceAll(cleaned, token, " ")
+	}
+	cleaned = strings.Join(strings.Fields(cleaned), "")
+	return strings.TrimSpace(cleaned) != ""
+}
+
 // existingSkillActionChain 用既有 skill 的 manifest 標籤組出可被 skillRouter
 // 高分命中的 action-chain（動作取 action_tag[0]、目標取 target_aliases[0]），
 // 避免用分類動詞（如「流程」）導致動作維度 0 分、整體掉到 0.70 而無法自動命中。
@@ -630,6 +735,13 @@ func (a *App) existingSkillActionChain(name string) string {
 			return ""
 		}
 		return action + actionchain.Separator + target
+	}
+	// Step 5：archived 找不到 → 試 builtin（router 合併 archived ∪ builtin），
+	// 讓 builtin.scheduler 這類能力也能被流程路由執行。
+	if a.skillRouter != nil {
+		if chain, ok := a.skillRouter.ActionChainForSkillID(name); ok {
+			return chain
+		}
 	}
 	return ""
 }

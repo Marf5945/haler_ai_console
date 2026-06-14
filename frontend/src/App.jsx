@@ -8,6 +8,7 @@ import {
   ActivateTool,
   ApplyUIStyleDiff,
   BuildSkillContext,
+  BootstrapScheduledSkill,
   ConfirmAndExecuteSkillExecution,
   ClearSkillContext,
   ClearWebSearchConfig,
@@ -42,6 +43,7 @@ import {
   ListArchivedSkills,
   ListPendingPackages,
   ListScheduledJobs,
+  NormalizeSchedulerDraft,
   // #I-1002: Review Archive binding
   ListReviewArchive,
   ListTools,
@@ -212,6 +214,7 @@ import {
   ListRemoteBridgeChannels,
   RenameRemoteBridgeChannel,
   RemoveRemoteBridgeChannel,
+  UpdateScheduledJob,
   GetRemoteBridgeInboundEndpoint,
   SaveRemoteBridgeInboundSecret,
   ListRemoteBridgeInboundAdapters,
@@ -1133,6 +1136,7 @@ function App() {
     cronExpr: '@daily',
     actionPayload: '',
   });
+  const [schedulerConversation, setSchedulerConversation] = useState(null);
 
   // Right rail learning/recording mode state. Backend capture and background work can attach here.
   const [learningEnabled, setLearningEnabled] = useState(false);
@@ -2046,6 +2050,50 @@ function App() {
       }
     });
 
+    const offSchedulerRequested = EventsOn('scheduler:action_requested', (payload) => {
+      const rawText = String(payload?.raw || '').trim();
+      const fallbackText = [payload?.action, payload?.target, payload?.next].filter(Boolean).join(' ');
+      const text = [rawText, fallbackText].filter(Boolean).join(' ');
+      const intent = parseSchedulerConversationIntent(rawText || text, schedulerJobs)
+        || parseSchedulerConversationIntent(text, schedulerJobs);
+      const sourceText = rawText || text;
+      const modelTitle = String(payload?.title || '').trim();
+      const modelSummary = String(payload?.summary || '').trim();
+      const fallbackName = modelTitle || cleanSchedulerNameText(sourceText) || payload?.action || '新的排程任務';
+      const fallbackAction = parseSchedulerActionText(sourceText) || fallbackName;
+      const draft = intent?.type === 'create'
+        ? {...intent.draft, name: modelTitle || intent.draft.name, summary: modelSummary || intent.draft.summary}
+        : {
+            name: fallbackName,
+            cronExpr: hasSchedulerTimeText(text) ? parseSchedulerTimeText(text, '') : '',
+            actionText: fallbackAction,
+            summary: modelSummary,
+            actionPayload: schedulerDefaultPayload(fallbackName, fallbackAction, modelSummary),
+          };
+      const normalized = normalizeSchedulerDraft(draft);
+      const missing = schedulerMissingSlots(normalized);
+      setSchedulerConversation({mode: 'create', phase: missing.length ? 'collecting' : 'confirm', draft: normalized, missing, job: null});
+      setSchedulerDraft({
+        name: normalized.name,
+        cronExpr: normalized.cronExpr || '@daily',
+        actionPayload: schedulerDefaultPayload(normalized.name || '提醒', normalized.actionText || normalized.name, normalized.summary),
+      });
+      Promise.all([refreshSchedulerClock(), refreshSchedulerJobs()]).catch(() => {});
+      setToolResult({toolId: 'scheduler', ok: true, message: missing.length ? '排程資訊待補齊' : '排程資訊等待確認'});
+    });
+
+    // Phase D：排程到點時後端 emit 'scheduler:reminder'，這裡在 app 內顯示提醒，
+    // 讓使用者知道系統要開始做事（remote_bridge 那條由後端 NotifyJobFired 另外送）。
+    const offSchedulerReminder = EventsOn('scheduler:reminder', (payload) => {
+      const title = String(payload?.title || '').trim() || '排程任務';
+      const summary = String(payload?.summary || payload?.action || '').trim();
+      const notice = `Ai:排程提醒：「${title}」時間到，系統要開始處理${summary ? `：${summary}` : ''}。`;
+      const conversationId = activeConversationIdRef.current || appSessionId || 'main';
+      setConversationMessages(conversationId, (prev) => [...prev, notice]);
+      setToolResult({toolId: 'scheduler', ok: true, message: `排程提醒：${title}`});
+      postDebugTrace('ui.scheduler.reminder', '', {title, summary});
+    });
+
     // §29.3 Summarization 觸發事件：背景整理上下文，不顯示手動摘要 banner。
     const offSummarizationNeeded = EventsOn('summarization:needed', (payload) => {
       if (!payload || summaryInFlightRef.current) return;
@@ -2205,6 +2253,8 @@ function App() {
       offRBPrimaryChanged();
       offRBDiscordStatus();
       offRBInbound();
+      offSchedulerRequested();
+      offSchedulerReminder();
       offW3AVerified();
       offW3APollution();
       offW3AExported();
@@ -4147,6 +4197,9 @@ function App() {
     } catch (err) {
       setConversationMessages(conversationId, (prev) => [...prev, t('system.conversationSaveFail', { error: err?.message || err })]);
     }
+    if (await handleSchedulerComposerIntent(text, conversationId, traceId, clearPendingTimers)) {
+      return;
+    }
     if (shouldHandleLearningShortcutBeforeLLM(text) && isLearningReplayRequest(text)) {
       clearPendingTimers();
       postDebugTrace('ui.composer.learning_replay_plan', traceId, {user_text: text});
@@ -5378,6 +5431,15 @@ function App() {
     }
   }
 
+  async function applySchedulerJobPatch(job, patch) {
+    if (!job?.id || !patch) return null;
+    const name = patch.name || job.name;
+    const cronExpr = patch.cronExpr || job.cron_expr;
+    const actionType = patch.actionType || job.action_type || 'event';
+    const actionPayload = patch.actionPayload || job.action_payload || schedulerDefaultPayload(name);
+    return callWails(() => UpdateScheduledJob(job.id, name, cronExpr, actionType, actionPayload));
+  }
+
   async function updateSchedulerJob(id, action) {
     if (!id) return;
     setSchedulerBusy(true);
@@ -5392,6 +5454,321 @@ function App() {
     } finally {
       setSchedulerBusy(false);
     }
+  }
+
+  async function bootstrapSchedulerSkill(job) {
+    if (!job?.id) return;
+    setSchedulerBusy(true);
+    setSchedulerError('');
+    try {
+      const result = await callWails(() => BootstrapScheduledSkill(job.id));
+      await Promise.all([refreshSchedulerClock(), refreshSchedulerJobs(), refreshAvailableAdapters()]);
+      if (result?.source_sub_id) {
+        setActiveHaoraId(result.source_sub_id);
+        await callWails(() => SetActiveConversationAgent(result.source_sub_id));
+      }
+      setToolResult({
+        toolId: 'scheduler',
+        ok: true,
+        message: `已建立排程 skill：${result?.skill_id || job.name}`,
+      });
+    } catch (error) {
+      setSchedulerError(error?.message || String(error));
+    } finally {
+      setSchedulerBusy(false);
+    }
+  }
+
+  function resetSchedulerComposerState(message = '') {
+    setSchedulerConversation(null);
+    setSchedulerDraft({name: '', cronExpr: '@daily', actionPayload: ''});
+    if (message) setToolResult({toolId: 'scheduler', ok: true, message});
+  }
+
+  async function commitSchedulerConversation(sendSchedulerReply) {
+    const pending = schedulerConversation;
+    if (!pending || pending.phase !== 'confirm') return false;
+
+    const normalized = normalizeSchedulerDraft(pending.draft);
+    const missing = schedulerMissingSlots(normalized);
+    if (missing.length) {
+      setSchedulerConversation({...pending, phase: 'collecting', draft: normalized, missing});
+      sendSchedulerReply(schedulerQuestionForMissing(missing));
+      return true;
+    }
+
+    setSchedulerBusy(true);
+    try {
+      if (pending.mode === 'update' && pending.job) {
+        await applySchedulerJobPatch(pending.job, {
+          name: normalized.name,
+          cronExpr: normalized.cronExpr,
+          actionType: pending.job.action_type || 'event',
+          actionPayload: schedulerDefaultPayload(normalized.name, normalized.actionText || normalized.name, normalized.summary),
+        });
+        sendSchedulerReply(`Ai:已寫入修改：「${normalized.name}」。你可以點右側「排程」查看摘要。`);
+      } else {
+        await callWails(() => CreateScheduledJob(
+          normalized.name,
+          normalized.cronExpr,
+          'event',
+          schedulerDefaultPayload(normalized.name, normalized.actionText || normalized.name, normalized.summary),
+        ));
+        sendSchedulerReply(`Ai:已建立排程：「${normalized.name}」。你可以點右側「排程」確認是否寫入正確。`);
+      }
+      resetSchedulerComposerState('排程已寫入');
+      await Promise.all([refreshSchedulerClock(), refreshSchedulerJobs()]);
+    } catch (error) {
+      setSchedulerError(error?.message || String(error));
+      sendSchedulerReply(`Ai:排程寫入失敗：${error?.message || String(error)}`);
+    } finally {
+      setSchedulerBusy(false);
+    }
+    return true;
+  }
+
+  async function confirmComposerAction() {
+    if (schedulerConversation?.phase !== 'confirm') return;
+    const conversationId = activeConversationIdRef.current || 'main';
+    await commitSchedulerConversation((message) => {
+      setConversationMessages(conversationId, (prev) => [...prev, message]);
+      persistConversationEntry(conversationId, 'assistant', message.replace(/^Ai:/, '')).catch(() => {});
+    });
+  }
+
+  function cancelComposerAction() {
+    if (schedulerConversation?.phase !== 'confirm') return;
+    const conversationId = activeConversationIdRef.current || 'main';
+    const message = 'Ai:好，我先取消這次排程確認。';
+    setConversationMessages(conversationId, (prev) => [...prev, message]);
+    persistConversationEntry(conversationId, 'assistant', message.replace(/^Ai:/, '')).catch(() => {});
+    resetSchedulerComposerState('已取消排程確認');
+  }
+
+  async function handleSchedulerComposerIntent(text, conversationId, traceId, clearPendingTimers) {
+    const sendSchedulerReply = (message) => {
+      setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, message));
+      persistConversationEntry(conversationId, 'assistant', message.replace(/^Ai:/, ''), traceId).catch(() => {});
+    };
+    const pending = schedulerConversation;
+    // 輕量 regex 只當「這句是否與排程有關」的前置過濾，避免攔截一般聊天；
+    // 真正的意圖判斷、時間換算、名稱/動作抽取一律交給模型（見下方 model-first）。
+    const startsScheduler = parseSchedulerConversationIntent(text, schedulerJobs);
+    if (!pending && !startsScheduler) return false;
+
+    clearPendingTimers();
+    setSchedulerError('');
+
+    // 直接可判定、不需動用模型的快捷詞：取消這次設定 / 在 confirm 階段的肯定確認。
+    if (pending && isSchedulerCancellation(text)) {
+      resetSchedulerComposerState();
+      sendSchedulerReply('Ai:好，我先取消這次排程設定。');
+      return true;
+    }
+    if (pending && pending.phase === 'confirm' && isSchedulerAffirmation(text)) {
+      return commitSchedulerConversation(sendSchedulerReply);
+    }
+
+    // 取得既有排程清單，供模型判斷「要改哪一筆」。
+    let jobs = schedulerJobs;
+    try {
+      const refreshed = await refreshSchedulerJobs();
+      if (Array.isArray(refreshed)) jobs = refreshed;
+    } catch (error) {
+      postDebugTrace('ui.scheduler.jobs_refresh.error', traceId, {error: error?.message || String(error)});
+    }
+
+    // ---- 模型優先：由模型合成意圖與所有欄位（時間→cron、名稱、動作、追問）。 ----
+    let model = null;
+    try {
+      model = await synthesizeSchedulerWithModel({pending, text, jobs, traceId});
+    } catch (error) {
+      postDebugTrace('ui.scheduler.model_fallback', traceId, {error: error?.message || String(error)});
+    }
+    if (model) {
+      const handled = applySchedulerModelResult({model, pending, jobs, sendSchedulerReply});
+      if (handled !== null) return handled;
+      // handled === null：模型判定與排程無關（intent=none 且無進行中草稿）→ 交回一般路由。
+      postDebugTrace('ui.scheduler.model_intent_none', traceId, {user_text: text});
+      return false;
+    }
+
+    // ---- 後援：模型失效時退回本機 regex，並明確告知使用者已降級。 ----
+    postDebugTrace('ui.scheduler.degraded', traceId, {user_text: text});
+    setToolResult({toolId: 'scheduler', ok: false, message: SCHEDULER_DEGRADED_NOTICE_SHORT});
+    return handleSchedulerComposerIntentFallback({pending, text, jobs, sendSchedulerReply});
+  }
+
+  // synthesizeSchedulerWithModel 把目前情境（草稿/階段/既有清單）打包丟給模型，
+  // 取回完整的排程規劃結果。失敗時 throw，由呼叫端退回後援。
+  async function synthesizeSchedulerWithModel({pending, text, jobs, traceId}) {
+    const adapterId = activeAdapterIdRef.current || activeAdapterId || '';
+    const sessionId = appSessionId || activeConversationIdRef.current || 'main';
+    const base = normalizeSchedulerDraft(pending?.draft || {});
+    const input = {
+      current_draft: base,
+      phase: pending?.phase || 'start',
+      mode: pending?.mode || '',
+      target_job: pending?.job
+        ? {no: schedulerJobNo(pending.job), name: pending.job.name, cron_expr: pending.job.cron_expr}
+        : null,
+      jobs: (Array.isArray(jobs) ? jobs : []).map((job, index) => ({
+        no: schedulerJobNo(job, index),
+        name: job.name,
+        cron_expr: job.cron_expr,
+        action: formatSchedulerPayload(job.action_payload),
+      })),
+    };
+    const normalized = await callWails(() => NormalizeSchedulerDraft(
+      adapterId,
+      sessionId,
+      JSON.stringify(input),
+      text,
+      `${traceId}-scheduler-synth`,
+    ));
+    postDebugTrace('ui.scheduler.synth.after', traceId, {request: text, response: normalized || null});
+    if (!normalized) throw new Error('模型未回傳排程結果');
+    return normalized;
+  }
+
+  // applySchedulerModelResult 把模型結果套成 UI 草稿與對話狀態。
+  // 回傳 true=已處理；null=與排程無關（交回一般路由）。
+  function applySchedulerModelResult({model, pending, jobs, sendSchedulerReply}) {
+    const intent = String(model.intent || '').toLowerCase();
+    const jobList = Array.isArray(jobs) ? jobs : [];
+
+    // 沒有進行中的草稿時，先依模型意圖分流。
+    if (!pending) {
+      if (intent === 'none') return null;
+      if (intent === 'open') {
+        setSchedulerPanelOpen(true);
+        Promise.all([refreshSchedulerClock(), refreshSchedulerJobs()]).catch(() => {});
+        sendSchedulerReply('Ai:我先打開排程清單，請確認要看或修改哪一筆。');
+        return true;
+      }
+    }
+
+    // 決定模式與目標 job（沿用 pending，或依模型 target_job_no 對應既有清單）。
+    let mode = pending?.mode || (intent === 'update' ? 'update' : 'create');
+    let job = pending?.job || null;
+    if (!job && intent === 'update' && Number(model.target_job_no) > 0) {
+      job = jobList.find((item, index) => schedulerJobNo(item, index) === Number(model.target_job_no)) || null;
+      if (!job) {
+        setSchedulerPanelOpen(true);
+        Promise.all([refreshSchedulerClock(), refreshSchedulerJobs()]).catch(() => {});
+        sendSchedulerReply('Ai:我找不到你想修改的那一筆排程，先打開清單讓你確認編號。');
+        return true;
+      }
+    }
+
+    // 以 pending 草稿或既有 job 為基底，疊上模型欄位。
+    const baseDraft = pending?.draft
+      ? {...pending.draft}
+      : (job
+          ? {name: job.name || '', cronExpr: job.cron_expr || '', actionText: formatSchedulerPayload(job.action_payload), actionPayload: job.action_payload || ''}
+          : {});
+    const next = normalizeSchedulerDraft(baseDraft);
+    const title = String(model.title || '').trim();
+    const action = String(model.action_text || '').trim();
+    const summary = String(model.summary || '').trim();
+    const cronExpr = String(model.cron_expr || '').trim();
+    const timeText = String(model.time_text || '').trim();
+    if (title) {
+      next.name = title.slice(0, 32);
+      if (!action) next.actionText = title.slice(0, 80);
+    }
+    if (action) next.actionText = action.slice(0, 80);
+    if (summary) next.summary = summary.slice(0, 180);
+    if (cronExpr) {
+      next.cronExpr = cronExpr;
+    } else if (timeText && (hasSchedulerTimeText(timeText) || hasSchedulerClockText(timeText))) {
+      next.cronExpr = parseSchedulerTimeText(timeText, next.cronExpr || '');
+    }
+
+    const normalized = normalizeSchedulerDraft(next);
+    normalized.actionPayload = schedulerDefaultPayload(
+      normalized.name || '提醒',
+      normalized.actionText || normalized.name,
+      normalized.summary,
+    );
+    const missing = schedulerMissingSlots(normalized);
+    const phase = missing.length ? 'collecting' : 'confirm';
+    setSchedulerConversation({mode, phase, draft: normalized, missing, job});
+    setSchedulerDraft({
+      name: normalized.name,
+      cronExpr: normalized.cronExpr || '@daily',
+      actionPayload: schedulerDefaultPayload(normalized.name || '提醒', normalized.actionText || normalized.name, normalized.summary),
+    });
+    const question = String(model.question || '').trim();
+    sendSchedulerReply(missing.length
+      ? (question ? `Ai:${question}` : schedulerQuestionForMissing(missing))
+      : schedulerConfirmationMessage(normalized, mode, job));
+    setToolResult({toolId: 'scheduler', ok: true, message: missing.length ? '排程資訊待補齊' : '排程資訊等待確認'});
+    return true;
+  }
+
+  // handleSchedulerComposerIntentFallback 為模型失效時的本機 regex 後援，
+  // 行為等同舊版硬編碼流程，但會在回覆前明確標示「已降級為本機規則」。
+  function handleSchedulerComposerIntentFallback({pending, text, jobs, sendSchedulerReply}) {
+    let noticeShown = false;
+    const sendWithNotice = (message) => {
+      let out = message;
+      if (!noticeShown) {
+        out = out.replace(/^Ai:/, `Ai:${SCHEDULER_DEGRADED_NOTICE}\n\n`);
+        noticeShown = true;
+      }
+      sendSchedulerReply(out);
+    };
+
+    if (pending) {
+      const preferredSlot = pending.missing?.[0] || '';
+      const nextDraft = mergeSchedulerSlotsFromText(pending.draft, text, preferredSlot);
+      const missing = schedulerMissingSlots(nextDraft);
+      const phase = missing.length ? 'collecting' : 'confirm';
+      setSchedulerConversation({...pending, draft: nextDraft, missing, phase});
+      setSchedulerDraft({
+        name: nextDraft.name,
+        cronExpr: nextDraft.cronExpr || '@daily',
+        actionPayload: schedulerDefaultPayload(nextDraft.name || '提醒', nextDraft.actionText || nextDraft.name, nextDraft.summary),
+      });
+      sendWithNotice(missing.length
+        ? schedulerQuestionForMissing(missing)
+        : schedulerConfirmationMessage(nextDraft, pending.mode, pending.job));
+      return true;
+    }
+
+    const intent = parseSchedulerConversationIntent(text, Array.isArray(jobs) ? jobs : schedulerJobs);
+    if (!intent) return false;
+    if (intent.type === 'open') {
+      setSchedulerPanelOpen(true);
+      Promise.all([refreshSchedulerClock(), refreshSchedulerJobs()]).catch(() => {});
+      sendWithNotice(`Ai:${intent.message || '我先打開排程清單，請確認要修改哪一筆。'}`);
+      return true;
+    }
+
+    const mode = intent.type === 'update' ? 'update' : 'create';
+    const baseDraft = intent.type === 'update'
+      ? {
+          name: intent.patch?.name || intent.job?.name || '',
+          cronExpr: intent.patch?.cronExpr || intent.job?.cron_expr || '',
+          actionText: formatSchedulerPayload(intent.patch?.actionPayload || intent.job?.action_payload),
+          actionPayload: intent.patch?.actionPayload || intent.job?.action_payload || '',
+        }
+      : intent.draft;
+    const normalized = mergeSchedulerSlotsFromText(baseDraft, text);
+    const missing = schedulerMissingSlots(normalized);
+    const phase = missing.length ? 'collecting' : 'confirm';
+    setSchedulerConversation({mode, phase, draft: normalized, missing, job: intent.job || null});
+    setSchedulerDraft({
+      name: normalized.name,
+      cronExpr: normalized.cronExpr || '@daily',
+      actionPayload: schedulerDefaultPayload(normalized.name || '提醒', normalized.actionText || normalized.name, normalized.summary),
+    });
+    sendWithNotice(missing.length
+      ? schedulerQuestionForMissing(missing)
+      : schedulerConfirmationMessage(normalized, mode, intent.job));
+    setToolResult({toolId: 'scheduler', ok: true, message: '排程資訊等待確認（本機模式）'});
+    return true;
   }
 
   function addFavoriteTool(toolId) {
@@ -6348,7 +6725,7 @@ function App() {
       dir={_i18nDir}
       onDragOver={handleGlobalFileDragOver}
       onDrop={handleGlobalFileDrop}
-      style={{'--ui-font-scale': fontScaleValue(settingsState.panel.fontScale)}}
+      style={{'--ui-font-scale': fontScaleValue(settingsState.panel.fontScale), ...fontPresetVars(settingsState.panel.fontPreset)}}
     >
       {/* v2.4: 首次啟動引導覆蓋層 */}
       <OnboardingOverlay
@@ -6511,6 +6888,7 @@ function App() {
           onRefresh={() => Promise.all([refreshSchedulerClock(), refreshSchedulerJobs()])}
           onCreate={createSchedulerJob}
           onJobAction={updateSchedulerJob}
+          onBootstrapSkill={bootstrapSchedulerSkill}
           onClose={() => setSchedulerPanelOpen(false)}
         />
       )}
@@ -6867,6 +7245,9 @@ function App() {
               onConfirmTaskReview={confirmSkillBuild}
               onCancelTaskReview={() => cancelActiveTaskProgress('review_cancel')}
               onShowTaskReviewDetails={() => setReviewPopup((current) => current === 'risk' ? null : 'risk')}
+              composerConfirmAction={buildSchedulerComposerConfirmAction(schedulerConversation, schedulerBusy)}
+              onComposerConfirm={confirmComposerAction}
+              onComposerCancel={cancelComposerAction}
             />
           </main>
           <RightRail
@@ -8184,11 +8565,11 @@ function resolveMonitorTraceURL() {
     monitorLinkPending = Promise.resolve()
       .then(() => GetMonitorLinks?.())
       .then((link) => {
-        monitorLinkCache = link || {url: 'http://127.0.0.1:48765'};
+        monitorLinkCache = link || {};
         return monitorLinkCache.url;
       })
       .catch(() => {
-        monitorLinkCache = {url: 'http://127.0.0.1:48765'};
+        monitorLinkCache = {};
         return monitorLinkCache.url;
       })
       .finally(() => {
@@ -8273,13 +8654,50 @@ const _roleLangLabelMap = {
   '泰文': 'settings.langTh',
 };
 const _fontPresetLabelMap = {
-  '預設': 'settings.fontDefault',
-  '等寬': 'settings.fontMono',
-  '圓潤': 'settings.fontRound',
-  'Default': 'settings.fontDefault',
-  'Monospace': 'settings.fontMono',
-  'Rounded': 'settings.fontRound',
+  // 預設（沿用系統/語言字型，不覆寫）
+  '預設': 'settings.fontDefault', 'Default': 'settings.fontDefault', '標準': 'settings.fontDefault',
+  'Predefinido': 'settings.fontDefault', 'Predeterminado': 'settings.fontDefault', 'ค่าเริ่มต้น': 'settings.fontDefault',
+  // 普通（中性內建無襯線）
+  '普通': 'settings.fontNormal', 'Normal': 'settings.fontNormal', '通常': 'settings.fontNormal', 'ปกติ': 'settings.fontNormal',
+  // 手寫
+  '手寫': 'settings.fontHand', 'Handwriting': 'settings.fontHand', '手書き': 'settings.fontHand',
+  'Manuscrito': 'settings.fontHand', 'Manuscrita': 'settings.fontHand', 'ลายมือ': 'settings.fontHand',
+  // 書法 / 毛筆
+  '書法': 'settings.fontCalli', 'Calligraphy': 'settings.fontCalli', '毛筆': 'settings.fontCalli',
+  'Caligrafia': 'settings.fontCalli', 'Caligrafía': 'settings.fontCalli', 'พู่กัน': 'settings.fontCalli',
+  // 圓潤 / 普普
+  '圓潤': 'settings.fontRound', 'Rounded': 'settings.fontRound', '丸ゴシック': 'settings.fontRound',
+  'Arredondado': 'settings.fontRound', 'Redondeada': 'settings.fontRound', 'มน': 'settings.fontRound',
+  // 等寬
+  '等寬': 'settings.fontMono', 'Monospace': 'settings.fontMono', '等幅': 'settings.fontMono',
+  'Monoespaçado': 'settings.fontMono', 'Monoespaciada': 'settings.fontMono', 'ความกว้างคงที่': 'settings.fontMono',
 };
+
+// 版型 → 字型堆疊（family 名稱需與 fontFaces.js 一致）。fontDefault 不覆寫，沿用語言預設字。
+const FONT_PRESET_STACKS = {
+  'settings.fontNormal': "'Inter','Noto Sans TC','Noto Sans JP',sans-serif",
+  'settings.fontHand':   "'Caveat','Klee One','LXGW WenKai','Noto Sans TC','Noto Sans JP',cursive",
+  'settings.fontCalli':  "'Dancing Script','LXGW WenKai','Yuji Syuku','Noto Serif TC','Noto Sans JP',serif",
+  'settings.fontRound':  "'Fredoka','jf-openhuninn','Noto Sans JP','Noto Sans TC',sans-serif",
+  'settings.fontMono':   "'JetBrains Mono','Noto Sans TC','Noto Sans JP',monospace",
+};
+
+// 把已儲存的版型值（可能是任一語言的顯示字串）正規化為穩定 key。
+function fontPresetKey(value) {
+  if (!value) return 'settings.fontDefault';
+  if (_fontPresetLabelMap[value]) return _fontPresetLabelMap[value];
+  for (const k of new Set(Object.values(_fontPresetLabelMap))) {
+    if (_t(k) === value) return k;
+  }
+  return 'settings.fontDefault';
+}
+
+// 版型 → 套在根元素的 CSS 變數（覆寫字體 family）。fontDefault 回傳空物件。
+function fontPresetVars(value) {
+  const stack = FONT_PRESET_STACKS[fontPresetKey(value)];
+  if (!stack) return {};
+  return { '--font-console': stack, '--i18n-font': stack };
+}
 // Any historical/localized label (zh-TW / en / ja, current + legacy) → stable key.
 // Used to migrate previously-persisted display strings to language-independent keys.
 const _styleLabelToKey = {
@@ -10664,7 +11082,7 @@ function SettingsMenu({
           icon="Aa"
           label={t('settings.fontPreset')}
           value={fontPresetValue}
-          options={[t('settings.fontDefault'), t('settings.fontRound'), t('settings.fontMono')]}
+          options={[t('settings.fontDefault'), t('settings.fontNormal'), t('settings.fontHand'), t('settings.fontCalli'), t('settings.fontRound'), t('settings.fontMono')]}
           onSelect={(preset) => onPanelChange({fontPreset: preset})}
         />
         <SettingPopupSelect
@@ -13035,6 +13453,37 @@ function MicIcon() {
   );
 }
 
+function ComposerConfirmBubble({action, onConfirm, onCancel}) {
+  if (!action) return null;
+  return (
+    <div className="composer-confirm-bubble" role="region" aria-label={action.title || '確認操作'}>
+      <div className="composer-confirm-copy">
+        <strong>{action.title}</strong>
+        {action.lines?.length > 0 && (
+          <div className="composer-confirm-lines">
+            {action.lines.map((line, index) => (
+              <span key={`${line}-${index}`}>{line}</span>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="composer-confirm-actions">
+        {action.summary && (
+          <button type="button" className="composer-confirm-summary" onClick={() => window.alert(action.summary)}>
+            摘要
+          </button>
+        )}
+        <button type="button" className="composer-confirm-cancel" onClick={onCancel}>
+          {action.cancelLabel || '取消'}
+        </button>
+        <button type="button" className="composer-confirm-primary" onClick={onConfirm} disabled={action.busy}>
+          {action.primaryLabel || '確定'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ConversationPanel({
   messages, personaName, draft, onDraftChange, onSend, onDelete, onSummarizeSearch,
   onInjectText, activeConversationId,
@@ -13050,6 +13499,7 @@ function ConversationPanel({
   taskActive = false, onCancelTask,
   pendingTaskReview = null, taskReviewDetailsOpen = false,
   onConfirmTaskReview, onCancelTaskReview, onShowTaskReviewDetails,
+  composerConfirmAction = null, onComposerConfirm, onComposerCancel,
 }) {
   const t = useI18n(s => s.t);
   const [activeMessage, setActiveMessage] = useState(null);
@@ -13236,6 +13686,12 @@ function ConversationPanel({
           />
         </div>
       )}
+
+      <ComposerConfirmBubble
+        action={composerConfirmAction}
+        onConfirm={onComposerConfirm}
+        onCancel={onComposerCancel}
+      />
 
       {/* ── 原有 Composer（聊天輸入區）── */}
       <form
@@ -14101,7 +14557,410 @@ function SafariNoticeModal({notice, onDismiss}) {
   );
 }
 
+// 模型失效退回本機 regex 時，給使用者的明確提示，避免誤以為模型變笨。
+const SCHEDULER_DEGRADED_NOTICE = '（提示：模型暫時無法使用，已改用本機規則解析排程，結果可能較簡略；模型恢復後會自動回到智慧判斷。）';
+const SCHEDULER_DEGRADED_NOTICE_SHORT = '模型暫時無法使用，已改用本機規則';
+
+const schedulerWeekdayMap = [
+  ['日', 0], ['天', 0], ['一', 1], ['二', 2], ['三', 3], ['四', 4], ['五', 5], ['六', 6],
+];
+const schedulerSlotLabels = {name: '標題', time: '時間'};
+const schedulerChineseNumberMap = {
+  零: 0,
+  〇: 0,
+  一: 1,
+  二: 2,
+  兩: 2,
+  三: 3,
+  四: 4,
+  五: 5,
+  六: 6,
+  七: 7,
+  八: 8,
+  九: 9,
+};
+
+function isSchedulerAffirmation(text) {
+  return /^(可以|可以了|好|好的|確認|確定|沒問題|ok|okay|yes|建立|寫入|送出|對|對的)$/i.test(String(text || '').trim());
+}
+
+function isSchedulerCancellation(text) {
+  return /^(取消|不要了|先不用|算了|停止)$/i.test(String(text || '').trim());
+}
+
+function schedulerDefaultPayload(title, actionText = '', summary = '') {
+  const cleanTitle = title || actionText || '提醒';
+  const cleanAction = actionText || cleanTitle;
+  const cleanSummary = summary || `在排程時間執行：${cleanAction}`;
+  return JSON.stringify({
+    event_name: 'scheduler:reminder',
+    data: {
+      title: cleanTitle,
+      action: cleanAction,
+      summary: cleanSummary,
+    },
+  });
+}
+
+function parseSchedulerChineseNumber(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  if (/^\d+$/.test(raw)) return Number(raw);
+  if (Object.prototype.hasOwnProperty.call(schedulerChineseNumberMap, raw)) return schedulerChineseNumberMap[raw];
+  if (raw === '十') return 10;
+  const tenIndex = raw.indexOf('十');
+  if (tenIndex < 0) return null;
+  const left = raw.slice(0, tenIndex);
+  const right = raw.slice(tenIndex + 1);
+  const tens = left ? schedulerChineseNumberMap[left] : 1;
+  const ones = right ? schedulerChineseNumberMap[right] : 0;
+  if (tens == null || ones == null) return null;
+  return tens * 10 + ones;
+}
+
+function normalizeSchedulerTimeNumerals(text) {
+  return String(text || '').replace(
+    /([零〇一二兩三四五六七八九十]{1,3})(?=\s*(?:點|:|：|分|日|號))/g,
+    (match) => {
+      const parsed = parseSchedulerChineseNumber(match);
+      return parsed == null ? match : String(parsed);
+    },
+  );
+}
+
+function hasSchedulerClockText(text) {
+  return /(?:上午|早上|中午|下午|晚上)?\s*\d{1,2}(?:[:：]\d{2}|點(?:半|\d{1,2}分?)?)/.test(normalizeSchedulerTimeNumerals(text));
+}
+
+function hasSchedulerTimeText(text) {
+  const raw = normalizeSchedulerTimeNumerals(text);
+  const hasClock = hasSchedulerClockText(raw);
+  const hasWeekly = /(?:每\s*)?(?:週|周|星期|禮拜)[日天一二三四五六]/.test(raw);
+  const hasMonthly = /每\s*月\s*\d{1,2}\s*(?:日|號)?/.test(raw);
+  return /@(?:hourly|daily|weekly|monthly|yearly)/i.test(raw)
+    || /\d{1,2}\s+\d{1,2}\s+\*|\*\s+\*\s+\*/.test(raw)
+    || /每\s*(小時|一小時|個小時)|hourly/i.test(raw)
+    || ((/每天|每日|每\s*(天|日)/.test(raw) || hasWeekly || hasMonthly) && hasClock);
+}
+
+function stripSchedulerTimeText(text) {
+  return normalizeSchedulerTimeNumerals(text)
+    .replace(/@(?:hourly|daily|weekly|monthly|yearly)/ig, ' ')
+    .replace(/(?:上午|早上|中午|下午|晚上)?\s*\d{1,2}(?:[:：]\d{2}|點(?:半|\d{1,2}分?)?)?/g, ' ')
+    .replace(/每\s*(小時|一小時|個小時)|每天|每日|每週|每周|每月|星期[日天一二三四五六]|禮拜[日天一二三四五六]|週[日天一二三四五六]|周[日天一二三四五六]/g, ' ')
+    .replace(/每\s*月\s*\d{1,2}\s*(?:日|號)?/g, ' ');
+}
+
+function extractSchedulerDeliveryText(text) {
+  const raw = String(text || '').trim();
+  const match = raw.match(/(?:幫我|請|再|並|然後)?\s*(?:做成|整理成|產出|生成|製作成)\s*(?:一個|一份|一張|一套)?\s*([^，,。；;\n]+)/);
+  if (!match?.[1]) return '';
+  return `整理成${match[1].trim()}`;
+}
+
+function removeSchedulerDeliveryClauses(text) {
+  return String(text || '')
+    .replace(/(?:，|,|。|；|;)?\s*(?:幫我|請|再|並|然後)?\s*(?:做成|整理成|產出|生成|製作成)\s*(?:一個|一份|一張|一套)?\s*[^，,。；;\n]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseSchedulerTimeText(text, fallback = '') {
+  const raw = normalizeSchedulerTimeNumerals(text);
+  const shortcut = raw.match(/@(hourly|daily|weekly|monthly|yearly)/i);
+  if (shortcut) return `@${shortcut[1].toLowerCase()}`;
+  const cron = raw.match(/(?:^|\s)(\S+\s+\S+\s+\S+\s+\S+\s+\S+)(?:\s|$)/);
+  if (cron && /^[\d*,\-\/]+\s+[\d*,\-\/]+\s+[\d*,\-\/]+\s+[\d*,\-\/]+\s+[\d*,\-\/]+$/.test(cron[1])) return cron[1];
+  const hasClock = hasSchedulerClockText(raw);
+  if (!hasSchedulerTimeText(raw) && !hasClock) return fallback;
+  const timeMatch = raw.match(/(?:上午|早上|中午|下午|晚上)?\s*(\d{1,2})(?:[:：](\d{2})|點(?:(半)|(\d{1,2})分?)?)/);
+  let hour = 9;
+  let minute = 0;
+  if (timeMatch) {
+    hour = Math.min(23, Math.max(0, Number(timeMatch[1])));
+    minute = timeMatch[2]
+      ? Math.min(59, Math.max(0, Number(timeMatch[2])))
+      : (timeMatch[3] ? 30 : (timeMatch[4] ? Math.min(59, Math.max(0, Number(timeMatch[4]))) : 0));
+    if ((raw.includes('下午') || raw.includes('晚上')) && hour < 12) hour += 12;
+    if (raw.includes('中午') && hour < 11) hour += 12;
+  }
+  if (/每\s*(小時|一小時|個小時)|hourly/i.test(raw)) return '@hourly';
+  const weekdayToken = schedulerWeekdayMap.find(([label]) => new RegExp(`(?:每\\s*)?(?:週|周|星期|禮拜)${label}`).test(raw));
+  if (weekdayToken) return `${minute} ${hour} * * ${weekdayToken[1]}`;
+  const monthMatch = raw.match(/每\s*月\s*(\d{1,2})\s*(?:日|號)?/);
+  if (monthMatch) return `${minute} ${hour} ${Math.min(31, Math.max(1, Number(monthMatch[1])))} * *`;
+  if (/每天|每日|daily/i.test(raw)) return `${minute} ${hour} * * *`;
+  if (hasClock) return `${minute} ${hour} * * *`;
+  return fallback;
+}
+
+function cleanSchedulerNameText(text) {
+  const raw = removeSchedulerDeliveryClauses(stripSchedulerTimeText(text));
+  const cleaned = String(raw || '')
+    .replace(/我想要|想要|我要|我想|請|幫我|幫忙|新增|建立|規劃|排程|排定|安排|任務|提醒/g, ' ')
+    .replace(/一個|一項|一筆|一下/g, ' ')
+    .replace(/時間(改成|改為|為|是).*/g, ' ')
+    .replace(/動作(改成|改為|為|是).*/g, ' ')
+    .replace(/的$/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.slice(0, 32);
+}
+
+function parseSchedulerActionText(text) {
+  const raw = removeSchedulerDeliveryClauses(String(text || '').trim());
+  const channelMatch = raw.match(/(?:要)?(?:用|以)\s*(.+?)\s*(?:提醒我|通知我|叫我)$/);
+  if (channelMatch?.[1]) return `${channelMatch[1].trim()}提醒`;
+  const remindMeSuffix = raw.match(/(.+?)\s*(?:提醒我|通知我|叫我)$/);
+  if (remindMeSuffix?.[1]) return remindMeSuffix[1].trim();
+  const notifyMatch = raw.match(/(?:提醒我|叫我|通知我)\s*(.+)$/);
+  if (notifyMatch?.[1]) return notifyMatch[1].trim();
+  const runMatch = raw.match(/(?:執行|做|跑)\s*(.+)$/);
+  if (runMatch?.[1]) return runMatch[1].trim();
+  const actionMatch = raw.match(/動作(?:改成|改為|為|是|:|：)\s*(.+)$/);
+  if (actionMatch?.[1]) return actionMatch[1].trim();
+  const quoted = raw.match(/[「『"]([^」』"]+)[」』"]/);
+  if (quoted?.[1]) return quoted[1].trim();
+  return cleanSchedulerNameText(raw);
+}
+
+function formatSchedulerSummary(draft) {
+  const delivery = draft?.deliveryText || extractSchedulerDeliveryText(draft?.sourceText || '');
+  const task = String(draft?.actionText || draft?.name || '提醒').trim();
+  const output = delivery ? `，${delivery}` : '';
+  return `在設定時間執行「${task}」${output}。`;
+}
+
+function normalizeSchedulerDraft(draft) {
+  const actionText = String(draft.actionText || '').trim();
+  const name = draft.name || actionText;
+  const summary = String(draft.summary || '').trim();
+  const finalSummary = summary || formatSchedulerSummary({...draft, name, actionText});
+  return {
+    name: String(name || '').trim(),
+    cronExpr: String(draft.cronExpr || '').trim(),
+    actionText,
+    summary: finalSummary,
+    deliveryText: String(draft.deliveryText || '').trim(),
+    sourceText: String(draft.sourceText || '').trim(),
+    actionPayload: draft.actionPayload || (name || actionText ? schedulerDefaultPayload(name || '提醒', actionText || name, finalSummary) : ''),
+  };
+}
+
+function schedulerMissingSlots(draft) {
+  const normalized = normalizeSchedulerDraft(draft || {});
+  return ['name', 'time'].filter((slot) => {
+    if (slot === 'name') return !normalized.name;
+    if (slot === 'time') return !normalized.cronExpr;
+    return false;
+  });
+}
+
+function schedulerQuestionForMissing(missing) {
+  const labels = missing.map((slot) => schedulerSlotLabels[slot]).filter(Boolean);
+  return `Ai:目前缺少「${labels.join('、')}」，請幫我補齊。`;
+}
+
+function schedulerConfirmationMessage(draft, mode = 'create', job = null) {
+  const normalized = normalizeSchedulerDraft(draft);
+  const title = mode === 'update' ? `準備修改排程「${job?.name || normalized.name}」` : '準備寫入排程';
+  const displayTime = formatSchedulerCronNextTime(normalized.cronExpr);
+  return [
+    `Ai:${title}，請確認：`,
+    `標題：${normalized.name}`,
+    `時間：${displayTime}`,
+    `摘要：${normalized.summary}`,
+    '如果正確，按下方「確定」或回覆「可以」我就寫入；要改的話直接說「改時間為…」或「改標題為…」。',
+  ].join('\n');
+}
+
+function buildSchedulerComposerConfirmAction(conversation, busy = false) {
+  if (!conversation || conversation.phase !== 'confirm') return null;
+  const normalized = normalizeSchedulerDraft(conversation.draft);
+  return {
+    type: 'scheduler',
+    title: conversation.mode === 'update' ? '確認修改排程' : '確認寫入排程',
+    primaryLabel: busy ? '寫入中' : '確定',
+    cancelLabel: '取消',
+    busy,
+    lines: [
+      `標題：${normalized.name}`,
+      `時間：${formatSchedulerCronNextTime(normalized.cronExpr)}`,
+      `摘要：${normalized.summary}`,
+    ],
+    summary: normalized.summary,
+  };
+}
+
+function mergeSchedulerSlotsFromText(currentDraft, text, preferredSlot = '') {
+  const raw = String(text || '').trim();
+  const next = {...(currentDraft || {})};
+  const actionText = parseSchedulerActionText(raw);
+  const cleanedName = cleanSchedulerNameText(raw);
+  const deliveryText = extractSchedulerDeliveryText(raw);
+  const explicitAction = /提醒|提醒我|叫我|通知我|動作|執行|做|跑/.test(raw);
+
+  if (preferredSlot === 'name' && raw) next.name = raw.slice(0, 32);
+  if (preferredSlot === 'action' && raw) next.actionText = raw.slice(0, 80);
+  if (preferredSlot === 'time' && (hasSchedulerTimeText(raw) || hasSchedulerClockText(raw))) next.cronExpr = parseSchedulerTimeText(raw, next.cronExpr || '');
+
+  if (hasSchedulerTimeText(raw)) next.cronExpr = parseSchedulerTimeText(raw, next.cronExpr || '');
+  if (/名稱|標題/.test(raw) && cleanedName) next.name = cleanedName;
+  if (explicitAction && actionText) next.actionText = actionText.slice(0, 80);
+  if (!next.name && (cleanedName || actionText)) next.name = (actionText || cleanedName).slice(0, 32);
+  if (!next.actionText && (cleanedName || actionText)) next.actionText = (actionText || cleanedName).slice(0, 80);
+  if (deliveryText) next.deliveryText = deliveryText;
+  if (raw) next.sourceText = [next.sourceText, raw].filter(Boolean).join('\n').slice(-500);
+
+  const normalized = normalizeSchedulerDraft(next);
+  normalized.actionPayload = normalized.actionText
+    ? schedulerDefaultPayload(normalized.name || '提醒', normalized.actionText, normalized.summary)
+    : '';
+  return normalized;
+}
+
+function findSchedulerJobFromText(text, jobs = []) {
+  const raw = String(text || '');
+  const indexWords = [
+    ['第一', 0], ['第1', 0], ['1', 0],
+    ['第二', 1], ['第2', 1], ['2', 1],
+    ['第三', 2], ['第3', 2], ['3', 2],
+    ['第四', 3], ['第4', 3], ['4', 3],
+    ['第五', 4], ['第5', 4], ['5', 4],
+  ];
+  const indexed = indexWords.find(([word]) => raw.includes(`${word}個任務`) || raw.includes(`${word}個排程`) || raw.includes(`${word}任務`) || raw.includes(`${word}排程`));
+  if (indexed) {
+    const targetNo = indexed[1] + 1;
+    return jobs.find((job, index) => schedulerJobNo(job, index) === targetNo) || null;
+  }
+  const hashNo = raw.match(/#\s*(\d+)|編號\s*(\d+)/);
+  if (hashNo) {
+    const targetNo = Number(hashNo[1] || hashNo[2]);
+    return jobs.find((job, index) => schedulerJobNo(job, index) === targetNo) || null;
+  }
+  return jobs.find((job) => job?.name && raw.includes(job.name)) || null;
+}
+
+function parseSchedulerConversationIntent(text, jobs = []) {
+  const raw = String(text || '').trim();
+  if (!/(排程|排定|定時|提醒|規劃|每小時|每天|每日|每週|每周|禮拜|星期)/.test(raw)) return null;
+  const isUpdate = /(修改|更改|改成|改為|變更|調整)/.test(raw);
+  if (isUpdate) {
+    const job = findSchedulerJobFromText(raw, jobs);
+    if (!job) return {type: 'open', message: '我找不到你想修改的排程，先打開清單讓你確認編號。'};
+    const nextName = /名稱/.test(raw) ? (cleanSchedulerNameText(raw) || job.name) : job.name;
+    const nextCron = hasSchedulerTimeText(raw)
+      ? parseSchedulerTimeText(raw, job.cron_expr)
+      : job.cron_expr;
+    const nextActionText = /動作/.test(raw) ? parseSchedulerActionText(raw) : '';
+    const nextPayload = nextActionText ? schedulerDefaultPayload(nextName, nextActionText) : job.action_payload;
+    return {
+      type: 'update',
+      job,
+      patch: {
+        name: nextName,
+        cronExpr: nextCron,
+        actionType: job.action_type || 'event',
+        actionPayload: nextPayload,
+      },
+    };
+  }
+  const draft = mergeSchedulerSlotsFromText({}, raw);
+  return {
+    type: 'create',
+    draft,
+  };
+}
+
 function formatSchedulerTime(value) {
+  if (!value) return '尚未排定';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return formatSchedulerDateKey(date);
+}
+
+function formatSchedulerDateKey(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value || '');
+  const pad = (number) => String(number).padStart(2, '0');
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+  ].join('-');
+}
+
+function schedulerCronPartNumber(part) {
+  const raw = String(part || '').trim();
+  return /^\d{1,2}$/.test(raw) ? Number(raw) : null;
+}
+
+function schedulerCronPartMatches(part, value) {
+  const raw = String(part || '').trim();
+  if (raw === '*' || raw === '') return true;
+  const number = schedulerCronPartNumber(raw);
+  return number == null ? false : number === value;
+}
+
+function nextSchedulerFireDate(cronExpr, baseDate = new Date()) {
+  const raw = String(cronExpr || '').trim();
+  if (!raw) return null;
+  const base = new Date(baseDate);
+  if (Number.isNaN(base.getTime())) return null;
+  if (/^@hourly$/i.test(raw)) {
+    const next = new Date(base);
+    next.setMinutes(0, 0, 0);
+    next.setHours(next.getHours() + 1);
+    return next;
+  }
+  if (/^@daily$/i.test(raw)) return nextSchedulerFireDate('0 9 * * *', base);
+  if (/^@weekly$/i.test(raw)) return nextSchedulerFireDate('0 9 * * 1', base);
+  if (/^@monthly$/i.test(raw)) return nextSchedulerFireDate('0 9 1 * *', base);
+  const parts = raw.split(/\s+/);
+  if (parts.length !== 5) return null;
+  const minute = schedulerCronPartNumber(parts[0]);
+  const hour = schedulerCronPartNumber(parts[1]);
+  if (minute == null || hour == null) return null;
+  const start = new Date(base);
+  start.setSeconds(0, 0);
+  for (let offset = 0; offset <= 370; offset += 1) {
+    const candidate = new Date(start);
+    candidate.setDate(start.getDate() + offset);
+    candidate.setHours(hour, minute, 0, 0);
+    if (candidate <= start) continue;
+    const dayOfMonth = candidate.getDate();
+    const month = candidate.getMonth() + 1;
+    const weekday = candidate.getDay();
+    if (!schedulerCronPartMatches(parts[2], dayOfMonth)) continue;
+    if (!schedulerCronPartMatches(parts[3], month)) continue;
+    if (!schedulerCronPartMatches(parts[4], weekday)) continue;
+    return candidate;
+  }
+  return null;
+}
+
+function formatSchedulerCronNextTime(cronExpr, fallback = '') {
+  const next = nextSchedulerFireDate(cronExpr);
+  return next ? formatSchedulerDateKey(next) : (fallback || cronExpr || '尚未排定');
+}
+
+function formatSchedulerJobNextTime(job) {
+  const nextFire = job?.next_fire || job?.nextFire || '';
+  if (nextFire) return formatSchedulerTime(nextFire);
+  return formatSchedulerCronNextTime(job?.cron_expr || job?.cronExpr || '');
+}
+
+// 排程清單／摘要只顯示「下次會啟動的時間」：停用或無 next_fire 一律留空，
+// 讓使用者一眼看出沒有排程；每日/每週/每月等 cron 規則不顯示給使用者。
+function schedulerActiveNextLabel(job) {
+  if (!job || job.enabled === false) return '';
+  const nextFire = job.next_fire || job.nextFire || '';
+  return nextFire ? formatSchedulerTime(nextFire) : '';
+}
+
+function formatSchedulerTimeLong(value) {
   if (!value) return '尚未排定';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -14114,6 +14973,35 @@ function formatSchedulerTime(value) {
   });
 }
 
+function formatSchedulerPayload(payload, fallback = '提醒') {
+  const parsed = parseSchedulerPayload(payload);
+  return parsed.action || parsed.title || parsed.event || payload || fallback;
+}
+
+function formatSchedulerPayloadSummary(payload, fallback = '尚無摘要') {
+  const parsed = parseSchedulerPayload(payload);
+  return parsed.summary || parsed.action || parsed.title || payload || fallback;
+}
+
+function parseSchedulerPayload(payload) {
+  try {
+    const parsed = JSON.parse(payload || '{}');
+    return {
+      title: parsed?.data?.title || '',
+      action: parsed?.data?.action || '',
+      summary: parsed?.data?.summary || '',
+      event: parsed?.event_name || '',
+    };
+  } catch {
+    return {title: '', action: String(payload || ''), summary: '', event: ''};
+  }
+}
+
+function schedulerJobNo(job, fallbackIndex = 0) {
+  const no = Number(job?.schedule_no ?? job?.scheduleNo ?? 0);
+  return no > 0 ? no : fallbackIndex + 1;
+}
+
 function SchedulerPanel({
   clock,
   jobs,
@@ -14124,6 +15012,7 @@ function SchedulerPanel({
   onRefresh,
   onCreate,
   onJobAction,
+  onBootstrapSkill,
   onClose,
 }) {
   const cronPresets = [
@@ -14131,6 +15020,9 @@ function SchedulerPanel({
     {label: '每日 09:00', value: '0 9 * * *'},
     {label: '每週一 09:00', value: '0 9 * * 1'},
   ];
+  const hasDraft = Boolean(draft.name || draft.actionPayload);
+  const [summaryJob, setSummaryJob] = useState(null);
+  const summaryText = summaryJob ? formatSchedulerPayloadSummary(summaryJob.action_payload, summaryJob.name || '尚無摘要') : '';
   const updateDraft = (patch) => onDraftChange((current) => ({...current, ...patch}));
 
   return createPortal(
@@ -14156,72 +15048,130 @@ function SchedulerPanel({
           <button type="button" onClick={onRefresh} disabled={busy}>同步</button>
         </div>
 
-        <div className="scheduler-create">
-          <label>
-            <span>名稱</span>
-            <input
-              type="text"
-              value={draft.name}
-              onChange={(event) => updateDraft({name: event.target.value})}
-              placeholder="例：每日資料備份"
-            />
-          </label>
-          <label>
-            <span>Cron</span>
-            <input
-              type="text"
-              value={draft.cronExpr}
-              onChange={(event) => updateDraft({cronExpr: event.target.value})}
-              placeholder="0 9 * * *"
-            />
-          </label>
-          <label className="scheduler-payload-field">
-            <span>Payload JSON</span>
-            <textarea
-              rows={3}
-              value={draft.actionPayload}
-              onChange={(event) => updateDraft({actionPayload: event.target.value})}
-              placeholder='{"event_name":"scheduler:reminder","data":{"title":"提醒"}}'
-            />
-          </label>
-          <div className="scheduler-preset-row">
-            {cronPresets.map((preset) => (
-              <button type="button" key={preset.value} onClick={() => updateDraft({cronExpr: preset.value})}>
-                {preset.label}
+        {hasDraft && (
+          <div className="scheduler-draft-strip">
+            <div className="scheduler-draft-fields">
+              <label>
+                <span>草稿名稱</span>
+                <input
+                  type="text"
+                  value={draft.name}
+                  onChange={(event) => updateDraft({name: event.target.value})}
+                  placeholder="例：每日資料備份"
+                />
+              </label>
+              <label>
+                <span>規則</span>
+                <input
+                  type="text"
+                  value={draft.cronExpr}
+                  onChange={(event) => updateDraft({cronExpr: event.target.value})}
+                  placeholder="0 9 * * *"
+                />
+              </label>
+              <label>
+                <span>摘要</span>
+                <textarea
+                  value={formatSchedulerPayloadSummary(draft.actionPayload, '')}
+                  onChange={(event) => updateDraft({actionPayload: schedulerDefaultPayload(draft.name || '提醒', draft.name || '提醒', event.target.value)})}
+                  placeholder="這個排程會做什麼"
+                  rows={2}
+                />
+              </label>
+            </div>
+            <div className="scheduler-preset-row">
+              {cronPresets.map((preset) => (
+                <button type="button" key={preset.value} onClick={() => updateDraft({cronExpr: preset.value})}>
+                  {preset.label}
+                </button>
+              ))}
+              <button className="scheduler-create-btn" type="button" onClick={onCreate} disabled={busy}>
+                {busy ? '處理中' : '建立排程'}
               </button>
-            ))}
+            </div>
           </div>
-          <button className="scheduler-create-btn" type="button" onClick={onCreate} disabled={busy}>
-            {busy ? '處理中' : '建立排程'}
-          </button>
-        </div>
+        )}
 
         {error && <p className="scheduler-error">{error}</p>}
 
-        <div className="scheduler-job-list">
-          {jobs.length === 0 ? (
-            <div className="scheduler-empty">尚無排程</div>
-          ) : jobs.map((job) => (
-            <article className="scheduler-job" key={job.id}>
-              <div>
-                <strong>{job.name}</strong>
-                <span>{job.cron_expr}</span>
-              </div>
-              <div>
-                <small>下次 {formatSchedulerTime(job.next_fire)}</small>
+        <div className="scheduler-table">
+          <div className="scheduler-table-scroll">
+            <div className="scheduler-table-head">
+              <span>#</span>
+              <span>標題</span>
+              <span>時間</span>
+              <span>狀態</span>
+              <span></span>
+            </div>
+            {jobs.length === 0 ? (
+              <div className="scheduler-empty">尚無排程</div>
+            ) : jobs.map((job, index) => (
+              <article className="scheduler-job" key={job.id}>
+                <span className="scheduler-job-index">{schedulerJobNo(job, index)}</span>
+                <div className="scheduler-job-name">
+                  <strong>{job.name}</strong>
+                </div>
+                <span>{schedulerActiveNextLabel(job)}</span>
                 <small>{job.enabled ? '啟用中' : '已暫停'}</small>
-              </div>
-              <div className="scheduler-job-actions">
-                {job.enabled ? (
-                  <button type="button" disabled={busy} onClick={() => onJobAction(job.id, 'pause')}>暫停</button>
-                ) : (
-                  <button type="button" disabled={busy} onClick={() => onJobAction(job.id, 'resume')}>恢復</button>
-                )}
-                <button type="button" disabled={busy} onClick={() => onJobAction(job.id, 'delete')}>刪除</button>
-              </div>
-            </article>
-          ))}
+                <div className="scheduler-job-actions">
+                  <button type="button" disabled={busy} onClick={() => setSummaryJob(job)}>摘要</button>
+                  {job.enabled ? (
+                    <button type="button" disabled={busy} onClick={() => onJobAction(job.id, 'pause')}>暫停</button>
+                  ) : (
+                    <button type="button" disabled={busy} onClick={() => onJobAction(job.id, 'resume')}>恢復</button>
+                  )}
+                  <button type="button" disabled={busy} onClick={() => onJobAction(job.id, 'delete')}>刪除</button>
+                </div>
+              </article>
+            ))}
+          </div>
         </div>
+
+        {summaryJob && (
+          <div className="scheduler-summary-modal" role="dialog" aria-label="排程摘要">
+            <section className="scheduler-summary-card">
+              <header>
+                <div>
+                  <span>摘要</span>
+                  <h4>{summaryJob.name || '未命名排程'}</h4>
+                </div>
+                <button type="button" onClick={() => setSummaryJob(null)} aria-label="關閉摘要">×</button>
+	              </header>
+	              <p>{summaryText}</p>
+	              <dl>
+	                <div>
+	                  <dt>時間</dt>
+	                  <dd>{schedulerActiveNextLabel(summaryJob)}</dd>
+	                </div>
+	                <div>
+	                  <dt>狀態</dt>
+	                  <dd>{summaryJob.enabled ? '啟用中' : '已暫停'}</dd>
+	                </div>
+	                <div>
+	                  <dt>Skill</dt>
+	                  <dd>{summaryJob.skill_id || '尚未建立'}</dd>
+	                </div>
+	                <div>
+	                  <dt>Sub</dt>
+	                  <dd>{summaryJob.source_sub_id || ''}</dd>
+	                </div>
+	              </dl>
+	              {!summaryJob.skill_id && (
+	                <button
+	                  className="scheduler-create-btn"
+	                  type="button"
+	                  disabled={busy}
+	                  onClick={async () => {
+	                    await onBootstrapSkill?.(summaryJob);
+	                    setSummaryJob(null);
+	                  }}
+	                >
+	                  {busy ? '處理中' : '建立自動 skill'}
+	                </button>
+	              )}
+	            </section>
+	          </div>
+	        )}
       </section>
     </div>,
     document.body,

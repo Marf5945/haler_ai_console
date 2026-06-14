@@ -209,3 +209,192 @@ func (r *Router) Resolve(at ActionTarget, sessionID string) (*ResolveResult, err
 
 	return result, nil
 }
+
+// ── 收尾版 Step 4：routing 能力初篩薄包裝（重用既有 Scorer，不引入 embedding）──
+
+// SkillBrief 是注入 routing judge prompt 用的精簡 skill 介紹。
+type SkillBrief struct {
+	SkillID     string
+	DisplayName string
+	Trigger     string // 由 DomainTag / TargetAliases 組出的簡短觸發語
+}
+
+// RankByQuery 把每個關鍵詞同時當 action/target 維度去比對所有 manifest，
+// 取每個 skill 的最高分，回傳 score>0 的候選（依分數遞減）。
+// 設計為 recall 導向：它只負責「縮小 catalog」，最終路由仍由 judge 決定。
+func (r *Router) RankByQuery(terms []string) []Candidate {
+	if r == nil {
+		return nil
+	}
+	merged := r.mergedManifests()
+	var out []Candidate
+	for _, m := range merged {
+		best := 0.0
+		for _, t := range terms {
+			t = strings.TrimSpace(t)
+			if t == "" {
+				continue
+			}
+			if s := r.scorer.Score(ActionTarget{Action: t, Target: t, Raw: t}, m); s > best {
+				best = s
+			}
+		}
+		if best <= 0 {
+			continue
+		}
+		risk := "low"
+		if len(m.Tags.RiskTag) > 0 {
+			risk = m.Tags.RiskTag[0]
+		}
+		out = append(out, Candidate{SkillID: m.SkillID, Score: best, Risk: risk, Reason: fmt.Sprintf("prefilter score=%.2f", best)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Score > out[j].Score })
+	return out
+}
+
+// Briefs 依 skillID 清單回傳精簡介紹（保序、去重、略過不存在者）。
+func (r *Router) Briefs(skillIDs []string) []SkillBrief {
+	if r == nil {
+		return nil
+	}
+	merged := r.mergedManifests()
+	seen := make(map[string]bool, len(skillIDs))
+	var out []SkillBrief
+	for _, id := range skillIDs {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		m, ok := merged[id]
+		if !ok {
+			continue
+		}
+		seen[id] = true
+		out = append(out, SkillBrief{
+			SkillID:     m.SkillID,
+			DisplayName: m.DisplayName,
+			Trigger:     briefTrigger(m),
+		})
+	}
+	return out
+}
+
+// ArchivedAndBuiltinSkillIDs 回傳目錄全集（archived ∪ builtin）的 SkillID 集合，
+// 供 Step 5 的 SkillID 白名單驗證使用。
+func (r *Router) ArchivedAndBuiltinSkillIDs() map[string]struct{} {
+	out := map[string]struct{}{}
+	if r == nil {
+		return out
+	}
+	for id := range r.mergedManifests() {
+		out[id] = struct{}{}
+	}
+	return out
+}
+
+// SkillExecutable 回傳某 SkillID 是否存在且 lifecycle 可執行（Step 5 白名單用）。
+func (r *Router) SkillExecutable(skillID string) bool {
+	if r == nil {
+		return false
+	}
+	m, ok := r.mergedManifests()[strings.TrimSpace(skillID)]
+	if !ok {
+		return false
+	}
+	// lifecycle 為 nil 時由 EnsureLifecycle 在載入階段補預設；保守視為可用。
+	if m.Lifecycle == nil {
+		return true
+	}
+	return m.Lifecycle.RouteAsCandidate
+}
+
+// ManifestBySkillID returns a copy of an archived or builtin manifest by SkillID.
+// Builtins are registered in-memory and are not present in ArchiveService.ListArchived(),
+// so execution/confirmation paths must use this merged view when available.
+func (r *Router) ManifestBySkillID(skillID string) (SkillManifest, bool) {
+	if r == nil {
+		return SkillManifest{}, false
+	}
+	m, ok := r.mergedManifests()[strings.TrimSpace(skillID)]
+	return m, ok
+}
+
+// mergedManifests 合併 archived + builtin（builtin 同 ID 覆蓋），與 Resolve 一致。
+func (r *Router) mergedManifests() map[string]SkillManifest {
+	manifests, err := r.archiveService.ListArchived()
+	if err != nil {
+		manifests = nil
+	}
+	merged := make(map[string]SkillManifest, len(manifests)+len(r.builtinManifests))
+	for _, m := range manifests {
+		merged[m.SkillID] = m
+	}
+	for _, m := range r.builtinManifests {
+		merged[m.SkillID] = *m
+	}
+	return merged
+}
+
+func briefTrigger(m SkillManifest) string {
+	parts := []string{}
+	for _, t := range m.Tags.DomainTag {
+		if t = strings.TrimSpace(t); t != "" {
+			parts = append(parts, t)
+		}
+		if len(parts) >= 3 {
+			break
+		}
+	}
+	if len(parts) == 0 {
+		for _, t := range m.Routing.TargetAliases {
+			if t = strings.TrimSpace(t); t != "" {
+				parts = append(parts, t)
+			}
+			if len(parts) >= 3 {
+				break
+			}
+		}
+	}
+	return strings.Join(parts, "/")
+}
+
+// ActionChainForSkillID 為某 SkillID（archived ∪ builtin）組出可被 Resolve 高分命中的
+// action-chain（動作取 ActionTag[0]，退而 ActionPatterns[0]；目標取 TargetAliases[0]，
+// 退而 DomainTag[0]/DisplayName/SkillID）。讓 builtin（如 builtin.scheduler）也能被
+// maybeHandleSkillFlow 執行，不再因為只讀 archived 而漏掉。
+func (r *Router) ActionChainForSkillID(skillID string) (string, bool) {
+	if r == nil {
+		return "", false
+	}
+	m, ok := r.mergedManifests()[strings.TrimSpace(skillID)]
+	if !ok {
+		return "", false
+	}
+	action := firstNonBlank(m.Tags.ActionTag)
+	if action == "" {
+		action = firstNonBlank(m.Routing.ActionPatterns)
+	}
+	target := firstNonBlank(m.Routing.TargetAliases)
+	if target == "" {
+		target = firstNonBlank(m.Tags.DomainTag)
+	}
+	if target == "" {
+		target = strings.TrimSpace(m.DisplayName)
+	}
+	if target == "" {
+		target = strings.TrimSpace(m.SkillID)
+	}
+	if action == "" || target == "" {
+		return "", false
+	}
+	return action + separator + target, true
+}
+
+func firstNonBlank(list []string) string {
+	for _, s := range list {
+		if t := strings.TrimSpace(s); t != "" {
+			return t
+		}
+	}
+	return ""
+}

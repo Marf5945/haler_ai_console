@@ -343,7 +343,17 @@ func (a *App) planTaskProgress(userText, adapterID, modelID, sessionID, traceID 
 	if raw, normalized, ok := buildDeterministicFileSearchPlan(userText); ok {
 		return raw, normalized, 0, nil
 	}
-	prompt := buildTaskPlanPrompt(userText) + a.taskExperienceDigest(userText)
+	experienceDigest := a.taskExperienceDigest(userText)
+	prompt := buildTaskPlanPrompt(userText) + experienceDigest
+	recordPromptSynthesisTrace("go.taskPlanner.synthesis", traceID, prompt, map[string]interface{}{
+		"adapter_id":            adapterID,
+		"model_id":              modelID,
+		"session_id":            sessionID,
+		"user_text_len":         len([]rune(userText)),
+		"user_text_preview":     truncateRunes(userText, 1200),
+		"experience_digest_len": len([]rune(experienceDigest)),
+		"stage":                 "plan",
+	})
 	resp, err := a.callPlannerAdapter(adapterID, modelID, sessionID, prompt, traceID)
 	if err != nil {
 		return "", dag.NormalizeResult{}, 0, err
@@ -381,6 +391,15 @@ type taskSearchIntent struct {
 func (a *App) classifyTaskSearchIntent(userText, adapterID, modelID, sessionID, traceID string) (taskSearchIntent, bool) {
 	prompt := buildTaskSearchIntentPrompt(userText)
 	intentTraceID := strings.Replace(traceID, "task-plan-", "task-intent-", 1)
+	recordPromptSynthesisTrace("go.taskPlanner.intent_synthesis", intentTraceID, prompt, map[string]interface{}{
+		"adapter_id":        adapterID,
+		"model_id":          modelID,
+		"session_id":        sessionID,
+		"parent_trace_id":   traceID,
+		"user_text_len":     len([]rune(userText)),
+		"user_text_preview": truncateRunes(userText, 1200),
+		"stage":             "search_intent",
+	})
 	resp, err := a.callPlannerAdapter(adapterID, modelID, sessionID, prompt, intentTraceID)
 	if err != nil || resp == nil || isPlannerTransientFailure(resp) {
 		return taskSearchIntent{}, false
@@ -433,7 +452,22 @@ func parseTaskSearchIntent(text string) (taskSearchIntent, bool) {
 
 func (a *App) repairTaskPlan(raw string, planErr error, adapterID, modelID, sessionID, traceID string) (string, dag.NormalizeResult, error) {
 	repairPrompt := buildTaskPlanRepairPrompt(raw, planErr)
-	resp, err := a.callPlannerAdapter(adapterID, modelID, sessionID, repairPrompt, strings.Replace(traceID, "task-plan-", "task-plan-repair-", 1))
+	repairTraceID := strings.Replace(traceID, "task-plan-", "task-plan-repair-", 1)
+	planErrText := ""
+	if planErr != nil {
+		planErrText = planErr.Error()
+	}
+	recordPromptSynthesisTrace("go.taskPlanner.repair_synthesis", repairTraceID, repairPrompt, map[string]interface{}{
+		"adapter_id":      adapterID,
+		"model_id":        modelID,
+		"session_id":      sessionID,
+		"parent_trace_id": traceID,
+		"raw_len":         len([]rune(raw)),
+		"raw_preview":     truncateRunes(raw, 2000),
+		"plan_error":      planErrText,
+		"stage":           "repair",
+	})
+	resp, err := a.callPlannerAdapter(adapterID, modelID, sessionID, repairPrompt, repairTraceID)
 	if err != nil {
 		return raw, dag.NormalizeResult{}, err
 	}
@@ -1626,10 +1660,20 @@ func sanitizeTaskOutputFileName(name, ext string) string {
 func (a *App) executeAdapterTaskNode(run *dag.DAGRun, node dag.DAGNode, adapterID, sessionID, traceID string) (string, error) {
 	// M2：flag 開啟 → cli_task 也走節點內 loop；goal 帶前置依賴 context。
 	// trace 用非 task 前綴，loop 內每輪才會走完整路由（與 chat_route 一致）。
-	if taskLoopEnabled() {
-		return a.executeTaskNodeLoop(run, node, buildTaskNodePrompt(run, node), adapterID, sessionID, "clitask-"+run.ID+"-"+node.ID)
-	}
 	prompt := buildTaskNodePrompt(run, node)
+	recordPromptSynthesisTrace("go.taskNode.synthesis", traceID, prompt, map[string]interface{}{
+		"adapter_id": adapterID,
+		"model_id":   run.Planner.PlannerModelID,
+		"session_id": sessionID,
+		"run_id":     run.ID,
+		"node_id":    node.ID,
+		"node_title": node.Title,
+		"operation":  node.Operation,
+		"stage":      "node_execute",
+	})
+	if taskLoopEnabled() {
+		return a.executeTaskNodeLoop(run, node, prompt, adapterID, sessionID, "clitask-"+run.ID+"-"+node.ID)
+	}
 	resp, err := a.callPlannerAdapter(adapterID, run.Planner.PlannerModelID, sessionID, prompt, traceID)
 	if err != nil {
 		return "", err
@@ -1655,6 +1699,18 @@ func (a *App) executeSubagentTaskNode(run *dag.DAGRun, node dag.DAGNode, adapter
 		subSessionID = run.ID
 	}
 	subSessionID = "subagent:" + subID + ":" + subSessionID
+	recordPromptSynthesisTrace("go.taskNode.synthesis", traceID, prompt, map[string]interface{}{
+		"adapter_id":     adapterID,
+		"model_id":       run.Planner.PlannerModelID,
+		"session_id":     subSessionID,
+		"run_id":         run.ID,
+		"node_id":        node.ID,
+		"node_title":     node.Title,
+		"operation":      node.Operation,
+		"subagent_id":    subID,
+		"stage":          "subagent_execute",
+		"parent_session": sessionID,
+	})
 	resp, err := a.callPlannerAdapter(adapterID, run.Planner.PlannerModelID, subSessionID, prompt, traceID)
 	if err != nil {
 		return "", err
@@ -2124,7 +2180,18 @@ func decomposeHasCycle(steps []decomposeStep) bool {
 
 // planDecompose 呼叫模型拿拆解結果，回傳 (title, chat_route 節點, raw, err)。
 func (a *App) planDecompose(userText, adapterID, modelID, sessionID, traceID string) (string, []dag.DAGNode, string, error) {
-	resp, err := a.callPlannerAdapter(adapterID, modelID, sessionID, buildDecomposePrompt(userText)+a.taskExperienceDigest(userText), traceID)
+	experienceDigest := a.taskExperienceDigest(userText)
+	prompt := buildDecomposePrompt(userText) + experienceDigest
+	recordPromptSynthesisTrace("go.taskPlanner.decompose_synthesis", traceID, prompt, map[string]interface{}{
+		"adapter_id":            adapterID,
+		"model_id":              modelID,
+		"session_id":            sessionID,
+		"user_text_len":         len([]rune(userText)),
+		"user_text_preview":     truncateRunes(userText, 1200),
+		"experience_digest_len": len([]rune(experienceDigest)),
+		"stage":                 "decompose",
+	})
+	resp, err := a.callPlannerAdapter(adapterID, modelID, sessionID, prompt, traceID)
 	if err != nil {
 		return "", nil, "", err
 	}

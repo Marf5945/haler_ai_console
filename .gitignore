@@ -23,6 +23,10 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/vite.config.*.timestamp-*.mjs
+frontend/public/fonts/*.ttf
+frontend/public/fonts/*.otf
+frontend/public/fonts/*.woff
+frontend/public/fonts/*.woff2
 
 # === 備份檔 / 歷史殘留 ===
 # SEC-W11 第二刀（2026-05-24）：避免 *.bak2 等備份檔再被 commit
@@ -121,6 +125,7 @@ TASKS*.md
 *AUDIT*.md
 *DECISIONS*.md
 *Spec_Draft.md
+REFACTOR*.md
 
 # === Python cache artifacts ===
 __pycache__/

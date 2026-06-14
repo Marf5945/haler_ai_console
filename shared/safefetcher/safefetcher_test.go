@@ -102,7 +102,7 @@ func TestFetch_RejectsBinaryMIME(t *testing.T) {
 // 正式 policy 下，內網/metadata 目標必須被擋（fetcher 不可成為 SSRF 入口）。
 func TestFetch_SSRFBlockedUnderRealPolicy(t *testing.T) {
 	for _, bad := range []string{
-		"http://127.0.0.1:48765/",                  // http + loopback
+		"http://127.0.0.1:3000/",                   // http + loopback
 		"https://169.254.169.254/latest/meta-data", // metadata
 		"https://metadata.google.internal/",        // metadata 主機名
 	} {

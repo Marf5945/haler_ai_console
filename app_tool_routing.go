@@ -220,10 +220,12 @@ func buildToolRoutingDecisionPrompt(systemPrompt string, userText string, lookup
 		"若 loaded_files 不是 none，使用者問剛剛/最近/拉進來/拖進來/已載入/引用的檔案時，不要問檔名或路徑；輸出 搜尋ㄌ引用文件ㄌ文件。",
 		"勿呼叫任何工具；「工具」僅是分類標籤。",
 		"格式只能是：閒聊ㄌ<回答> | 操作ㄌ<候選tag/名稱/關鍵詞>ㄌ待命 | 程式ㄌ<程式名稱>ㄌ輸出 | 流程ㄌ<skill名稱>ㄌ輸出 | 查詢ㄌ<關鍵詞>ㄌ操作 | 搜尋ㄌ<關鍵詞>ㄌ文件 | 網路ㄌ<搜尋關鍵字>ㄌ待命 | 提問ㄌ<問題>ㄌ待命 | 需要工具",
+		"若流程 target 是 builtin.scheduler，target 可寫成 builtin.scheduler;title=<短標題>;summary=<一句話摘要>；title/summary 用自然語言抽取使用者真正要定期做的事，不要把「做成簡報/整理成文件」截成標題。",
 		"需要工具：需要其他工具，或候選不足但不像閒聊。",
 		"網路路由：凡需網路搜尋才能判斷的變動資料，如網路、即時、今天、今日、最新、現在等關鍵字→網路。",
+		"提問時機：查詢結果明顯取決於缺失的關鍵資訊（如地點/日期/個人身分/星座）時，先輸出 提問ㄌ<具體問題>ㄌ待命，不要硬搜；但只問會改變結果的關鍵資訊，能直接答就別問。",
 		"操作：明確重現/回放/照做/執行已保存操作且 saved_operations 明確→操作；只有 recent_operations 不算明確。",
-		"判斷=製作獨立程式(產出 .go 等程式檔)→程式; 使用既有/已安裝 skill，或要既有 skill 處理資料/表格/CSV/XLSX/JSON並輸出→流程; 找操作候選→查詢; 找本機資料/文件/skill/記憶/對話/trace/專案→搜尋; 無法判斷本機或網路且缺必要資訊→提問; 明顯聊天→閒聊",
+		"判斷=製作獨立程式(產出 .go 等程式檔)→程式; 使用既有/已安裝 skill，或要既有 skill 處理資料/表格/CSV/XLSX/JSON並輸出→流程（流程的 target 必須是 available_skills 區塊裡的 SkillID，不可自創名稱）; 找操作候選→查詢; 找本機資料/文件/skill/記憶/對話/trace/專案→搜尋; 無法判斷本機或網路且缺必要資訊→提問; 明顯聊天→閒聊",
 	}, " ")
 	parts := []string{strings.TrimSpace(lookupContext), "rules=" + routingRules}
 	if h := formatCompactRoutingHistory(recent, userText, 3); h != "" {
@@ -254,6 +256,9 @@ func parseToolRoutingDecision(text string) toolRoutingDecision {
 		decision.Action = chain.Action
 		decision.Target = chain.Target
 		decision.Next = chain.Next
+		if chain.Action == "流程" {
+			decision.Target, decision.Title, decision.Summary = parseSchedulerRoutingTargetMetadata(chain.Target)
+		}
 		return decision
 	}
 	return decision
@@ -353,14 +358,9 @@ func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sess
 		if strings.TrimSpace(decision.Target) == "" {
 			return false, skill_step.CLIResponse{}
 		}
-		// judge 主動提問（模糊：本機還是網路 / 缺必要資訊）→ 直接把問題回給使用者。
+		// judge 主動提問 → 交 handleJudgeClarification：存 pending（供補答重跑 judge）並套澄清上限。
 		if strings.TrimSpace(decision.Action) == "提問" {
-			return true, skill_step.CLIResponse{
-				Text:   setQuestionFloatingCandidates(questionPayload(decision.Target, decision.Next), traceID),
-				Action: decision.Action,
-				Target: decision.Target,
-				Next:   decision.Next,
-			}
+			return true, a.handleJudgeClarification(sessionID, userText, decision.Target, traceID)
 		}
 		if resp, handled := a.maybeHandleResourceGate(strings.TrimSpace(decision.Action+" "+decision.Target), sessionID, traceID); handled {
 			return true, *resp
@@ -383,10 +383,8 @@ func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sess
 				Next:   decision.Next,
 			}
 		}
+		// Step 2：背景只進 judge/composer context，不再拼進搜尋 query。
 		target := decision.Target
-		if decision.Action == "網路" {
-			target = a.targetWithBackground(sessionID, target)
-		}
 		if req, ok := websearch.RequestFromAction(decision.Action, target); ok {
 			webResp := a.executeWebSearch(req, traceID)
 			webResp.Action = decision.Action

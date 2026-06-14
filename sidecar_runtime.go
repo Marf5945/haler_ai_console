@@ -62,6 +62,7 @@ function traceNode(node, traceID, data) {
   if (!traceID) return;
   try {
     const endpoint = traceEndpoint();
+    if (!endpoint) return;
     const body = JSON.stringify({node, trace_id: traceID, data});
     const req = http.request({
       hostname: endpoint.hostname,
@@ -122,7 +123,8 @@ function traceParams(traceID, params) {
 
 function traceEndpoint() {
   try {
-    const raw = process.env.AI_CONSOLE_TRACE_URL || "http://127.0.0.1:48765";
+    const raw = process.env.AI_CONSOLE_TRACE_URL;
+    if (!raw) return null;
     const parsed = new URL(raw);
     return {
       hostname: parsed.hostname || "127.0.0.1",
@@ -130,7 +132,7 @@ function traceEndpoint() {
       pathname: parsed.pathname || "",
     };
   } catch {
-    return {hostname: "127.0.0.1", port: 48765, pathname: ""};
+    return null;
   }
 }
 

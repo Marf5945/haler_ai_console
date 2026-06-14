@@ -106,7 +106,8 @@ def main() -> int:
         print(f"[ERR] ONNX 不存在：{args.onnx}", file=sys.stderr)
         return 2
 
-    tempfile.tempdir = os.environ.get("TMPDIR") or tempfile.gettempdir()
+    if os.environ.get("TMPDIR"):
+        tempfile.tempdir = os.environ["TMPDIR"]
 
     import torch
     import coremltools as ct
@@ -151,7 +152,7 @@ def main() -> int:
     # 4) 存 mlpackage 再編譯成 .mlmodelc（不需要 coremlcompiler CLI）
     out_dir = args.out
     out_dir.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=tempfile.tempdir) as tmp:
+    with tempfile.TemporaryDirectory() as tmp:
         pkg = Path(tmp) / "model.mlpackage"
         mlmodel.save(str(pkg))
         compiled = compile_model(str(pkg), str(Path(tmp) / "compiled.mlmodelc"))

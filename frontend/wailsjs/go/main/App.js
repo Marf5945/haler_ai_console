@@ -78,6 +78,10 @@ export function AutoDetectCLI() {
   return window['go']['main']['App']['AutoDetectCLI']();
 }
 
+export function BootstrapScheduledSkill(arg1) {
+  return window['go']['main']['App']['BootstrapScheduledSkill'](arg1);
+}
+
 export function BuildAndSaveSkillDraft(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['BuildAndSaveSkillDraft'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -918,6 +922,10 @@ export function NextGreeting(arg1) {
   return window['go']['main']['App']['NextGreeting'](arg1);
 }
 
+export function NormalizeSchedulerDraft(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['NormalizeSchedulerDraft'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function NotifyStatusRail(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['NotifyStatusRail'](arg1, arg2, arg3, arg4);
 }
@@ -1420,6 +1428,10 @@ export function UpdateDAGNodeStatus(arg1, arg2, arg3) {
 
 export function UpdateLearningRunMetadata(arg1) {
   return window['go']['main']['App']['UpdateLearningRunMetadata'](arg1);
+}
+
+export function UpdateScheduledJob(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['UpdateScheduledJob'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function ValidateMemoryItem(arg1) {

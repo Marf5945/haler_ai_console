@@ -22,18 +22,19 @@ func (e schedulerSkillExecutor) ExecuteSkill(ctx context.Context, actionTarget s
 		return ctx.Err()
 	default:
 	}
+	// Phase E：依故障切換順序（CLI → 本地 → API 墊底）逐一嘗試；可重試失敗自動換下一個後端。
+	if cands := e.app.schedulerFailoverCandidates(); len(cands) > 0 {
+		_, err := runSchedulerWithFailover(cands, func(adapterID string) schedulerAttemptResult {
+			return e.app.runSchedulerSkillOnce(adapterID, sessionID, actionTarget)
+		})
+		return err
+	}
+	// 後備：登錄表為空時沿用單一預設 adapter（維持舊行為）。
 	adapterID := e.app.defaultSkillExecutionAdapterID()
 	if adapterID == "" {
 		return fmt.Errorf("scheduler skill executor: no adapter available")
 	}
-	decision, err := e.app.ExecuteSkillMessage(adapterID, sessionID, actionTarget, fmt.Sprintf("scheduler-skill-%d", time.Now().UnixNano()))
-	if err != nil {
-		return err
-	}
-	if !decision.Executed {
-		return fmt.Errorf("scheduler skill executor: skill %q was not executed (decision=%s)", actionTarget, decision.Decision)
-	}
-	return nil
+	return e.app.runSchedulerSkillOnce(adapterID, sessionID, actionTarget).err
 }
 
 // skillManifestToTool 把已歸檔 skill manifest 轉成工具列上的一個 Tool。
@@ -512,17 +513,9 @@ func (a *App) BuildSkillContext(resolveID string, sessionID string) (*skill_step
 		}
 	}
 
-	// Load manifest for resource refs.
-	manifests, err := a.skillArchive.ListArchived()
-	if err != nil {
-		return nil, err
-	}
 	var manifest skill_step.SkillManifest
-	for _, m := range manifests {
-		if m.SkillID == result.SelectedSkillID {
-			manifest = m
-			break
-		}
+	if m := a.findManifestForExec(result.SelectedSkillID); m != nil {
+		manifest = *m
 	}
 
 	inj := skill_step.BuildInjection(sessionID, selected, manifest)

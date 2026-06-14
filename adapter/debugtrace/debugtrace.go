@@ -17,7 +17,7 @@ import (
 // Keep while cleanup is in progress: this is active diagnostic infrastructure,
 // not an unused watcher. The monitor URL may be stale after the app exits.
 
-const DefaultAddr = "127.0.0.1:48765"
+const DefaultAddr = "127.0.0.1:0"
 
 // LinkSnapshot is the current monitor-link register exposed to UI/debug code.
 type LinkSnapshot struct {
@@ -103,7 +103,7 @@ func URL() string {
 	if env := os.Getenv("AI_CONSOLE_TRACE_URL"); env != "" {
 		return env
 	}
-	return "http://" + DefaultAddr
+	return ""
 }
 
 // Snapshot returns the monitor-link register for UI and diagnostics.
@@ -114,9 +114,6 @@ func Snapshot() LinkSnapshot {
 	addr := store.addr
 	if url == "" {
 		url = os.Getenv("AI_CONSOLE_TRACE_URL")
-	}
-	if url == "" {
-		url = "http://" + DefaultAddr
 	}
 	if addr == "" {
 		addr = DefaultAddr

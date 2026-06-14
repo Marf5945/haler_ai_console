@@ -130,8 +130,8 @@ func (a *App) maybeHandleWebSearch(userText, sessionID, traceID string) (*skill_
 	if handled, resp := a.maybeAskForToolReadiness(sessionID, decision, userText, traceID); handled {
 		return &resp, true
 	}
-	req.Query = a.targetWithBackground(sessionID, req.Query)
-	// SEC-15: 查詢（含背景）出境前過機密檢查，命中先問。
+	// Step 2：背景不再拼進搜尋 query（targetWithBackground 已移除）。
+	// SEC-15: 查詢出境前過機密檢查，命中先問。
 	if resp, gated := a.gateSearchEgress(req, sessionID, traceID); gated {
 		return resp, true
 	}
@@ -140,6 +140,13 @@ func (a *App) maybeHandleWebSearch(userText, sessionID, traceID string) (*skill_
 }
 
 func (a *App) executeWebSearch(req websearch.SearchRequest, traceID string) skill_step.CLIResponse {
+	// Step 6 安全背刺：不論哪條路徑（含 judge 路由直接呼叫 executeWebSearch），
+	// 出境前一律過機密遮蔽。互動式「命中先問」仍在 maybeHandleWebSearch；這裡是
+	// 確定性的最後一道閘，保證機密永不離開本機。
+	if masked, records := memory.RedactBeforeWrite(req.Query); len(records) > 0 {
+		debugtrace.Record("web_search.egress_redacted", traceID, map[string]interface{}{"count": len(records)})
+		req.Query = masked
+	}
 	a.pushActionStatus("網路", req.Query) // status rail：正在用網路搜尋「…」…
 	debugtrace.Record("web_search.enter", traceID, map[string]interface{}{
 		"query": req.Query,

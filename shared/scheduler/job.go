@@ -42,6 +42,9 @@ type Job struct {
 	// ID 為工作的唯一識別碼（UUID v4 格式）。
 	ID string `json:"id"`
 
+	// ScheduleNo 為給使用者看的穩定排程編號。刪除後不回收，避免重複。
+	ScheduleNo int `json:"schedule_no"`
+
 	// Name 為工作的顯示名稱，供使用者辨識用途。
 	Name string `json:"name"`
 
@@ -77,6 +80,28 @@ type Job struct {
 
 	// ProjectID 建立時所屬專案
 	ProjectID string `json:"project_id"`
+
+	// --- 3.1.10 自動執行管線欄位（新增，向後相容；舊紀錄反序列化為零值）---
+
+	// SkillID 為此排程綁定的可參數化 skill。空字串代表「尚未做成 skill」，
+	// 第一次到點時會走「開 sub 對話 → 產生 skill」流程；之後直接跑此 skill。
+	SkillID string `json:"skill_id,omitempty"`
+
+	// SourceSubID 為第一次執行時開啟、用來存對話與後續吐資料的 sub 對話 ID。
+	SourceSubID string `json:"source_sub_id,omitempty"`
+
+	// FlowHash 為「流程內容」雜湊（動作/摘要 + skill 內容）。到點時比對，
+	// 不一致代表使用者改了流程 → 清除 SkillID、重走新對話重建 skill。
+	FlowHash string `json:"flow_hash,omitempty"`
+
+	// LastOutputDate 為上次成功吐出資料的日期鍵（YYYYMMDD），避免同日重複輸出。
+	LastOutputDate string `json:"last_output_date,omitempty"`
+
+	// NotifyOnFire 表示到點時是否透過 remote_bridge 通知使用者。
+	NotifyOnFire bool `json:"notify_on_fire"`
+
+	// AutoRunSkill 表示已有 SkillID 時，是否直接全自動跑 skill（不開新對話）。
+	AutoRunSkill bool `json:"auto_run_skill"`
 }
 
 // --------------------------------------------------------------------------
@@ -173,6 +198,7 @@ func NewJob(name, cronExpr string, actionType ActionType, actionPayload string, 
 		Name:          name,
 		CronExpr:      cronExpr,
 		Enabled:       true,
+		NotifyOnFire:  true, // 新排程預設到點通知；設 false 可關閉 remote 通知
 		ActionType:    actionType,
 		ActionPayload: actionPayload,
 		LastFired:     "",
@@ -202,6 +228,13 @@ func IsValidActionType(actionType ActionType) bool {
 // computePayloadHash 回傳 payload 的 SHA-256 hex 字串。
 func computePayloadHash(payload string) string {
 	h := sha256.Sum256([]byte(payload))
+	return hex.EncodeToString(h[:])
+}
+
+// computeFlowHash 計算「流程內容」雜湊（名稱 + payload + 綁定的 skill），
+// 用於 Phase I 偵測使用者是否改了流程（不一致 → 重走新對話、重建 skill）。
+func computeFlowHash(name, payload, skillID string) string {
+	h := sha256.Sum256([]byte(name + "\x00" + payload + "\x00" + skillID))
 	return hex.EncodeToString(h[:])
 }
 

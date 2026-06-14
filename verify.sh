@@ -3,7 +3,7 @@
 # 用法（從任何地方都可執行）： ./verify.sh   或   bash verify.sh
 set -uo pipefail
 
-# 專案根目錄：由本腳本位置推導，避免把本機絕對路徑寫進倉庫。
+# 專案根目錄：以本腳本所在位置推導，避免把個人本機路徑寫進 repo。
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR" || { echo "❌ 找不到專案目錄：$PROJECT_DIR"; exit 1; }
 
@@ -15,7 +15,7 @@ if ! command -v go >/dev/null 2>&1; then
   exit 1
 fi
 
-export GOCACHE="${GOCACHE:-/tmp/go-build-cache-fresh}"
+export GOCACHE="${GOCACHE:-${TMPDIR:-/tmp}/go-build-cache-fresh}"
 echo "專案：$PROJECT_DIR"
 echo "go： $(command -v go)  ($(go version 2>/dev/null))"
 

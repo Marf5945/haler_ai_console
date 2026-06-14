@@ -63,6 +63,8 @@ export function ApproveTaskStep(arg1:string):Promise<dag.DAGRun>;
 
 export function AutoDetectCLI():Promise<any>;
 
+export function BootstrapScheduledSkill(arg1:string):Promise<main.SchedulerSkillBootstrapResult>;
+
 export function BuildAndSaveSkillDraft(arg1:string,arg2:string,arg3:Array<string>,arg4:Array<string>,arg5:skill_step.ExpectedChain):Promise<main.SkillDraftSaveResult>;
 
 export function BuildLLMContext(arg1:string,arg2:string,arg3:boolean):Promise<llm_context.ContextPayload>;
@@ -483,6 +485,8 @@ export function NativeDragExportSubHandler(arg1:string,arg2:string,arg3:string,a
 
 export function NextGreeting(arg1:string):Promise<string>;
 
+export function NormalizeSchedulerDraft(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<main.SchedulerDraftNormalization>;
+
 export function NotifyStatusRail(arg1:string,arg2:string,arg3:string,arg4:string):Promise<statusrail.View>;
 
 export function OpenExternalURL(arg1:string):Promise<void>;
@@ -734,6 +738,8 @@ export function UnregisterAdapter(arg1:string):Promise<void>;
 export function UpdateDAGNodeStatus(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function UpdateLearningRunMetadata(arg1:string):Promise<any>;
+
+export function UpdateScheduledJob(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<scheduler.Job>;
 
 export function ValidateMemoryItem(arg1:string):Promise<memory.ValidationResult>;
 

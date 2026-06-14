@@ -443,6 +443,30 @@ func (a *SidecarCLIAdapter) SendMessage(opts skill_step.CLIMessageOptions) (skil
 
 	log.Printf("[CONV] 合成 prompt: key=%s sentences=%d summaries=%d chars=%d input_id=%s control=%v system_prompt_len=%d",
 		continuityKey, rawSentenceCount, validSummaryCount, state.counter.Count(), inputSentenceID, isControlMessage, len([]rune(systemPrompt)))
+	synthesisMode := "conversation"
+	if isToolJudge {
+		synthesisMode = "tool_judge"
+	} else if isControlMessage {
+		synthesisMode = "control"
+	}
+	synthesisTrace := map[string]interface{}{
+		"adapter_id":          opts.AdapterID,
+		"session_id":          opts.SessionID,
+		"continuity_key":      continuityKey,
+		"mode":                synthesisMode,
+		"skip_continuity":     opts.SkipContinuity,
+		"tool_routing_mode":   opts.ToolRoutingMode,
+		"is_command":          opts.IsCommand,
+		"raw_sentence_count":  rawSentenceCount,
+		"valid_summary_count": validSummaryCount,
+		"counter_chars":       state.counter.Count(),
+		"input_sentence_id":   inputSentenceID,
+		"system_prompt_len":   len([]rune(systemPrompt)),
+		"current_input_len":   len([]rune(opts.UserText)),
+	}
+	addPromptSynthesisTraceText(synthesisTrace, "current_input", opts.UserText, 2000)
+	addPromptSynthesisTraceText(synthesisTrace, "synth_prompt", synthesizedPrompt, 12000)
+	debugtrace.Record("go.promptSynthesis.registers", opts.TraceID, synthesisTrace)
 
 	// 組裝 IPC 參數——使用合成後的 prompt 取代原始 userText
 	workspaceDir, err := a.ensureWorkspaceDir(opts.AdapterID, continuityKey)
@@ -667,7 +691,7 @@ func addTraceUserText(fields map[string]interface{}, traceID, text string) {
 }
 
 func isTaskProgressTraceID(traceID string) bool {
-	return strings.HasPrefix(traceID, "task-plan-") || strings.HasPrefix(traceID, "task-plan-repair-") || strings.HasPrefix(traceID, "task-node-")
+	return strings.HasPrefix(traceID, "task-plan-") || strings.HasPrefix(traceID, "task-plan-repair-") || strings.HasPrefix(traceID, "task-intent-") || strings.HasPrefix(traceID, "task-node-")
 }
 
 func truncateTraceRunes(s string, maxRunes int) string {
@@ -679,6 +703,13 @@ func truncateTraceRunes(s string, maxRunes int) string {
 		return s
 	}
 	return string(runes[:maxRunes]) + "..."
+}
+
+func addPromptSynthesisTraceText(fields map[string]interface{}, prefix, text string, maxRunes int) {
+	preview := truncateTraceRunes(text, maxRunes)
+	fields[prefix+"_len"] = len([]rune(text))
+	fields[prefix+"_preview"] = preview
+	fields[prefix+"_compacted"] = len([]rune(text)) > maxRunes
 }
 
 func (a *SidecarCLIAdapter) ensureWorkspaceDir(adapterID, continuityKey string) (string, error) {

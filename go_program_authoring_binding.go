@@ -55,20 +55,13 @@ func (a *App) maybeHandleGoProgramAuthoring(decision toolRoutingDecision, sessio
 		return false, skill_step.CLIResponse{}
 	}
 	if question, need := goProgramAuthoringClarification(userText); need {
-		a.toolReadinessMu.Lock()
-		if a.pendingToolQuestions == nil {
-			a.pendingToolQuestions = make(map[string]pendingToolQuestion)
+		if ok, reason := a.storeClarification(sessionID, decision.Action, decision.Target, userText, question); !ok {
+			debugtrace.Record("go.goProgram.authoring.clarification_exhausted", traceID, map[string]interface{}{
+				"program": decision.Target,
+				"reason":  reason,
+			})
+			return true, skill_step.CLIResponse{Text: clarificationExhaustedMessage(question)}
 		}
-		a.pendingToolQuestions[sessionID] = pendingToolQuestion{
-			SessionID:        sessionID,
-			Action:           decision.Action,
-			Target:           decision.Target,
-			MissingContext:   "小程式資料格式",
-			Question:         question,
-			OriginalUserText: userText,
-			CreatedAt:        time.Now(),
-		}
-		a.toolReadinessMu.Unlock()
 		debugtrace.Record("go.goProgram.authoring.question", traceID, map[string]interface{}{
 			"program":  decision.Target,
 			"question": question,

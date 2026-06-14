@@ -175,16 +175,18 @@ type App struct {
 	stopRecoveryService *stop_recovery.Service
 
 	// v3.6.1 Visual Learning（§12）— 完整接入
-	visualLearning      *visual_learning.Service
-	learningService     *visual_learning.LearningService
-	opencvPipeline      *visual_learning.OpenCVPipeline
-	yoloDetector        *visual_learning.YOLODetector
-	nativeInput         *visual_learning.NativeInput
-	canonicalLabelSvc   *visual_learning.CanonicalLabelService
-	elementDictionary   *visual_learning.ElementDictionary
-	actionDictionary    *visual_learning.ActionDictionary
-	pendingCandidateMgr *visual_learning.PendingCandidateManager
-	vlSafeExporter      *visual_learning.SafeExporter
+	visualLearning        *visual_learning.Service
+	learningService       *visual_learning.LearningService
+	opencvPipeline        *visual_learning.OpenCVPipeline
+	yoloDetector          *visual_learning.YOLODetector
+	nativeInput           *visual_learning.NativeInput
+	canonicalLabelSvc     *visual_learning.CanonicalLabelService
+	elementDictionary     *visual_learning.ElementDictionary
+	actionDictionary      *visual_learning.ActionDictionary
+	pendingCandidateMgr   *visual_learning.PendingCandidateManager
+	vlSafeExporter        *visual_learning.SafeExporter
+	pendingLearningTextMu sync.Mutex
+	pendingLearningText   map[string]pendingLearningTextEvent
 
 	// v3.6.2 W3A Media Provenance（§9A）— 媒體原件來源追蹤
 	// 7 種驗證狀態、雙層指紋、操作指紋簽章、模型污染偵測、sidecar 管理。
@@ -356,6 +358,7 @@ func NewApp() *App {
 		actionDictionary:    visual_learning.NewActionDictionary(filepath.Join(hookRoot, "data", "visual_learning")),
 		pendingCandidateMgr: visual_learning.NewPendingCandidateManager(filepath.Join(hookRoot, "data", "visual_learning")),
 		vlSafeExporter:      visual_learning.NewSafeExporter(filepath.Join(hookRoot, "data", "visual_learning")),
+		pendingLearningText: make(map[string]pendingLearningTextEvent),
 
 		// v3.6.2 W3A Media Provenance（§9A）
 		w3aMedia: w3a_media.NewService(hookRoot),
@@ -839,8 +842,24 @@ func (a *App) RunSummarizationNow(adapterID string) (string, error) {
 	}
 	// Rule 15：寫 summaries.md（非 talk_full）；Rule 8：AppendSummary 內部做 redaction。
 	root := storage.ProjectRoot(appDataRoot(), "default")
-	if _, err := memory.NewPipeline(root).AppendSummary(sum.Tag, sum.Content); err != nil {
+	pipeline := memory.NewPipeline(root)
+	if _, err := pipeline.AppendSummary(sum.Tag, sum.Content); err != nil {
 		return "", fmt.Errorf("寫入 summaries.md 失敗: %w", err)
+	}
+	// v3.1.7：摘要的原文細節落 deep_memory.md + index 對照，之後可用 展開ㄌtagㄌ待命 撈回。
+	// 失敗不擋摘要主流程（細節層是輔助），但記 trace 供查。
+	if strings.TrimSpace(sum.OriginalContent) != "" {
+		deepTag := "D-" + strings.TrimPrefix(sum.Tag, "S-")
+		if _, derr := pipeline.AppendDeepMemory(deepTag, sum.OriginalContent); derr == nil {
+			_ = pipeline.AppendIndexEntry(memory.MemoryIndexEntry{
+				SummaryTag:  sum.Tag,
+				DeepTag:     deepTag,
+				SentenceIDs: sum.SentenceIDs,
+				CreatedAt:   time.Now().Format(time.RFC3339),
+			})
+		} else {
+			debugtrace.Record("go.RunSummarizationNow.deep_memory_failed", "", map[string]interface{}{"error": derr.Error()})
+		}
 	}
 	return sum.Content, nil
 }
@@ -1855,10 +1874,6 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 			"judge_error":    errorString(judgeErr),
 		})
 		if handled, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID, userText); handled {
-			// 複合意圖 Web Chain（2.5.5.11）：web search 且 next=網路 → 回灌續跑。
-			routedResp = a.maybeContinueWebChain(
-				a.webChainCLIStepCall(adapterID, cliPath, sessionID, modelOverride, traceID),
-				sessionID, traceID, userText, decision.Raw, routedResp)
 			return &routedResp, nil
 		}
 	}
@@ -1956,6 +1971,10 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 		// CLI/local model only chooses the builtin action; App owns the actual local scan.
 		localResp := a.executeLocalSearch(req, sessionID, traceID)
 		return &localResp, nil
+	}
+	// 展開：撈回 deep_memory 細節（v3.1.7），與 搜尋 同模式。
+	if handled, memResp := a.maybeExpandMemory(resp.Action, resp.Target, traceID); handled {
+		return &memResp, nil
 	}
 	// DEBUG_TRACE_REMOVE: Response returned from sidecar/CLI to Go.
 	debugtrace.Record("go.cliAdapter.response", traceID, map[string]interface{}{
@@ -2251,8 +2270,6 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 			"adapter_kind":   "api",
 		})
 		if handled, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID, userText); handled {
-			// 複合意圖 Web Chain（2.5.5.11）：API 路徑共用同一條迴圈，stepCall 走 callAPI。
-			routedResp = a.maybeContinueWebChain(callAPI, sessionID, traceID, userText, decision.Raw, routedResp)
 			return &routedResp, nil
 		}
 	}
@@ -2698,6 +2715,11 @@ func (a *App) resolveActionChainResponse(rawText string, actionTags []string, tr
 		resp.Next = chain.Next
 		return resp
 	}
+	// 展開：撈回 deep_memory 細節（v3.1.7）。
+	if handled, memResp := a.maybeExpandMemory(chain.Action, chain.Target, traceID); handled {
+		memResp.Next = chain.Next
+		return memResp
+	}
 	if decision := actionchain.ResolveBuiltIn(chain); decision.Handled {
 		displayText = decision.DisplayText
 		debugtrace.Record("go.APIMessage.actionChain.builtin", traceID, map[string]interface{}{
@@ -2709,7 +2731,8 @@ func (a *App) resolveActionChainResponse(rawText string, actionTags []string, tr
 		})
 	} else if validation.Code == actionchain.ValidationOK {
 		// Non-builtin valid actions become review/tool-card requests, same as CLI path.
-		if a.eventBus != nil {
+		// v3.1.8：loop 來源不出工具卡（loop 自己管 pending/risk），消除雙重提示。
+		if a.eventBus != nil && !eventbus.IsTaskLoopTrace(traceID) {
 			a.eventBus.Emit(eventbus.EventSchedulerActionRequested, map[string]string{
 				"action":     chain.Action,
 				"target":     chain.Target,
@@ -3159,9 +3182,6 @@ func (a *App) buildSharedPersonaPrompt(persona settings.Persona) string {
 	if value := strings.TrimSpace(persona.Identity); value != "" {
 		fields = append(fields, "身份="+value)
 	}
-	if value := strings.TrimSpace(persona.Personality); value != "" {
-		fields = append(fields, "個性="+value)
-	}
 	if value := strings.TrimSpace(persona.Scenario); value != "" {
 		fields = append(fields, "情境="+value)
 	}
@@ -3197,12 +3217,41 @@ func expandReplyStrategyPrompt(value string) string {
 	}
 }
 
+// expandPersonalityPrompt 把「聊天語氣」preset id 展開成一句語氣描述。
+// 空值回傳空字串（呼叫端略過注入）；非預設值視為使用者自訂，原樣帶入。
+// 僅供閒聊 lane（buildInspectorPrompt）使用，不進共用人格或主任務 lane。
+func expandPersonalityPrompt(value string) string {
+	switch strings.TrimSpace(value) {
+	case "":
+		return ""
+	case "deadpan_weary", "厭世毒舌":
+		return "疲憊、乾、帶點自嘲與吐槽，但依舊可靠。"
+	case "stoic_tough", "冷面直球":
+		return "話少、直接、不寒暄，有大氣總裁感。"
+	case "calm_rational", "冷靜理性":
+		return "沉穩、克制、不情緒化，偏客觀機器式回答。"
+	case "warm_gentle", "溫柔療癒":
+		return "柔軟、有溫度，會安撫、共情並適度道歉。"
+	case "upbeat_energetic", "元氣熱血":
+		return "高能量、積極、正向，會推動對話往前走。"
+	case "witty_playful", "幽默風趣":
+		return "輕鬆、會玩梗、有來有往，但不影響正事。"
+	case "tsundere", "傲嬌腹黑":
+		return "嘴上嫌得要命，但還是會幫忙，常說只是順手。"
+	default:
+		return strings.TrimSpace(value)
+	}
+}
+
 // buildInspectorPrompt 組裝上方互動專用 prompt。
 // 結構：共用人格 → 上方互動歷史 → 上方輸出限制 → 當前輸入
 func (a *App) buildInspectorPrompt(persona settings.Persona, userText string) string {
 	var sb strings.Builder
 
 	sb.WriteString(a.buildSharedPersonaPrompt(persona))
+	if tone := expandPersonalityPrompt(persona.Personality); tone != "" {
+		sb.WriteString("聊天語氣：" + tone + "\n只在閒聊、陪伴、打招呼、情緒回應時套用；不得影響事實判斷、工具選擇、風險判斷、程式碼與任務結果。\n")
+	}
 	sb.WriteString("這是短互動回覆；只使用本區短歷史；直接回答，不輸出系統欄位、通道名稱或標記；三句內。\n")
 
 	// 上方歷史只取 inspectorHistory，不讀下方主聊天。
@@ -5123,6 +5172,7 @@ func (a *App) GetReadinessGateState() ReadinessGateState {
 func (a *App) SelectFloatingCandidate(candidateID string) ReadinessGateState {
 	readinessMu.Lock()
 	defer readinessMu.Unlock()
+	// 清除已選擇的候選（前端會消失刷新）
 	currentGateState.FloatingCandidates = nil
 	return currentGateState
 }

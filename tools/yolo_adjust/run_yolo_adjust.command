@@ -1,3 +1,4 @@
 #!/bin/zsh
-cd "$HOME/Desktop/yolo_adjust" || exit 1
+SCRIPT_DIR="${0:A:h}"
+cd "$SCRIPT_DIR" || exit 1
 python3 yolo_adjust_app.py

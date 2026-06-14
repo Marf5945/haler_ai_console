@@ -288,9 +288,7 @@ func formatDocSearchContext(keywords []string, results []builtin.DocumentSearchR
 	}
 	for _, r := range results {
 		name := sanitizeDocSearchText(r.DisplayName)
-		// 強制截斷搜尋結果 snippet,與直接讀檔路徑共用同一上限,
-		// 避免超長段落把 D: 區塊撐爆(最壞情況 = 檔數上限 × referencePromptSummaryRunes)。
-		snip := summarizeReferenceText(sanitizeDocSearchText(r.Snippet), referencePromptSummaryRunes)
+		snip := sanitizeDocSearchText(r.Snippet)
 		if snip == "" {
 			snip = "無文字摘要"
 		}

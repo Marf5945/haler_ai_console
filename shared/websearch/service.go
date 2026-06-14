@@ -63,9 +63,8 @@ type ConfigPublic struct {
 }
 
 type SearchRequest struct {
-	Query          string   `json:"query"`
-	Limit          int      `json:"limit,omitempty"`
-	IncludeDomains []string `json:"include_domains,omitempty"`
+	Query string `json:"query"`
+	Limit int    `json:"limit,omitempty"`
 }
 
 type SearchOutcome struct {
@@ -168,28 +167,20 @@ func (s *Service) Search(ctx context.Context, req SearchRequest, cfg ProviderCon
 		return SearchOutcome{}, ErrEmptyQuery
 	}
 	limit := normalizedLimit(req.Limit)
-	includeDomains := normalizeDomainList(req.IncludeDomains)
 	cfg.ProviderID = NormalizeProviderID(cfg.ProviderID)
 	var outcome SearchOutcome
 	var err error
 	switch cfg.ProviderID {
 	case ProviderTavily:
-		outcome, err = s.searchTavily(ctx, req.Query, limit, includeDomains, cfg)
+		outcome, err = s.searchTavily(ctx, req.Query, limit, cfg)
 	case ProviderGoogleCSE:
-		outcome, err = s.searchGoogleCSE(ctx, req.Query, limit, includeDomains, cfg)
+		outcome, err = s.searchGoogleCSE(ctx, req.Query, limit, cfg)
 	case ProviderBrave:
-		outcome, err = s.searchBrave(ctx, req.Query, limit, includeDomains, cfg)
+		outcome, err = s.searchBrave(ctx, req.Query, limit, cfg)
 	default:
 		return SearchOutcome{}, ErrProviderMissing
 	}
 	if err == nil {
-		if len(includeDomains) > 0 {
-			outcome.Results = filterResultsByDomains(outcome.Results, includeDomains)
-			if len(outcome.Results) == 0 {
-				outcome.NoResults = true
-				return outcome, ErrNoResults
-			}
-		}
 		// 依查詢語言加權：繁中→台灣(.tw/gov.tw)，英文→美/英(gov/edu/ac.uk)；清單外仍保留在後當備援。
 		rankByAuthority(req.Query, outcome.Results)
 	}
@@ -245,20 +236,16 @@ func rankByAuthority(query string, results []SearchResult) {
 	})
 }
 
-func (s *Service) searchTavily(ctx context.Context, query string, limit int, includeDomains []string, cfg ProviderConfig) (SearchOutcome, error) {
+func (s *Service) searchTavily(ctx context.Context, query string, limit int, cfg ProviderConfig) (SearchOutcome, error) {
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return SearchOutcome{}, ErrCredentialMissing
 	}
-	requestPayload := map[string]interface{}{
+	body, err := json.Marshal(map[string]interface{}{
 		"query":          query,
 		"search_depth":   "basic",
 		"max_results":    limit,
 		"include_answer": false,
-	}
-	if len(includeDomains) > 0 {
-		requestPayload["include_domains"] = includeDomains
-	}
-	body, err := json.Marshal(requestPayload)
+	})
 	if err != nil {
 		return SearchOutcome{}, err
 	}
@@ -296,7 +283,7 @@ func (s *Service) searchTavily(ctx context.Context, query string, limit int, inc
 	return outcomeOrNoResults(query, ProviderTavily, ProviderName(ProviderTavily), results)
 }
 
-func (s *Service) searchGoogleCSE(ctx context.Context, query string, limit int, includeDomains []string, cfg ProviderConfig) (SearchOutcome, error) {
+func (s *Service) searchGoogleCSE(ctx context.Context, query string, limit int, cfg ProviderConfig) (SearchOutcome, error) {
 	if strings.TrimSpace(cfg.APIKey) == "" || strings.TrimSpace(cfg.CX) == "" {
 		return SearchOutcome{}, ErrCredentialMissing
 	}
@@ -304,7 +291,7 @@ func (s *Service) searchGoogleCSE(ctx context.Context, query string, limit int, 
 	q := u.Query()
 	q.Set("key", strings.TrimSpace(cfg.APIKey))
 	q.Set("cx", strings.TrimSpace(cfg.CX))
-	q.Set("q", queryWithSiteFilters(query, includeDomains))
+	q.Set("q", query)
 	q.Set("num", fmt.Sprintf("%d", minInt(limit, 10)))
 	u.RawQuery = q.Encode()
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
@@ -339,13 +326,13 @@ func (s *Service) searchGoogleCSE(ctx context.Context, query string, limit int, 
 	return outcomeOrNoResults(query, ProviderGoogleCSE, ProviderName(ProviderGoogleCSE), results)
 }
 
-func (s *Service) searchBrave(ctx context.Context, query string, limit int, includeDomains []string, cfg ProviderConfig) (SearchOutcome, error) {
+func (s *Service) searchBrave(ctx context.Context, query string, limit int, cfg ProviderConfig) (SearchOutcome, error) {
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return SearchOutcome{}, ErrCredentialMissing
 	}
 	u, _ := url.Parse("https://api.search.brave.com/res/v1/web/search")
 	q := u.Query()
-	q.Set("q", queryWithSiteFilters(query, includeDomains))
+	q.Set("q", query)
 	q.Set("count", fmt.Sprintf("%d", limit))
 	u.RawQuery = q.Encode()
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
@@ -482,84 +469,6 @@ func IsSearchAction(action string) bool {
 	default:
 		return false
 	}
-}
-
-func normalizeDomainList(domains []string) []string {
-	seen := map[string]bool{}
-	var normalized []string
-	for _, raw := range domains {
-		host := normalizeDomain(raw)
-		if host == "" || seen[host] {
-			continue
-		}
-		seen[host] = true
-		normalized = append(normalized, host)
-	}
-	sort.Strings(normalized)
-	return normalized
-}
-
-func normalizeDomain(raw string) string {
-	raw = strings.TrimSpace(strings.ToLower(raw))
-	raw = strings.TrimPrefix(raw, "*.")
-	raw = strings.Trim(raw, ".")
-	if raw == "" {
-		return ""
-	}
-	if strings.Contains(raw, "://") {
-		if u, err := url.Parse(raw); err == nil {
-			raw = u.Hostname()
-		}
-	} else if strings.Contains(raw, "/") {
-		if u, err := url.Parse("https://" + raw); err == nil {
-			raw = u.Hostname()
-		}
-	}
-	raw = strings.TrimSpace(strings.ToLower(raw))
-	raw = strings.TrimPrefix(raw, "*.")
-	raw = strings.Trim(raw, ".")
-	if strings.Contains(raw, ":") {
-		if u, err := url.Parse("https://" + raw); err == nil {
-			raw = u.Hostname()
-		}
-	}
-	return raw
-}
-
-func queryWithSiteFilters(query string, domains []string) string {
-	domains = normalizeDomainList(domains)
-	if len(domains) == 0 {
-		return query
-	}
-	clauses := make([]string, 0, len(domains))
-	for _, domain := range domains {
-		clauses = append(clauses, "site:"+domain)
-	}
-	if len(clauses) == 1 {
-		return strings.TrimSpace(query + " " + clauses[0])
-	}
-	return strings.TrimSpace(query + " (" + strings.Join(clauses, " OR ") + ")")
-}
-
-func filterResultsByDomains(results []SearchResult, domains []string) []SearchResult {
-	domains = normalizeDomainList(domains)
-	if len(domains) == 0 {
-		return results
-	}
-	filtered := make([]SearchResult, 0, len(results))
-	for _, result := range results {
-		host := normalizeDomain(result.URL)
-		if host == "" {
-			continue
-		}
-		for _, domain := range domains {
-			if host == domain || strings.HasSuffix(host, "."+domain) {
-				filtered = append(filtered, result)
-				break
-			}
-		}
-	}
-	return filtered
 }
 
 func appendResult(results []SearchResult, result SearchResult, limit int) []SearchResult {

@@ -133,13 +133,14 @@ type input struct {
 
 // NativeInput records and replays OS-level click input on Windows.
 type NativeInput struct {
-	mu       sync.Mutex
-	hook     uintptr
-	threadID uint32
-	done     chan struct{}
-	callback uintptr
-	onClick  func(NativeClickEvent)
-	selfExe  string
+	mu         sync.Mutex
+	hook       uintptr
+	threadID   uint32
+	done       chan struct{}
+	callback   uintptr
+	onClick    func(NativeClickEvent)
+	onKeyboard func(NativeKeyboardEvent)
+	selfExe    string
 }
 
 func NewNativeInput() *NativeInput {
@@ -147,13 +148,30 @@ func NewNativeInput() *NativeInput {
 	return &NativeInput{selfExe: strings.ToLower(filepath.Base(exe))}
 }
 
-func (n *NativeInput) Start(onClick func(NativeClickEvent)) error {
+func (n *NativeInput) PermissionStatus() NativePermissionStatus {
+	return NativePermissionStatus{
+		Accessibility:   true,
+		InputMonitoring: true,
+		ScreenRecording: true,
+		Platform:        "windows",
+		Message:         "Windows native input uses OS hooks and does not use macOS privacy prompts.",
+	}
+}
+
+func (n *NativeInput) RequestPermissions() NativePermissionStatus {
+	status := n.PermissionStatus()
+	status.Requested = true
+	return status
+}
+
+func (n *NativeInput) Start(onClick func(NativeClickEvent), onKeyboard func(NativeKeyboardEvent)) error {
 	n.mu.Lock()
 	if n.done != nil {
 		n.mu.Unlock()
 		return nil
 	}
 	n.onClick = onClick
+	n.onKeyboard = onKeyboard
 	ready := make(chan error, 1)
 	done := make(chan struct{})
 	n.done = done
@@ -168,6 +186,7 @@ func (n *NativeInput) Start(onClick func(NativeClickEvent)) error {
 			n.hook = 0
 			n.callback = 0
 			n.onClick = nil
+			n.onKeyboard = nil
 		}
 		n.mu.Unlock()
 		return err
@@ -197,6 +216,7 @@ func (n *NativeInput) Stop() error {
 	n.hook = 0
 	n.callback = 0
 	n.onClick = nil
+	n.onKeyboard = nil
 	n.mu.Unlock()
 	return nil
 }
@@ -403,6 +423,74 @@ func (n *NativeInput) CaptureWindow(hwnd uintptr) (WindowCapture, error) {
 		WindowRect:    rect,
 		WindowTitle:   title,
 		WindowProcess: procName,
+	}, nil
+}
+
+func (n *NativeInput) CaptureScreenRegion(rect PixelBBox) (WindowCapture, error) {
+	if rect.W <= 0 || rect.H <= 0 {
+		return WindowCapture{}, fmt.Errorf("native capture: invalid screen region %+v", rect)
+	}
+	screenDC, _, err := procGetDC.Call(0)
+	if screenDC == 0 {
+		return WindowCapture{}, fmt.Errorf("native capture: GetDC failed: %v", err)
+	}
+	defer procReleaseDC.Call(0, screenDC)
+
+	memDC, _, err := procCreateCompatibleDC.Call(screenDC)
+	if memDC == 0 {
+		return WindowCapture{}, fmt.Errorf("native capture: CreateCompatibleDC failed: %v", err)
+	}
+	defer procDeleteDC.Call(memDC)
+
+	bmp, _, err := procCreateCompatibleBitmap.Call(screenDC, uintptr(rect.W), uintptr(rect.H))
+	if bmp == 0 {
+		return WindowCapture{}, fmt.Errorf("native capture: CreateCompatibleBitmap failed: %v", err)
+	}
+	defer procDeleteObject.Call(bmp)
+
+	oldObj, _, _ := procSelectObject.Call(memDC, bmp)
+	if oldObj != 0 {
+		defer procSelectObject.Call(memDC, oldObj)
+	}
+
+	if r, _, err := procBitBlt.Call(memDC, 0, 0, uintptr(rect.W), uintptr(rect.H), screenDC, uintptr(rect.X), uintptr(rect.Y), srccopy); r == 0 {
+		return WindowCapture{}, fmt.Errorf("native capture: BitBlt failed: %v", err)
+	}
+
+	data := make([]byte, rect.W*rect.H*4)
+	info := bitmapInfo{}
+	info.Header.Size = uint32(unsafe.Sizeof(info.Header))
+	info.Header.Width = int32(rect.W)
+	info.Header.Height = -int32(rect.H)
+	info.Header.Planes = 1
+	info.Header.BitCount = 32
+	info.Header.Compression = biRGB
+	info.Header.SizeImage = uint32(len(data))
+	if r, _, err := procGetDIBits.Call(
+		memDC,
+		bmp,
+		0,
+		uintptr(rect.H),
+		uintptr(unsafe.Pointer(&data[0])),
+		uintptr(unsafe.Pointer(&info)),
+		dibRGBColors,
+	); r == 0 {
+		return WindowCapture{}, fmt.Errorf("native capture: GetDIBits failed: %v", err)
+	}
+	for i := 0; i+3 < len(data); i += 4 {
+		data[i], data[i+2] = data[i+2], data[i]
+		if data[i+3] == 0 {
+			data[i+3] = 255
+		}
+	}
+	return WindowCapture{
+		ImageData:     data,
+		Width:         rect.W,
+		Height:        rect.H,
+		Scale:         1,
+		WindowRect:    rect,
+		WindowTitle:   "screen region",
+		WindowProcess: "screen",
 	}, nil
 }
 

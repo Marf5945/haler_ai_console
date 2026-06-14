@@ -6,47 +6,35 @@ import (
 	"ui_console/adapter/visual_learning"
 )
 
-func TestCanAutoConfirmLowRiskReplayAllowsNormalBrowserPage(t *testing.T) {
+func TestCanAutoConfirmBrowserReplayAllowsNormalBrowserPage(t *testing.T) {
 	step := visual_learning.LearningReplayStep{
 		WindowProcess: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
 		WindowTitle:   "YouTube - Google Chrome",
 	}
 	relocated := visual_learning.AnchorRelocationResult{Confidence: 0.61, Reason: "OpenCV fallback matched a candidate"}
-	if !canAutoConfirmLowRiskReplay(step, relocated) {
+	if !canAutoConfirmBrowserReplay(step, relocated) {
 		t.Fatal("expected normal Chrome page replay to auto-confirm")
 	}
 }
 
-func TestCanAutoConfirmLowRiskReplayAllowsExplorerFolderNavigation(t *testing.T) {
+func TestCanAutoConfirmBrowserReplayRejectsExplorer(t *testing.T) {
 	step := visual_learning.LearningReplayStep{
 		WindowProcess: "C:\\Windows\\explorer.exe",
-		WindowTitle:   "Projects",
+		WindowTitle:   "native-window",
 	}
 	relocated := visual_learning.AnchorRelocationResult{Confidence: 0.9}
-	if !canAutoConfirmLowRiskReplay(step, relocated) {
-		t.Fatal("expected explorer folder navigation replay to auto-confirm")
+	if canAutoConfirmBrowserReplay(step, relocated) {
+		t.Fatal("expected explorer replay to require confirmation")
 	}
 }
 
-func TestCanAutoConfirmLowRiskReplayRejectsDangerousExplorerText(t *testing.T) {
-	step := visual_learning.LearningReplayStep{
-		WindowProcess: "C:\\Windows\\explorer.exe",
-		WindowTitle:   "Recycle Bin",
-		Label:         "Delete",
-	}
-	relocated := visual_learning.AnchorRelocationResult{Confidence: 0.9}
-	if canAutoConfirmLowRiskReplay(step, relocated) {
-		t.Fatal("expected dangerous explorer replay to require confirmation")
-	}
-}
-
-func TestCanAutoConfirmLowRiskReplayRejectsDangerousBrowserText(t *testing.T) {
+func TestCanAutoConfirmBrowserReplayRejectsDangerousBrowserText(t *testing.T) {
 	step := visual_learning.LearningReplayStep{
 		WindowProcess: "chrome.exe",
 		WindowTitle:   "Checkout payment - Google Chrome",
 	}
 	relocated := visual_learning.AnchorRelocationResult{Confidence: 0.9}
-	if canAutoConfirmLowRiskReplay(step, relocated) {
+	if canAutoConfirmBrowserReplay(step, relocated) {
 		t.Fatal("expected payment page replay to require confirmation")
 	}
 }

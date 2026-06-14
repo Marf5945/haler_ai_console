@@ -24,7 +24,6 @@ import {memory} from '../models';
 import {debugtrace} from '../models';
 import {browser_pref} from '../models';
 import {taborder} from '../models';
-import {skill_eval} from '../models';
 
 export function AcknowledgePendingItem(arg1:string,arg2:string):Promise<void>;
 
@@ -111,6 +110,8 @@ export function ConfirmAndExecuteSkillExecution(arg1:string,arg2:string,arg3:str
 export function ConfirmClose(arg1:boolean,arg2:string):Promise<void>;
 
 export function ConfirmCredentialMigration():Promise<credential.MigrationStatus>;
+
+export function ConfirmLearningTextEvent(arg1:string,arg2:string):Promise<void>;
 
 export function ConfirmPackageInstall(arg1:string):Promise<void>;
 
@@ -304,6 +305,8 @@ export function GetReviewExecutionContext(arg1:string):Promise<review.ReviewExec
 
 export function GetSafariRuntimeNotice():Promise<browser_pref.RuntimeNoticeResult>;
 
+export function GetSchedulerClock():Promise<main.SchedulerClockSnapshot>;
+
 export function GetSettingsState():Promise<settings.State>;
 
 export function GetSidecarState():Promise<string>;
@@ -331,6 +334,8 @@ export function GetToolVisibility():Promise<any>;
 export function GetUISettings():Promise<any>;
 
 export function GetURLProvenance(arg1:string):Promise<any>;
+
+export function GetVisualLearningPermissionStatus():Promise<any>;
 
 export function GetVoiceSettings():Promise<voice.State>;
 
@@ -482,6 +487,8 @@ export function NotifyStatusRail(arg1:string,arg2:string,arg3:string,arg4:string
 
 export function OpenExternalURL(arg1:string):Promise<void>;
 
+export function OpenVisualLearningPermissionSettings(arg1:string):Promise<void>;
+
 export function PauseScheduledJob(arg1:string):Promise<void>;
 
 export function PollStatusRail():Promise<statusrail.View>;
@@ -517,6 +524,8 @@ export function PurgeProject(arg1:string,arg2:string):Promise<any>;
 export function ReadDocumentContent(arg1:string):Promise<string>;
 
 export function RecognizeNativeOCR(arg1:Array<number>):Promise<Array<visual_learning.OCRResult>>;
+
+export function RecordLearningKeyboardEvent(arg1:string):Promise<void>;
 
 export function RecordLearningMouseEvent(arg1:string):Promise<void>;
 
@@ -569,6 +578,8 @@ export function ReorderAdapters(arg1:string):Promise<void>;
 export function ReorderPersonas(arg1:Array<string>):Promise<settings.State>;
 
 export function ReorderTabs(arg1:string):Promise<void>;
+
+export function RequestVisualLearningPermissions():Promise<any>;
 
 export function ResolveAndExecuteDestructiveReviewCard(arg1:string,arg2:string):Promise<main.DestructiveReviewExecutionResult>;
 
@@ -731,7 +742,3 @@ export function VerifyMediaFile(arg1:string):Promise<any>;
 export function WakeLocalAdapter(arg1:string):Promise<any>;
 
 export function WakeOllamaDaemon():Promise<void>;
-
-export function WebChainMonthlyStats():Promise<Array<skill_eval.WebChainSigStats>>;
-
-export function WebChainSkillCandidates():Promise<Array<skill_eval.WebChainSigStats>>;

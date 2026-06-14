@@ -46,6 +46,7 @@ package visual_learning
 
 // Go 端匯出的回呼（cgo 產生對應 C symbol）。
 extern void goNativeClickCallback(double x, double y, int button, int clickCount, uintptr_t handle);
+extern void goNativeKeyboardCallback(int keyCode, uint64_t flags, const uint16_t *chars, int length, uintptr_t handle);
 
 typedef struct {
     CFMachPortRef      tap;
@@ -60,6 +61,15 @@ static CGEventRef nativeTapCallback(CGEventTapProxy proxy, CGEventType type,
                                     CGEventRef event, void *refcon) {
     if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
         if (gTap) CGEventTapEnable(gTap, true); // 被系統停用後自動恢復
+        return event;
+    }
+    if (type == kCGEventKeyDown) {
+        UniChar chars[16];
+        UniCharCount actual = 0;
+        CGEventKeyboardGetUnicodeString(event, 16, &actual, chars);
+        int keyCode = (int)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+        uint64_t flags = (uint64_t)CGEventGetFlags(event);
+        goNativeKeyboardCallback(keyCode, flags, (const uint16_t *)chars, (int)actual, (uintptr_t)refcon);
         return event;
     }
     int button = 0; // 0 = left, 1 = right
@@ -125,7 +135,8 @@ static int nativeRequestScreenCapture(void) {
 // 成功回 NativeTap*（malloc），失敗回 NULL（通常是缺權限）。非阻塞。
 static NativeTap *nativeTapSetup(uintptr_t handle) {
     CGEventMask mask = CGEventMaskBit(kCGEventLeftMouseUp) |
-                       CGEventMaskBit(kCGEventRightMouseUp);
+                       CGEventMaskBit(kCGEventRightMouseUp) |
+                       CGEventMaskBit(kCGEventKeyDown);
     CFMachPortRef tap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
                                          kCGEventTapOptionListenOnly, mask,
                                          nativeTapCallback, (void *)handle);
@@ -215,32 +226,38 @@ static int nativeWindowInfoByNumber(long windowNumber, WinInfo *out) {
     return 1;
 }
 
-// 找游標下、layer 0（一般視窗）、最前面、且 bounds 含點的視窗資訊。
+// 找游標下最前面且 bounds 含點的視窗資訊。第一輪偏好 layer 0
+//（一般視窗）；第二輪允許 Dock、選單列、浮層等非 layer-0 surface，
+// 讓學習模式能記錄 Dock/taskbar-like icon 點擊，再交給 screen-region
+// capture + OpenCV 輔助定位。
 static void nativeWindowAtPoint(double px, double py, WinInfo *out) {
     memset(out, 0, sizeof(WinInfo));
     CFArrayRef list = CGWindowListCopyWindowInfo(
-        kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+        kCGWindowListOptionOnScreenOnly,
         kCGNullWindowID);
     if (!list) return;
     CFIndex count = CFArrayGetCount(list); // 前到後（z-order）
-    for (CFIndex i = 0; i < count; i++) {
-        CFDictionaryRef d = (CFDictionaryRef)CFArrayGetValueAtIndex(list, i);
+    for (int pass = 0; pass < 2 && out->found == 0; pass++) {
+        for (CFIndex i = 0; i < count; i++) {
+            CFDictionaryRef d = (CFDictionaryRef)CFArrayGetValueAtIndex(list, i);
 
-        int layer = 0;
-        CFNumberRef layerRef = (CFNumberRef)CFDictionaryGetValue(d, kCGWindowLayer);
-        if (layerRef) CFNumberGetValue(layerRef, kCFNumberIntType, &layer);
-        if (layer != 0) continue; // 略過選單列、Dock、浮層等
+            int layer = 0;
+            CFNumberRef layerRef = (CFNumberRef)CFDictionaryGetValue(d, kCGWindowLayer);
+            if (layerRef) CFNumberGetValue(layerRef, kCFNumberIntType, &layer);
+            if (pass == 0 && layer != 0) continue;
+            if (pass == 1 && layer == 0) continue;
 
-        CFDictionaryRef boundsDict = (CFDictionaryRef)CFDictionaryGetValue(d, kCGWindowBounds);
-        if (!boundsDict) continue;
-        CGRect r;
-        if (!CGRectMakeWithDictionaryRepresentation(boundsDict, &r)) continue;
-        if (px < r.origin.x || py < r.origin.y ||
-            px > r.origin.x + r.size.width || py > r.origin.y + r.size.height) continue;
+            CFDictionaryRef boundsDict = (CFDictionaryRef)CFDictionaryGetValue(d, kCGWindowBounds);
+            if (!boundsDict) continue;
+            CGRect r;
+            if (!CGRectMakeWithDictionaryRepresentation(boundsDict, &r)) continue;
+            if (px < r.origin.x || py < r.origin.y ||
+                px > r.origin.x + r.size.width || py > r.origin.y + r.size.height) continue;
 
-        out->found = 1;
-        nativeFillWinInfoFromDict(d, out);
-        break;
+            out->found = 1;
+            nativeFillWinInfoFromDict(d, out);
+            break;
+        }
     }
     CFRelease(list);
 }
@@ -436,6 +453,73 @@ static int nativePostMouseClick(double x, double y, int rightButton, int clicks)
     return 1;
 }
 
+static int nativePostShortcutV(void) {
+    CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
+    CGEventRef down = CGEventCreateKeyboardEvent(source, (CGKeyCode)9, true);
+    CGEventRef up = CGEventCreateKeyboardEvent(source, (CGKeyCode)9, false);
+    if (!down || !up) {
+        if (down) CFRelease(down);
+        if (up) CFRelease(up);
+        if (source) CFRelease(source);
+        return 0;
+    }
+    CGEventSetFlags(down, kCGEventFlagMaskCommand);
+    CGEventSetFlags(up, kCGEventFlagMaskCommand);
+    CGEventPost(kCGHIDEventTap, down);
+    usleep(30000);
+    CGEventPost(kCGHIDEventTap, up);
+    CFRelease(down);
+    CFRelease(up);
+    if (source) CFRelease(source);
+    return 1;
+}
+
+static int nativePostVirtualKeyCode(int keyCode, uint64_t flags) {
+    CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
+    CGEventRef down = CGEventCreateKeyboardEvent(source, (CGKeyCode)keyCode, true);
+    CGEventRef up = CGEventCreateKeyboardEvent(source, (CGKeyCode)keyCode, false);
+    if (!down || !up) {
+        if (down) CFRelease(down);
+        if (up) CFRelease(up);
+        if (source) CFRelease(source);
+        return 0;
+    }
+    CGEventSetFlags(down, (CGEventFlags)flags);
+    CGEventSetFlags(up, (CGEventFlags)flags);
+    CGEventPost(kCGHIDEventTap, down);
+    usleep(30000);
+    CGEventPost(kCGHIDEventTap, up);
+    CFRelease(down);
+    CFRelease(up);
+    if (source) CFRelease(source);
+    return 1;
+}
+
+static int nativePostUnicodeText(const uint16_t *chars, int length) {
+    if (!chars || length <= 0) return 0;
+    CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
+    for (int i = 0; i < length; i++) {
+        UniChar ch = (UniChar)chars[i];
+        CGEventRef down = CGEventCreateKeyboardEvent(source, 0, true);
+        CGEventRef up = CGEventCreateKeyboardEvent(source, 0, false);
+        if (!down || !up) {
+            if (down) CFRelease(down);
+            if (up) CFRelease(up);
+            if (source) CFRelease(source);
+            return 0;
+        }
+        CGEventKeyboardSetUnicodeString(down, 1, &ch);
+        CGEventKeyboardSetUnicodeString(up, 1, &ch);
+        CGEventPost(kCGHIDEventTap, down);
+        CGEventPost(kCGHIDEventTap, up);
+        CFRelease(down);
+        CFRelease(up);
+        usleep(25000);
+    }
+    if (source) CFRelease(source);
+    return 1;
+}
+
 // ── 視窗截圖 ────────────────────────────────────────────────────────
 
 // CGImage → RGBA bytes（premultiplied, big-endian RGBA8888）。
@@ -497,18 +581,41 @@ static int nativeCaptureWindowRGBA(long windowNumber, uint8_t **outData, int *ou
     CGImageRelease(image);
     return ok;
 }
+
+// 截取螢幕上的一塊區域。用於 Dock / menu bar / overlay 這類不是一般
+// layer-0 app window 的點擊，讓 OpenCV fallback 能看見 icon 像素。
+static int nativeCaptureScreenRegionRGBA(double x, double y, double w, double h, uint8_t **outData, int *outW, int *outH) {
+    *outData = NULL;
+    *outW = 0;
+    *outH = 0;
+    if (w <= 0 || h <= 0) return 0;
+    typedef CGImageRef (*CreateWindowImageFn)(CGRect, CGWindowListOption, CGWindowID, CGWindowImageOption);
+    CreateWindowImageFn createImage = (CreateWindowImageFn)dlsym(RTLD_DEFAULT, "CGWindowListCreateImage");
+    if (!createImage) return 0;
+    CGImageRef image = createImage(
+        CGRectMake(x, y, w, h),
+        kCGWindowListOptionOnScreenOnly,
+        kCGNullWindowID,
+        kCGWindowImageDefault);
+    if (!image) return 0;
+    int ok = nativeImageToRGBA(image, outData, outW, outH);
+    CGImageRelease(image);
+    return ok;
+}
 */
 import "C"
 
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"runtime"
 	"runtime/cgo"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf16"
 	"unsafe"
 )
 
@@ -522,27 +629,93 @@ var (
 // Replay activates the target window (AX raise + frontmost) before posting
 // clicks, and supports visual relocation when window capture is available.
 type NativeInput struct {
-	mu      sync.Mutex
-	onClick func(NativeClickEvent)
-	handle  cgo.Handle
-	tap     *C.NativeTap
-	done    chan struct{}
-	selfPID int
+	mu         sync.Mutex
+	onClick    func(NativeClickEvent)
+	onKeyboard func(NativeKeyboardEvent)
+	handle     cgo.Handle
+	tap        *C.NativeTap
+	done       chan struct{}
+	selfPID    int
 }
 
 func NewNativeInput() *NativeInput {
 	return &NativeInput{selfPID: os.Getpid()}
 }
 
+func (n *NativeInput) PermissionStatus() NativePermissionStatus {
+	status := NativePermissionStatus{
+		Accessibility:   C.nativeCheckAccessibility() != 0,
+		InputMonitoring: C.nativePreflightListenAccess() != 0,
+		ScreenRecording: C.nativePreflightScreenCapture() != 0,
+		Platform:        "darwin",
+	}
+	status.Missing = nativePermissionMissing(status)
+	status.MissingKeys = nativePermissionMissingKeys(status)
+	status.NeedsRestart = len(status.Missing) > 0
+	if len(status.Missing) == 0 {
+		status.Message = "Visual Learning native permissions are ready."
+	} else {
+		status.Message = "Grant the missing macOS privacy permissions, then restart ai-console."
+	}
+	return status
+}
+
+func (n *NativeInput) RequestPermissions() NativePermissionStatus {
+	// 只對「目前缺少」的權限發出系統提示，且每個提示在一個 app 生命週期最多一次，
+	// 避免使用者每次按按鈕都被重複彈窗。Accessibility 的提示只是把使用者導去設定頁，
+	// 並非 app 內 inline 授權。
+	if C.nativeCheckAccessibility() == 0 && nativeAccessibilityPromptShown.CompareAndSwap(false, true) {
+		C.nativeRequestAccessibility()
+	}
+	if C.nativePreflightListenAccess() == 0 && nativeListenPromptShown.CompareAndSwap(false, true) {
+		C.nativeRequestListenAccess()
+	}
+	if C.nativePreflightScreenCapture() == 0 && nativeScreenCapturePromptShown.CompareAndSwap(false, true) {
+		C.nativeRequestScreenCapture()
+	}
+	status := n.PermissionStatus()
+	status.Requested = true
+	return status
+}
+
+func nativePermissionMissing(status NativePermissionStatus) []string {
+	missing := []string{}
+	if !status.Accessibility {
+		missing = append(missing, "輔助使用 Accessibility")
+	}
+	if !status.InputMonitoring {
+		missing = append(missing, "輸入監控 Input Monitoring")
+	}
+	if !status.ScreenRecording {
+		missing = append(missing, "螢幕錄製 Screen Recording")
+	}
+	return missing
+}
+
+func nativePermissionMissingKeys(status NativePermissionStatus) []string {
+	missing := []string{}
+	if !status.Accessibility {
+		missing = append(missing, "accessibility")
+	}
+	if !status.InputMonitoring {
+		missing = append(missing, "input_monitoring")
+	}
+	if !status.ScreenRecording {
+		missing = append(missing, "screen_recording")
+	}
+	return missing
+}
+
 // Start 安裝 CGEventTap 並開始錄製外部視窗點擊。
 // 若缺少授權（CGEventTapCreate 回 NULL），回明確錯誤。
-func (n *NativeInput) Start(onClick func(NativeClickEvent)) error {
+func (n *NativeInput) Start(onClick func(NativeClickEvent), onKeyboard func(NativeKeyboardEvent)) error {
 	n.mu.Lock()
 	if n.done != nil {
 		n.mu.Unlock()
 		return nil // 已在錄製
 	}
 	n.onClick = onClick
+	n.onKeyboard = onKeyboard
 	done := make(chan struct{})
 	n.done = done
 	n.handle = cgo.NewHandle(n)
@@ -560,6 +733,7 @@ func (n *NativeInput) Start(onClick func(NativeClickEvent)) error {
 				n.handle = 0
 			}
 			n.onClick = nil
+			n.onKeyboard = nil
 		}
 		n.mu.Unlock()
 		return err
@@ -571,32 +745,29 @@ func (n *NativeInput) runLoop(ready chan<- error, done chan struct{}) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	// 只在本次 app 生命週期第一次缺授權時跳出系統提示；之後由 UI 顯示
-	// native_recorder_degraded，避免權限視窗反覆干擾並被錄進示範。
+	// 錄製啟動「只檢查、不主動 prompt」：授權提示視窗會搶焦點、並被 event tap
+	// 錄成多餘步驟。缺權限時直接回明確錯誤，交由 UI（RequestPermissions /
+	// OpenVisualLearningPermissionSettings）引導使用者去設定頁授權後重啟 app。
 	//
-	// 注意：listen-only event tap 需要的是「輸入監控」，跟 Accessibility 是
-	// 兩個獨立授權，兩個都要請求。
-	if C.nativeCheckAccessibility() == 0 && nativeAccessibilityPromptShown.CompareAndSwap(false, true) {
-		C.nativeRequestAccessibility()
-	}
-	if C.nativePreflightListenAccess() == 0 && nativeListenPromptShown.CompareAndSwap(false, true) {
-		C.nativeRequestListenAccess()
+	// listen-only event tap 真正需要的是「輸入監控 Input Monitoring」——這也是
+	// 「錄製成功卻全空」的根因：缺它時 tap 可能建得起來，但系統不送任何事件。
+	if C.nativePreflightListenAccess() == 0 {
+		ready <- fmt.Errorf("native input: 缺少「輸入監控 Input Monitoring」，錄製收不到任何外部點擊/按鍵。請到 系統設定 → 隱私權與安全性 → 輸入監控 開啟 ai-console，完全結束並重啟 app")
+		n.closeDone(done)
+		return
 	}
 
 	tap := C.nativeTapSetup(C.uintptr_t(n.handle))
 	if tap == nil {
-		missing := make([]string, 0, 2)
-		if C.nativeCheckAccessibility() == 0 {
-			missing = append(missing, "輔助使用 Accessibility")
-		}
-		if C.nativePreflightListenAccess() == 0 {
-			missing = append(missing, "輸入監控 Input Monitoring")
-		}
-		detail := "Accessibility 與 Input Monitoring"
-		if len(missing) > 0 {
-			detail = strings.Join(missing, "、")
-		}
-		ready <- fmt.Errorf("native input: CGEventTapCreate failed — 請到 系統設定 → 隱私權與安全性 開啟「%s」後重啟 app（缺輸入監控時錄製收不到任何外部點擊）", detail)
+		ready <- fmt.Errorf("native input: CGEventTapCreate 失敗 — 通常仍是「輸入監控 Input Monitoring」尚未對這支執行檔生效，請確認已開啟並完全重啟 app")
+		n.closeDone(done)
+		return
+	}
+
+	// 防呆：tap 建立成功不代表事件會流入。再次確認輸入監控，避免靜默錄空。
+	if C.nativePreflightListenAccess() == 0 {
+		C.nativeTapTeardown(tap)
+		ready <- fmt.Errorf("native input: 已建立事件監聽，但「輸入監控 Input Monitoring」未授權，錄製會收不到任何事件 — 請開啟輸入監控並重啟 app")
 		n.closeDone(done)
 		return
 	}
@@ -649,6 +820,7 @@ func (n *NativeInput) Stop() error {
 		n.done = nil
 		n.tap = nil
 		n.onClick = nil
+		n.onKeyboard = nil
 		if !timedOut && n.handle != 0 {
 			n.handle.Delete()
 			n.handle = 0
@@ -668,10 +840,7 @@ func (n *NativeInput) Stop() error {
 func (n *NativeInput) emitClick(x, y, button, clickCount int) {
 	var info C.WinInfo
 	C.nativeWindowAtPoint(C.double(x), C.double(y), &info)
-	if info.found == 0 {
-		return
-	}
-	if int(info.pid) == n.selfPID {
+	if info.found != 0 && int(info.pid) == n.selfPID {
 		return // 略過點到自己 app 的情況（app 內點擊由 WebView 處理）
 	}
 
@@ -680,8 +849,14 @@ func (n *NativeInput) emitClick(x, y, button, clickCount int) {
 	if title == "" {
 		title = owner
 	}
-	if isMacOSPermissionPromptWindow(owner, title) {
+	if info.found != 0 && isMacOSPermissionPromptWindow(owner, title) {
 		return
+	}
+	if owner == "" {
+		owner = "screen"
+	}
+	if title == "" {
+		title = owner
 	}
 
 	var sw, sh C.int
@@ -712,6 +887,10 @@ func (n *NativeInput) emitClick(x, y, button, clickCount int) {
 			H: int(info.h),
 		},
 	}
+	if info.found == 0 {
+		event.WindowHandle = 0
+		event.WindowRect = PixelBBox{}
+	}
 
 	n.mu.Lock()
 	cb := n.onClick
@@ -719,6 +898,113 @@ func (n *NativeInput) emitClick(x, y, button, clickCount int) {
 	if cb != nil {
 		go cb(event)
 	}
+}
+
+func (n *NativeInput) emitKeyboard(keyCode int, flags uint64, text string) {
+	front := frontmostWindowInfo()
+	if front.PID == 0 || front.PID == n.selfPID {
+		return
+	}
+	key := nativeKeyName(keyCode)
+	modifiers := nativeModifierNames(flags)
+	action := string(MouseEventKey)
+	if len(modifiers) > 0 {
+		action = string(MouseEventShortcut)
+	} else if strings.TrimSpace(text) != "" {
+		action = string(MouseEventText)
+	}
+	if action == string(MouseEventKey) && key == "" {
+		return
+	}
+	var sw, sh C.int
+	C.nativeMainDisplaySize(&sw, &sh)
+	event := NativeKeyboardEvent{
+		Timestamp:     time.Now(),
+		Action:        action,
+		Text:          text,
+		Key:           firstNonEmptyKey(key, strings.TrimSpace(text)),
+		KeyCode:       keyCode,
+		Modifiers:     modifiers,
+		WindowTitle:   front.Title,
+		WindowProcess: front.Process,
+		WindowHandle:  front.Handle,
+		ScreenWidth:   int(sw),
+		ScreenHeight:  int(sh),
+		WindowRect:    front.Rect,
+	}
+	n.mu.Lock()
+	cb := n.onKeyboard
+	n.mu.Unlock()
+	if cb != nil {
+		go cb(event)
+	}
+}
+
+func nativeModifierNames(flags uint64) []string {
+	modifiers := []string{}
+	if flags&uint64(C.kCGEventFlagMaskCommand) != 0 {
+		modifiers = append(modifiers, "cmd")
+	}
+	if flags&uint64(C.kCGEventFlagMaskControl) != 0 {
+		modifiers = append(modifiers, "ctrl")
+	}
+	if flags&uint64(C.kCGEventFlagMaskAlternate) != 0 {
+		modifiers = append(modifiers, "option")
+	}
+	if flags&uint64(C.kCGEventFlagMaskShift) != 0 {
+		modifiers = append(modifiers, "shift")
+	}
+	if flags&uint64(C.kCGEventFlagMaskSecondaryFn) != 0 {
+		modifiers = append(modifiers, "fn")
+	}
+	return modifiers
+}
+
+func nativeKeyName(keyCode int) string {
+	switch keyCode {
+	case 36:
+		return "Enter"
+	case 48:
+		return "Tab"
+	case 49:
+		return "Space"
+	case 51:
+		return "Delete"
+	case 53:
+		return "Escape"
+	case 76:
+		return "NumpadEnter"
+	case 123:
+		return "ArrowLeft"
+	case 124:
+		return "ArrowRight"
+	case 125:
+		return "ArrowDown"
+	case 126:
+		return "ArrowUp"
+	}
+	if keyCode >= 0 && keyCode < len(macKeyCodeNames) {
+		return macKeyCodeNames[keyCode]
+	}
+	return ""
+}
+
+func firstNonEmptyKey(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+var macKeyCodeNames = []string{
+	"A", "S", "D", "F", "H", "G", "Z", "X", "C", "V",
+	"", "B", "Q", "W", "E", "R", "Y", "T", "1", "2",
+	"3", "4", "6", "5", "=", "9", "7", "-", "8", "0",
+	"]", "O", "U", "[", "I", "P", "Enter", "L", "J", "'",
+	"K", ";", "\\", ",", "/", "N", "M", ".", "Tab", "Space",
+	"`", "Delete", "", "Escape",
 }
 
 // ResolveWindow 比對錄到的 window handle 與目前桌面：
@@ -822,6 +1108,26 @@ func frontmostWindowInfo() ResolvedWindow {
 
 // Click / MoveCursorOnly：以 macOS 全域螢幕座標（point）重放。
 func (n *NativeInput) Click(step LearningReplayStep) NativeReplayResult {
+	switch step.Action {
+	case string(MouseEventText):
+		return n.TypeText(step)
+	case string(MouseEventSensitive):
+		return NativeReplayResult{
+			OK:            false,
+			Skipped:       true,
+			Method:        "native_sensitive_text",
+			Index:         step.Index,
+			Label:         step.Label,
+			X:             step.X,
+			Y:             step.Y,
+			Error:         "sensitive text was not saved; use the configured password/credential app to authorize filling it",
+			WindowTitle:   step.WindowTitle,
+			WindowProcess: step.WindowProcess,
+			Sensitive:     true,
+		}
+	case string(MouseEventShortcut), string(MouseEventKey):
+		return n.PressKey(step)
+	}
 	if step.CoordinateSpace != "screen" && step.Source != "native" {
 		return NativeReplayResult{
 			OK:      false,
@@ -897,6 +1203,200 @@ func (n *NativeInput) Click(step LearningReplayStep) NativeReplayResult {
 		ForegroundProcess: frontProcess,
 		Warning:           warning,
 	}
+}
+
+func (n *NativeInput) TypeText(step LearningReplayStep) NativeReplayResult {
+	if step.RequiresConfirm && !step.ReplayConfirmed {
+		return NativeReplayResult{
+			OK:                false,
+			Skipped:           true,
+			NeedsConfirmation: true,
+			Method:            "native_text_confirmation",
+			Index:             step.Index,
+			Label:             step.Label,
+			X:                 step.X,
+			Y:                 step.Y,
+			Text:              step.Text,
+			WindowTitle:       step.WindowTitle,
+			WindowProcess:     step.WindowProcess,
+			Error:             "text input requires confirmation before replay",
+		}
+	}
+	if strings.TrimSpace(step.Text) == "" {
+		return NativeReplayResult{
+			OK:            false,
+			Skipped:       true,
+			Method:        "native_text",
+			Index:         step.Index,
+			Label:         step.Label,
+			X:             step.X,
+			Y:             step.Y,
+			Error:         "text step has no saved text",
+			WindowTitle:   step.WindowTitle,
+			WindowProcess: step.WindowProcess,
+		}
+	}
+	if C.nativeCheckAccessibility() == 0 {
+		return NativeReplayResult{
+			OK:            false,
+			Method:        "native_text",
+			Index:         step.Index,
+			Label:         step.Label,
+			X:             step.X,
+			Y:             step.Y,
+			Error:         "native input: text replay requires Accessibility permission",
+			WindowTitle:   step.WindowTitle,
+			WindowProcess: step.WindowProcess,
+		}
+	}
+	foregroundOK, frontTitle, frontProcess := n.activateStepWindow(step)
+	time.Sleep(250 * time.Millisecond)
+	method := "native_paste_safe"
+	ok := false
+	if strings.EqualFold(step.Playback, "type") {
+		ok = nativeTypeUnicodeText(step.Text)
+		method = "native_type_text"
+	} else {
+		ok = nativePasteText(step.Text)
+		if !ok {
+			ok = nativeTypeUnicodeText(step.Text)
+			method = "native_type_text"
+		}
+	}
+	result := NativeReplayResult{
+		OK:                ok,
+		Method:            method,
+		Index:             step.Index,
+		Label:             step.Label,
+		X:                 step.X,
+		Y:                 step.Y,
+		Text:              step.Text,
+		WindowTitle:       step.WindowTitle,
+		WindowProcess:     step.WindowProcess,
+		ForegroundOK:      foregroundOK,
+		ForegroundTitle:   frontTitle,
+		ForegroundProcess: frontProcess,
+	}
+	if !ok {
+		result.Error = "native input: failed to replay text"
+	}
+	return result
+}
+
+func (n *NativeInput) PressKey(step LearningReplayStep) NativeReplayResult {
+	if C.nativeCheckAccessibility() == 0 {
+		return NativeReplayResult{
+			OK:            false,
+			Method:        "native_key",
+			Index:         step.Index,
+			Label:         step.Label,
+			X:             step.X,
+			Y:             step.Y,
+			Error:         "native input: key replay requires Accessibility permission",
+			WindowTitle:   step.WindowTitle,
+			WindowProcess: step.WindowProcess,
+		}
+	}
+	foregroundOK, frontTitle, frontProcess := n.activateStepWindow(step)
+	time.Sleep(180 * time.Millisecond)
+	ok := false
+	key := strings.TrimSpace(step.Key)
+	if strings.EqualFold(key, "Enter") || strings.EqualFold(key, "NumpadEnter") {
+		ok = nativeTypeUnicodeText("\n")
+	} else if strings.EqualFold(key, "Tab") {
+		ok = nativeTypeUnicodeText("\t")
+	} else if strings.EqualFold(key, "Space") {
+		ok = nativeTypeUnicodeText(" ")
+	} else if strings.EqualFold(key, "Escape") {
+		ok = nativePostVirtualKey(53, step.Modifiers)
+	} else if len(step.Modifiers) > 0 {
+		ok = nativePostShortcut(step)
+	} else if key != "" && len([]rune(key)) == 1 {
+		ok = nativeTypeUnicodeText(key)
+	}
+	result := NativeReplayResult{
+		OK:                ok,
+		Method:            "native_key",
+		Index:             step.Index,
+		Label:             step.Label,
+		X:                 step.X,
+		Y:                 step.Y,
+		Key:               key,
+		Modifiers:         append([]string(nil), step.Modifiers...),
+		WindowTitle:       step.WindowTitle,
+		WindowProcess:     step.WindowProcess,
+		ForegroundOK:      foregroundOK,
+		ForegroundTitle:   frontTitle,
+		ForegroundProcess: frontProcess,
+	}
+	if !ok {
+		result.Error = "native input: unsupported or failed key replay"
+	}
+	return result
+}
+
+func nativePasteText(text string) bool {
+	previous, _ := exec.Command("pbpaste").Output()
+	cmd := exec.Command("pbcopy")
+	cmd.Stdin = strings.NewReader(text)
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	ok := C.nativePostShortcutV() != 0
+	time.Sleep(120 * time.Millisecond)
+	restore := exec.Command("pbcopy")
+	restore.Stdin = strings.NewReader(string(previous))
+	_ = restore.Run()
+	return ok
+}
+
+func nativeTypeUnicodeText(text string) bool {
+	encoded := utf16.Encode([]rune(text))
+	if len(encoded) == 0 {
+		return false
+	}
+	return C.nativePostUnicodeText((*C.uint16_t)(unsafe.Pointer(&encoded[0])), C.int(len(encoded))) != 0
+}
+
+func nativePostShortcut(step LearningReplayStep) bool {
+	keyCode, ok := macKeyNameToCode(strings.TrimSpace(step.Key))
+	if !ok {
+		return false
+	}
+	return nativePostVirtualKey(keyCode, step.Modifiers)
+}
+
+func nativePostVirtualKey(keyCode int, modifiers []string) bool {
+	flags := nativeFlagsFromModifiers(modifiers)
+	return C.nativePostVirtualKeyCode(C.int(keyCode), C.uint64_t(flags)) != 0
+}
+
+func macKeyNameToCode(key string) (int, bool) {
+	for code, name := range macKeyCodeNames {
+		if strings.EqualFold(name, key) {
+			return code, true
+		}
+	}
+	return 0, false
+}
+
+func nativeFlagsFromModifiers(modifiers []string) uint64 {
+	var flags uint64
+	for _, mod := range modifiers {
+		switch strings.ToLower(strings.TrimSpace(mod)) {
+		case "cmd", "command", "meta":
+			flags |= uint64(C.kCGEventFlagMaskCommand)
+		case "ctrl", "control":
+			flags |= uint64(C.kCGEventFlagMaskControl)
+		case "option", "alt":
+			flags |= uint64(C.kCGEventFlagMaskAlternate)
+		case "shift":
+			flags |= uint64(C.kCGEventFlagMaskShift)
+		case "fn":
+			flags |= uint64(C.kCGEventFlagMaskSecondaryFn)
+		}
+	}
+	return flags
 }
 
 func (n *NativeInput) MoveCursorOnly(step LearningReplayStep) NativeReplayResult {
@@ -980,6 +1480,59 @@ func (n *NativeInput) CaptureWindow(hwnd uintptr) (WindowCapture, error) {
 		},
 		WindowTitle:   title,
 		WindowProcess: owner,
+	}, nil
+}
+
+// CaptureScreenRegion captures visible screen pixels for surfaces that are not
+// stable layer-0 windows, such as the Dock, menu bar, or floating overlays.
+func (n *NativeInput) CaptureScreenRegion(rect PixelBBox) (WindowCapture, error) {
+	if rect.W <= 0 || rect.H <= 0 {
+		return WindowCapture{}, fmt.Errorf("native capture: invalid screen region %+v", rect)
+	}
+	if C.nativePreflightScreenCapture() == 0 {
+		if nativeScreenCapturePromptShown.CompareAndSwap(false, true) {
+			C.nativeRequestScreenCapture()
+		}
+		return WindowCapture{}, fmt.Errorf("native capture: 缺少「螢幕錄製 Screen Recording」權限（系統設定 → 隱私權與安全性 → 螢幕錄製），螢幕區塊視覺重定位停用")
+	}
+	var data *C.uint8_t
+	var width, height C.int
+	ok := C.nativeCaptureScreenRegionRGBA(
+		C.double(rect.X),
+		C.double(rect.Y),
+		C.double(rect.W),
+		C.double(rect.H),
+		&data,
+		&width,
+		&height,
+	)
+	if ok == 0 || data == nil || width <= 0 || height <= 0 {
+		return WindowCapture{}, fmt.Errorf("native capture: screen region capture failed %+v", rect)
+	}
+	defer C.free(unsafe.Pointer(data))
+	size := int(width) * int(height) * 4
+	imageData := C.GoBytes(unsafe.Pointer(data), C.int(size))
+	scale := 1.0
+	if rect.W > 0 {
+		scale = float64(width) / float64(rect.W)
+		for _, snap := range []float64{1, 2, 3} {
+			if scale > snap*0.92 && scale < snap*1.08 {
+				scale = snap
+				break
+			}
+		}
+		if scale <= 0 {
+			scale = 1
+		}
+	}
+	return WindowCapture{
+		ImageData:     imageData,
+		Width:         int(width),
+		Height:        int(height),
+		Scale:         scale,
+		WindowRect:    rect,
+		WindowTitle:   "screen region",
+		WindowProcess: "screen",
 	}, nil
 }
 

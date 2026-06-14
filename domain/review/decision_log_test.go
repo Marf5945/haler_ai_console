@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"ui_console/audit_log"
@@ -79,9 +78,6 @@ func TestWriteDecisionLogJSONLFormat(t *testing.T) {
 
 // TestWriteDecisionLogFilePermission verifies the log file is 0644.
 func TestWriteDecisionLogFilePermission(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows does not report Unix permission bits reliably")
-	}
 	dataRoot := tmpDataRoot(t)
 	svc := NewServiceWithDataRoot(dataRoot)
 
@@ -110,9 +106,6 @@ func TestWriteDecisionLogFilePermission(t *testing.T) {
 
 // TestWriteDecisionLogDirPermission verifies the review directory is 0755.
 func TestWriteDecisionLogDirPermission(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows does not report Unix permission bits reliably")
-	}
 	dataRoot := tmpDataRoot(t)
 	svc := NewServiceWithDataRoot(dataRoot)
 

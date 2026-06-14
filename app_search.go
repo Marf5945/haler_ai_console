@@ -25,6 +25,11 @@ func (a *App) maybeHandleLocalSearch(userText, sessionID, traceID string) (*skil
 	if isLearningOperationCatalogText(userText) {
 		return nil, false
 	}
+	if target, ok := parseMemoryExpandRequest(userText); ok {
+		if handled, resp := a.maybeExpandMemory(memoryExpandActionLabel, target, traceID); handled {
+			return &resp, true
+		}
+	}
 	if resp, ok := a.maybeHandlePendingLocalSearchWebFallback(userText, sessionID, traceID); ok {
 		return resp, true
 	}
@@ -56,6 +61,23 @@ func (a *App) maybeHandleLocalSearch(userText, sessionID, traceID string) (*skil
 	}
 	resp := a.executeLocalSearch(req, sessionID, traceID)
 	return &resp, true
+}
+
+func parseMemoryExpandRequest(userText string) (string, bool) {
+	text := strings.TrimSpace(userText)
+	if text == "" {
+		return "", false
+	}
+	for _, prefix := range []string{"展開", "查回", "展開記憶", "展開摘要"} {
+		if strings.HasPrefix(text, prefix) {
+			target := strings.TrimSpace(strings.TrimPrefix(text, prefix))
+			target = strings.TrimSpace(strings.TrimSuffix(target, "的細節"))
+			target = strings.TrimSpace(strings.TrimSuffix(target, "細節"))
+			target = strings.Trim(target, "：: -")
+			return target, target != ""
+		}
+	}
+	return "", false
 }
 
 func (a *App) maybeHandlePendingLocalSearchWebFallback(userText, sessionID, traceID string) (*skill_step.CLIResponse, bool) {

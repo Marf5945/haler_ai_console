@@ -102,6 +102,53 @@ func (s *LoopState) TrimToBudget(budget int) {
 	}
 }
 
+// CompressToBudget 摘要式壓縮（v3.1.8，取代 TrimToBudget 的硬截斷路線）：
+// 超預算時把最舊的一批觀察「合併」成一筆 digest（保留每筆的動作、目標與開頭線索），
+// 而不是把它們逐筆掏空——同樣的 byte 數下保住更多訊號。deterministic、不叫 LLM。
+func (s *LoopState) CompressToBudget(budget int) {
+	if s.SanitizedBytes() <= budget || len(s.Observations) <= 2 {
+		return
+	}
+	// 從最舊開始收進 digest，直到剩餘部分壓進預算的 7 成（留空間給新觀察）。
+	target := budget * 7 / 10
+	cut := 0
+	remaining := s.SanitizedBytes()
+	for cut < len(s.Observations)-2 && remaining > target {
+		remaining -= len(s.Observations[cut].SanitizedText)
+		cut++
+	}
+	if cut == 0 {
+		return
+	}
+	var b strings.Builder
+	b.WriteString("（前段摘要）")
+	for i := 0; i < cut; i++ {
+		o := s.Observations[i]
+		head := o.SanitizedText
+		if len(head) > 100 {
+			c := 100
+			for c > 0 && (head[c]&0xC0) == 0x80 {
+				c--
+			}
+			head = head[:c] + "…"
+		}
+		fmt.Fprintf(&b, "\n%d. [%s %s] %s", i+1, o.Action, o.Target, head)
+	}
+	digest := ObservationRecord{
+		Kind:          "digest",
+		Action:        "摘要",
+		SanitizedText: b.String(),
+		CompactText:   b.String(),
+		Hash:          HashObservation("digest", "", b.String()),
+		Truncated:     true,
+	}
+	s.Observations = append([]ObservationRecord{digest}, s.Observations[cut:]...)
+	// digest 本身仍超預算（單筆都很肥）→ 退回硬修剪兜底。
+	if s.SanitizedBytes() > budget {
+		s.TrimToBudget(budget)
+	}
+}
+
 func loopStatePath(projectRoot, runID, nodeID string) string {
 	return filepath.Join(projectRoot, "dag_runs", runID+"."+nodeID+suffixLoop)
 }

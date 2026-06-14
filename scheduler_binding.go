@@ -7,9 +7,34 @@ package main
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"ui_console/shared/scheduler"
 )
+
+// SchedulerClockSnapshot 描述排程器目前使用的本機系統時間。
+type SchedulerClockSnapshot struct {
+	Now           string `json:"now"`
+	LocalTime     string `json:"local_time"`
+	UnixMillis    int64  `json:"unix_millis"`
+	Timezone      string `json:"timezone"`
+	UTCOffset     string `json:"utc_offset"`
+	UTCOffsetMins int    `json:"utc_offset_minutes"`
+}
+
+// GetSchedulerClock 回傳後端排程器所依據的本機系統時間。
+func (a *App) GetSchedulerClock() SchedulerClockSnapshot {
+	now := time.Now()
+	zoneName, offsetSeconds := now.Zone()
+	return SchedulerClockSnapshot{
+		Now:           now.Format(time.RFC3339),
+		LocalTime:     now.Format("2006-01-02 15:04:05"),
+		UnixMillis:    now.UnixMilli(),
+		Timezone:      zoneName,
+		UTCOffset:     formatUTCOffset(offsetSeconds),
+		UTCOffsetMins: offsetSeconds / 60,
+	}
+}
 
 // --------------------------------------------------------------------------
 // CreateScheduledJob — 建立排程任務

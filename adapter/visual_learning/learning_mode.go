@@ -33,6 +33,10 @@ const (
 	MouseEventDoubleClick MouseEventType = "double_click"
 	MouseEventDrag        MouseEventType = "drag"
 	MouseEventScroll      MouseEventType = "scroll"
+	MouseEventText        MouseEventType = "text"
+	MouseEventShortcut    MouseEventType = "shortcut"
+	MouseEventKey         MouseEventType = "key"
+	MouseEventSensitive   MouseEventType = "sensitive_text"
 )
 
 // LearningRun is the top-level record for one user-initiated demonstration session.
@@ -64,6 +68,12 @@ type MouseEventTrace struct {
 	X               int                       `json:"x"`
 	Y               int                       `json:"y"`
 	Button          string                    `json:"button"`
+	Text            string                    `json:"text,omitempty"`
+	Key             string                    `json:"key,omitempty"`
+	Modifiers       []string                  `json:"modifiers,omitempty"`
+	Playback        string                    `json:"playback,omitempty"`
+	Sensitive       bool                      `json:"sensitive,omitempty"`
+	RequiresConfirm bool                      `json:"requires_confirmation,omitempty"`
 	Source          string                    `json:"source,omitempty"`
 	CoordinateSpace string                    `json:"coordinate_space,omitempty"`
 	TargetRegionID  string                    `json:"target_region_id"`
@@ -153,6 +163,13 @@ type LearningReplayStep struct {
 	X               int                       `json:"x"`
 	Y               int                       `json:"y"`
 	Button          string                    `json:"button"`
+	Text            string                    `json:"text,omitempty"`
+	Key             string                    `json:"key,omitempty"`
+	Modifiers       []string                  `json:"modifiers,omitempty"`
+	Playback        string                    `json:"playback,omitempty"`
+	Sensitive       bool                      `json:"sensitive,omitempty"`
+	RequiresConfirm bool                      `json:"requires_confirmation,omitempty"`
+	ReplayConfirmed bool                      `json:"replay_confirmed,omitempty"`
 	Source          string                    `json:"source,omitempty"`
 	CoordinateSpace string                    `json:"coordinate_space,omitempty"`
 	Label           string                    `json:"label,omitempty"`
@@ -745,6 +762,12 @@ func (s *LearningService) replayStepsFromTraceLocked(tracePath string) ([]Learni
 			X:               event.X,
 			Y:               event.Y,
 			Button:          event.Button,
+			Text:            event.Text,
+			Key:             event.Key,
+			Modifiers:       append([]string(nil), event.Modifiers...),
+			Playback:        event.Playback,
+			Sensitive:       event.Sensitive,
+			RequiresConfirm: event.RequiresConfirm,
 			Source:          event.Source,
 			CoordinateSpace: event.CoordinateSpace,
 			Label:           event.TargetLabel,
@@ -763,6 +786,11 @@ func (s *LearningService) replayStepsFromTraceLocked(tracePath string) ([]Learni
 		if prev := len(steps) - 1; prev >= 0 && shouldMergeDoubleClickStep(steps[prev], step) {
 			step.Index = steps[prev].Index
 			steps[prev] = step
+			continue
+		}
+		if prev := len(steps) - 1; prev >= 0 && shouldMergeTextStep(steps[prev], step) {
+			steps[prev].Text += step.Text
+			steps[prev].Summary = replayStepSummary(steps[prev])
 			continue
 		}
 		steps = append(steps, step)
@@ -792,6 +820,25 @@ func shouldMergeDoubleClickStep(prev, next LearningReplayStep) bool {
 		dy = -dy
 	}
 	return dx <= 8 && dy <= 8
+}
+
+func shouldMergeTextStep(prev, next LearningReplayStep) bool {
+	if prev.Action != string(MouseEventText) || next.Action != string(MouseEventText) {
+		return false
+	}
+	if prev.Sensitive || next.Sensitive || prev.RequiresConfirm != next.RequiresConfirm {
+		return false
+	}
+	if prev.Source != next.Source || prev.CoordinateSpace != next.CoordinateSpace {
+		return false
+	}
+	if prev.CSSSelector != next.CSSSelector || prev.WindowHandle != next.WindowHandle {
+		return false
+	}
+	if strings.TrimSpace(next.Text) == "" {
+		return false
+	}
+	return true
 }
 
 func learningRunTag(runID string) string {
@@ -861,10 +908,13 @@ func buildLearningRunTitle(run *LearningRun, steps []LearningReplayStep) string 
 	if len(steps) == 0 {
 		return "empty demo"
 	}
+	if steps[0].Action == string(MouseEventText) {
+		return fmt.Sprintf("type into %s", replayStepTarget(steps[0]))
+	}
 	first := replayStepTarget(steps[0])
 	last := replayStepTarget(steps[len(steps)-1])
 	if first == last || last == "" {
-		return fmt.Sprintf("click %s", first)
+		return fmt.Sprintf("%s %s", firstNonEmptyString(steps[0].Action, "click"), first)
 	}
 	return fmt.Sprintf("%s to %s", first, last)
 }
@@ -875,6 +925,8 @@ func buildLearningRunSummary(steps []LearningReplayStep) string {
 	}
 	nativeCount := 0
 	domCount := 0
+	textCount := 0
+	shortcutCount := 0
 	targets := make([]string, 0, 3)
 	seenTargets := map[string]bool{}
 	for _, step := range steps {
@@ -883,13 +935,25 @@ func buildLearningRunSummary(steps []LearningReplayStep) string {
 		} else {
 			domCount++
 		}
+		switch step.Action {
+		case string(MouseEventText), string(MouseEventSensitive):
+			textCount++
+		case string(MouseEventShortcut), string(MouseEventKey):
+			shortcutCount++
+		}
 		target := replayStepTarget(step)
 		if target != "" && !seenTargets[target] && len(targets) < 3 {
 			seenTargets[target] = true
 			targets = append(targets, target)
 		}
 	}
-	parts := []string{fmt.Sprintf("%d click steps", len(steps))}
+	parts := []string{fmt.Sprintf("%d replay steps", len(steps))}
+	if textCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d text/key-input steps", textCount))
+	}
+	if shortcutCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d shortcut steps", shortcutCount))
+	}
 	if nativeCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d native window steps", nativeCount))
 	}
@@ -952,6 +1016,9 @@ func operationKeywords(run *LearningRun, steps []LearningReplayStep) []string {
 	}
 	for _, step := range steps {
 		keywords = append(keywords,
+			step.Action,
+			step.Key,
+			strings.Join(step.Modifiers, " "),
 			step.Label,
 			step.Role,
 			step.Tag,
@@ -985,12 +1052,20 @@ func operationRisk(run *LearningRun, steps []LearningReplayStep) *OperationRisk 
 	reasons := []string{}
 	nativeCount := 0
 	manualAnchorCount := 0
+	textCount := 0
+	sensitiveCount := 0
 	for _, step := range steps {
 		if step.Source == "native" || step.CoordinateSpace == "screen" {
 			nativeCount++
 		}
 		if step.WindowsAnchor != nil && step.WindowsAnchor.NeedsReview {
 			manualAnchorCount++
+		}
+		if step.Action == string(MouseEventText) || step.Action == string(MouseEventShortcut) || step.Action == string(MouseEventKey) {
+			textCount++
+		}
+		if step.Sensitive || step.Action == string(MouseEventSensitive) {
+			sensitiveCount++
 		}
 	}
 	if nativeCount > 0 {
@@ -1000,6 +1075,14 @@ func operationRisk(run *LearningRun, steps []LearningReplayStep) *OperationRisk 
 	if manualAnchorCount > 0 {
 		score += 25
 		reasons = append(reasons, "manual_anchor_needs_review")
+	}
+	if textCount > 0 {
+		score += 20
+		reasons = append(reasons, "keyboard_or_text_input")
+	}
+	if sensitiveCount > 0 {
+		score += 40
+		reasons = append(reasons, "sensitive_text_placeholder")
 	}
 	if len(steps) >= 6 {
 		score += 15
@@ -1123,5 +1206,29 @@ func replayStepSummary(step LearningReplayStep) string {
 	if action == "" {
 		action = "click"
 	}
+	switch action {
+	case string(MouseEventText):
+		if step.Sensitive {
+			return fmt.Sprintf("sensitive text input in %s", replayStepTarget(step))
+		}
+		return fmt.Sprintf("type text in %s", replayStepTarget(step))
+	case string(MouseEventShortcut):
+		return fmt.Sprintf("press shortcut %s in %s", shortcutSummary(step), replayStepTarget(step))
+	case string(MouseEventKey):
+		return fmt.Sprintf("press key %s in %s", strings.TrimSpace(step.Key), replayStepTarget(step))
+	case string(MouseEventSensitive):
+		return fmt.Sprintf("sensitive text input in %s", replayStepTarget(step))
+	}
 	return fmt.Sprintf("%s %s at (%d, %d)", action, replayStepTarget(step), step.X, step.Y)
+}
+
+func shortcutSummary(step LearningReplayStep) string {
+	parts := append([]string(nil), step.Modifiers...)
+	if strings.TrimSpace(step.Key) != "" {
+		parts = append(parts, strings.TrimSpace(step.Key))
+	}
+	if len(parts) == 0 {
+		return "unknown"
+	}
+	return strings.Join(parts, "+")
 }

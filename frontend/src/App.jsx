@@ -44,10 +44,12 @@ import {
   ListPendingPackages,
   ListScheduledJobs,
   NormalizeSchedulerDraft,
+  ResolveSchedulerBackgroundPrompt,
   // #I-1002: Review Archive binding
   ListReviewArchive,
   ListTools,
   PollStatusRail,
+  PrepareLearningDigest,
   PreparePackageInstallPayload,
   PromoteDraftToPending,
   ListExternalLinksByType,
@@ -1148,6 +1150,8 @@ function App() {
       return false;
     }
   });
+  const learningDigestReadyRef = useRef(false);
+  const learningDigestPreparingRef = useRef(false);
 
   useEffect(() => {
     refreshSchedulerClock();
@@ -1530,6 +1534,8 @@ function App() {
 
   // §30: 關閉視窗 → 存成 sub 對話框
   const [sessionClosePrompt, setSessionClosePrompt] = useState(null);
+  const [schedulerBgPrompt, setSchedulerBgPrompt] = useState(false);
+  const [schedulerBgBusy, setSchedulerBgBusy] = useState(false);
 
   // I-2: Skill Context Orchestration
   const [appSessionId, setAppSessionId] = useState('');
@@ -2005,6 +2011,9 @@ function App() {
         setTimeout(() => setAutoArchiveToast(null), 5000);
       }
     });
+    const offDigestUpdated = EventsOn('digest:updated', () => {
+      loadReviewPanelData();
+    });
 
     // #I-805: Sidecar 崩潰 / 狀態變更事件
     const offExecInterrupted = EventsOn('dag:execution_interrupted', (payload) => {
@@ -2164,6 +2173,10 @@ function App() {
         setSessionClosePrompt(payload.analysis);
       }
     });
+    // Phase G：關閉時若有啟用排程，後端 emit 此事件 → 顯示背景模式選擇。
+    const offSchedulerBgPrompt = EventsOn('scheduler:background_prompt', () => {
+      setSchedulerBgPrompt(true);
+    });
     const offSessionCloseConfirmed = EventsOn('session:close_confirmed', () => {
       // 後端已完成清除，下一次關閉會由 beforeClose 放行。
       Quit();
@@ -2240,6 +2253,7 @@ function App() {
       offDegradedExit();
       offMemory();
       offExecInterrupted();
+      offDigestUpdated();
       offSidecarState();
       offCLIAuth();
       offNativeRecorderDegraded();
@@ -2262,6 +2276,7 @@ function App() {
       offW3ATrust();
       offSessionClose();
       offSessionCloseConfirmed();
+      offSchedulerBgPrompt();
       offLearningTextConfirm();
     };
   }, []);
@@ -3089,10 +3104,10 @@ function App() {
   useEffect(() => {
     if (!learningEnabled) return undefined;
 
-    let idleTimer = window.setTimeout(markLearningDigestReady, learningIdleDelayMs);
+    let idleTimer = window.setTimeout(() => markLearningDigestReady('idle_20m'), learningIdleDelayMs);
     const resetIdleTimer = () => {
       window.clearTimeout(idleTimer);
-      idleTimer = window.setTimeout(markLearningDigestReady, learningIdleDelayMs);
+      idleTimer = window.setTimeout(() => markLearningDigestReady('idle_20m'), learningIdleDelayMs);
     };
     const activityEvents = ['keydown', 'pointerdown', 'mousemove', 'wheel', 'touchstart'];
     activityEvents.forEach((eventName) => window.addEventListener(eventName, resetIdleTimer, {passive: true}));
@@ -3104,6 +3119,10 @@ function App() {
       window.removeEventListener('beforeunload', confirmLearningBackground);
     };
   }, [learningEnabled]);
+
+  useEffect(() => {
+    learningDigestReadyRef.current = learningDigestReady;
+  }, [learningDigestReady]);
 
   useEffect(() => {
     try {
@@ -6510,13 +6529,23 @@ function App() {
     }
   }
 
-  // Stores a lightweight "new skill/sub digest" hint for the next app open.
-  function markLearningDigestReady() {
-    setLearningDigestReady(true);
+  // Idle learning prepares a real Review Panel digest before showing the hint.
+  async function markLearningDigestReady(reason = 'idle') {
+    if (learningDigestReadyRef.current || learningDigestPreparingRef.current) return;
+    learningDigestPreparingRef.current = true;
     try {
-      window.localStorage.setItem(learningDigestStorageKey, 'true');
-    } catch {
-      /* local notification hint only */
+      const result = await callWails(() => PrepareLearningDigest(reason)).catch(() => null);
+      if (result?.has_updates === false) return;
+      learningDigestReadyRef.current = true;
+      setLearningDigestReady(true);
+      loadReviewPanelData();
+      try {
+        window.localStorage.setItem(learningDigestStorageKey, 'true');
+      } catch {
+        /* local notification hint only */
+      }
+    } finally {
+      learningDigestPreparingRef.current = false;
     }
   }
 
@@ -6552,6 +6581,7 @@ function App() {
       setVlLearningActive(false);
       setVlActiveLearningRun(null);
       setLearningDigestReady(false);
+      learningDigestReadyRef.current = false;
       try { window.localStorage.removeItem(learningDigestStorageKey); } catch { /* */ }
     } else {
       // 開啟學習模式（需要 activeWindowHash，目前用 session ID）
@@ -7715,6 +7745,51 @@ function App() {
       )}
       {packageInstallError && !pendingImport && (
         <PackageErrorToast message={packageInstallError} onClose={() => setPackageInstallError('')}/>
+      )}
+
+      {/* Phase G：關閉前的背景喚醒選擇 */}
+      {schedulerBgPrompt && (
+        <div className="session-close-overlay" role="dialog" aria-modal="true" aria-label="排程背景模式">
+          <div className="session-close-dialog">
+            <h3>關閉前：要讓排程在背景繼續嗎？</h3>
+            <p className="session-close-hint">
+              你有啟用中的排程。選「進入低耗能背景」會在排程時間自動喚醒電腦執行（可從睡眠喚醒）；
+              <strong>請勿關機</strong>——關機後無法被喚醒。選「直接關閉」則下次開啟時才補跑。
+            </p>
+            <div className="session-close-actions">
+              <button
+                type="button"
+                className="session-close-btn session-close-save"
+                disabled={schedulerBgBusy}
+                onClick={async () => {
+                  setSchedulerBgBusy(true);
+                  try {
+                    await callWails(() => ResolveSchedulerBackgroundPrompt(true));
+                    setSchedulerBgPrompt(false);
+                    Quit();
+                  } catch (error) {
+                    setToolResult({toolId: 'scheduler', ok: false, message: `背景喚醒設定失敗，已取消關閉：${error?.message || error}`});
+                  } finally {
+                    setSchedulerBgBusy(false);
+                  }
+                }}
+              >進入低耗能背景</button>
+              <button
+                type="button"
+                className="session-close-btn session-close-discard"
+                disabled={schedulerBgBusy}
+                onClick={async () => {
+                  setSchedulerBgBusy(true);
+                  try { await callWails(() => ResolveSchedulerBackgroundPrompt(false)); } catch { /* 停用 best-effort */ } finally {
+                    setSchedulerBgBusy(false);
+                    setSchedulerBgPrompt(false);
+                    Quit();
+                  }
+                }}
+              >直接關閉</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* §30: 關閉視窗 → 存成 sub 對話框 */}
@@ -14191,7 +14266,7 @@ function ReviewPanel({
                   {digestExpanded.urgent && digestBlocks.urgent.map((item, i) => (
                     <div className="digest-item" key={item.id || i}>
                       <span>{item.title || item.id}</span>
-                      <small>{item.category} · {item.risk || 'unknown'}</small>
+                      <small>{item.category || item.ui_group || item.backend_group} · {item.risk || item.risk_level || 'unknown'}</small>
                       <div className="digest-item-actions">
                         <button type="button" onClick={() => onAcknowledgeDigestItem(item.id, 'keep')}>{t('review.keep')}</button>
                         <button type="button" onClick={() => onAcknowledgeDigestItem(item.id, 'review_now')}>{t('review.reviewAction')}</button>
@@ -14210,7 +14285,7 @@ function ReviewPanel({
                   {digestExpanded.later && digestBlocks.later.map((item, i) => (
                     <div className="digest-item" key={item.id || i}>
                       <span>{item.title || item.id}</span>
-                      <small>{item.category}</small>
+                      <small>{item.category || item.ui_group || item.backend_group}</small>
                       <div className="digest-item-actions">
                         <button type="button" onClick={() => onAcknowledgeDigestItem(item.id, 'keep')}>{t('review.keep')}</button>
                         <button type="button" onClick={() => onAcknowledgeDigestItem(item.id, 'archive')}>{t('review.archive')}</button>
@@ -14228,7 +14303,7 @@ function ReviewPanel({
                   {digestExpanded.archive && digestBlocks.archive.map((item, i) => (
                     <div className="digest-item" key={item.id || i}>
                       <span>{item.title || item.id}</span>
-                      <small>{item.category}</small>
+                      <small>{item.category || item.ui_group || item.backend_group}</small>
                       <div className="digest-item-actions">
                         <button type="button" onClick={() => onAcknowledgeDigestItem(item.id, 'batch_archive_low_value')}>{t('review.batchArchive')}</button>
                         <button type="button" onClick={() => onAcknowledgeDigestItem(item.id, 'keep')}>{t('review.keep')}</button>
@@ -14383,12 +14458,12 @@ function categorizePendingDigest(digest) {
   const blocks = {urgent: [], later: [], archive: []};
   if (!digest || !digest.items) return blocks;
   for (const item of digest.items) {
-    const cat = item.category || '';
-    if (cat === 'risky' || cat === 'high_value') {
+    const cat = item.category || item.backend_group || item.ui_group || '';
+    if (cat === 'risky' || cat === 'high_value' || cat === 'risky_candidate' || cat === 'high_value_candidate' || cat === 'needs_decision' || cat === 'needs_your_decision') {
       blocks.urgent.push(item);
-    } else if (cat === 'keep_suggestion') {
+    } else if (cat === 'keep_suggestion' || cat === 'can_wait') {
       blocks.later.push(item);
-    } else if (cat === 'archive_suggestion' || cat === 'duplicate_group') {
+    } else if (cat === 'archive_suggestion' || cat === 'duplicate_group' || cat === 'suggest_archive' || cat === 'suggested_archive') {
       blocks.archive.push(item);
     } else {
       blocks.later.push(item);

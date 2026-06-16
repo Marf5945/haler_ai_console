@@ -49,6 +49,8 @@ func classifySchedulerAdapterKind(ad adapter_registry.Adapter) (failoverKind, bo
 	switch strings.ToLower(strings.TrimSpace(ad.Kind)) {
 	case "api":
 		return failoverAPI, true
+	case "local":
+		return failoverLocal, true
 	case "cli":
 		// 有 endpoint（本地模型 server）或 Ollama 執行檔 → 視為本地模型，優先於雲端 API。
 		if strings.TrimSpace(ad.Endpoint) != "" || adapter_registry.IsOllamaExecutablePath(ad.Path) {

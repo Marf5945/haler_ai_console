@@ -10,8 +10,6 @@ HaLer for AI Console 是一個本機優先的 AI 工作台，將多種 LLM 介�
 - **任務 DAG 與自動流程**：可將任務拆成 DAG run、追蹤節點狀態、保留 debug trace，並在高風險步驟前以 review card 暫停等待確認。
 - **Bounded Replan**：執行失敗時可在低風險、同目標、read-only 條件下嘗試重新規劃尚未開始的後續步驟；Go 端負責裁決，並保留 audit log。
 - **Skill 與 Go Program Authoring**：可掃描、建立、保存與執行 skill；也能引導產生受限權限的 Go program，經驗證與 review 後再納入工作流。
-- **模型優先排程自動化**：可把自然語言排程需求正規化為已驗證草稿，支援建立/修改排程、NextFire 顯示、app 內提醒、Remote Bridge 通知、故障切換執行，以及將排程任務建立為可審核的 reusable skill 草稿。
-- **Agent 執行護欄**：包含 routing validator、prompt synthesis trace、tool readiness、bounded task loop、critic hooks，以及工具資訊不足或高風險時的 waiting-for-user 狀態。
 - **文件、引用與搜尋**：支援拖放匯入文件、建立本機文件庫、TF-IDF / Ollama embedding 檢索、Reference prompt context、URL provenance、local search 與可設定的 web search provider。
 - **內建資料工具**：提供 CSV / JSON / Office 文件讀寫能力，並包含零第三方依賴的 xlsx 產生路徑與電料 BOM 產出技能範例。
 - **Visual Learning**：包含螢幕/影像元素偵測、OCR、按鈕候選、元素字典、動作候選與 dry-run 信心計算；YOLOX 模型為選配，缺少時會回退到 OpenCV shape/text 偵測。
@@ -27,8 +25,6 @@ HaLer for AI Console is a local-first AI workbench that brings LLM adapters, doc
 - **Task DAG automation**: breaks work into DAG runs, tracks node status, keeps debug traces, and pauses for review cards before high-risk steps continue.
 - **Bounded Replan**: when execution fails, the app can try to rewrite only the not-yet-started tail of a task under low-risk, same-goal, read-only constraints; Go owns the final decision and writes audit logs.
 - **Skills and Go Program Authoring**: scans, builds, saves, and executes skills; guided Go program generation is validated, permission-scoped, and review-gated before entering workflows.
-- **Model-first scheduled automation**: turns natural-language scheduling requests into validated drafts, supports create/update flows, shows next-fire status, sends in-app or Remote Bridge notifications, runs with adapter failover, and can bootstrap auditable reusable skill drafts for scheduled jobs.
-- **Agent execution guardrails**: includes routing validation, prompt synthesis tracing, tool readiness checks, bounded task loops, critic hooks, and explicit waiting-for-user states for incomplete or risky tool runs.
 - **Documents, references, and search**: imports dropped documents, maintains a local document store, supports TF-IDF / Ollama embedding retrieval, builds reference prompt context, records URL provenance, and offers local search plus configurable web search providers.
 - **Built-in data tools**: includes CSV / JSON / Office document readers and writers, a zero-third-party xlsx generation path, and an electrical-material BOM skill example.
 - **Visual Learning**: provides screen/image element detection, OCR, button candidates, an element dictionary, action candidates, and dry-run confidence scoring; the optional YOLOX model falls back to OpenCV shape/text detection when unavailable.
@@ -167,28 +163,6 @@ To enable full button detection:
    (`adapter/visual_learning/model_hashes.json`) at load time; a mismatched or
    tampered file is rejected.
 
-## Optional: Font Presets
-
-Font preset binaries are not stored in Git because CJK font files are large.
-The repository keeps the license text, source list, download helper, and
-runtime wiring only.
-
-To enable all bundled font presets before building:
-
-```bash
-bash scripts/fetch_fonts.sh
-```
-
-For a smaller local setup that covers the default sans/mono presets:
-
-```bash
-bash scripts/fetch_fonts.sh --core
-```
-
-The downloaded `.ttf` files are written to `frontend/public/fonts/` and remain
-ignored by Git. See `FONT_SPEC.md` for the font stack, file names, and OFL-1.1
-license notes.
-
 ## Development
 
 Run the app in development mode:
@@ -203,12 +177,6 @@ Run frontend tests:
 npm test --prefix frontend
 ```
 
-Run the repository verification helper:
-
-```bash
-bash verify.sh
-```
-
 ## Repository Notes
 
 Do not commit generated output or dependency folders:
@@ -216,7 +184,6 @@ Do not commit generated output or dependency folders:
 - `build/bin`
 - `frontend/dist`
 - `frontend/node_modules`
-- `frontend/public/fonts/*.ttf`
 - `*.exe`
 - `.DS_Store`
 - `._*`

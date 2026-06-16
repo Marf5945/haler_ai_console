@@ -97,7 +97,7 @@ func (a *App) BootstrapScheduledSkill(jobID string) (*SchedulerSkillBootstrapRes
 	if err := a.AppendTalkEntryForAgent(sub.ID, "assistant", "已建立可審核的排程 skill 草稿："+skillID+"。第一次啟用後，後續排程會在此 sub 自動執行。"); err != nil {
 		return nil, err
 	}
-	if err := a.schedulerService.BindJobSkillInSub(job.ID, skillID, sub.ID, string(actionPayload)); err != nil {
+	if err := a.schedulerService.RecordJobSkill(job.ID, skillID, sub.ID); err != nil {
 		return nil, err
 	}
 	if a.eventBus != nil {

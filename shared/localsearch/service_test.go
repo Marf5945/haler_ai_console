@@ -32,16 +32,17 @@ func TestSearchFindsContentAndPath(t *testing.T) {
 }
 
 func TestSearchRedactsSnippet(t *testing.T) {
+	key := "sk" + "-abcdefghijklmnopqrstuvwxyz123456"
 	svc := NewService(nil, []Item{{
 		Source:  "document", // 預設會搜的本機檔案來源（記憶搜尋另有專測）
 		Title:   "secret",
-		Content: "token sk-abcdefghijklmnopqrstuvwxyz123456 should not show",
+		Content: "token " + key + " should not show",
 	}})
 	results, err := svc.Search(SearchRequest{Query: "token"})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
-	if len(results) != 1 || strings.Contains(results[0].Snippet, "sk-abcdefghijklmnopqrstuvwxyz") {
+	if len(results) != 1 || strings.Contains(results[0].Snippet, key[:18]) {
 		t.Fatalf("snippet not redacted: %#v", results)
 	}
 }

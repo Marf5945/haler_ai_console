@@ -958,6 +958,10 @@ export function PrepareCloudTTSText(arg1) {
   return window['go']['main']['App']['PrepareCloudTTSText'](arg1);
 }
 
+export function PrepareLearningDigest(arg1) {
+  return window['go']['main']['App']['PrepareLearningDigest'](arg1);
+}
+
 export function PreparePackageInstall(arg1, arg2) {
   return window['go']['main']['App']['PreparePackageInstall'](arg1, arg2);
 }
@@ -1142,6 +1146,10 @@ export function ResolveReviewCard(arg1) {
   return window['go']['main']['App']['ResolveReviewCard'](arg1);
 }
 
+export function ResolveSchedulerBackgroundPrompt(arg1) {
+  return window['go']['main']['App']['ResolveSchedulerBackgroundPrompt'](arg1);
+}
+
 export function ResolveSkillForAction(arg1, arg2) {
   return window['go']['main']['App']['ResolveSkillForAction'](arg1, arg2);
 }
@@ -1250,6 +1258,10 @@ export function ScanSkillFolder(arg1) {
   return window['go']['main']['App']['ScanSkillFolder'](arg1);
 }
 
+export function SchedulerHasActiveJobs() {
+  return window['go']['main']['App']['SchedulerHasActiveJobs']();
+}
+
 export function SearchLearningOperations(arg1, arg2) {
   return window['go']['main']['App']['SearchLearningOperations'](arg1, arg2);
 }
@@ -1336,6 +1348,10 @@ export function SetPixelAvatarPack(arg1) {
 
 export function SetRemoteBridgePrimaryChannel(arg1) {
   return window['go']['main']['App']['SetRemoteBridgePrimaryChannel'](arg1);
+}
+
+export function SetSchedulerBackgroundWake(arg1) {
+  return window['go']['main']['App']['SetSchedulerBackgroundWake'](arg1);
 }
 
 export function SetToolPreference(arg1, arg2, arg3, arg4) {

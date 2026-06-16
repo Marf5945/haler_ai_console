@@ -340,3 +340,44 @@ func (a *App) RegisterSchedulerCallback(name string) error {
 	})
 	return nil
 }
+
+// --------------------------------------------------------------------------
+// 背景喚醒（Phase G）— 前端關閉時詢問是否進低耗能背景並安裝喚醒鬧鐘
+// --------------------------------------------------------------------------
+
+// SchedulerHasActiveJobs 回報是否有啟用中的排程，前端關閉時用來決定要不要問「背景喚醒」。
+func (a *App) SchedulerHasActiveJobs() bool {
+	if a == nil || a.schedulerService == nil {
+		return false
+	}
+	for _, j := range a.schedulerService.ListJobs() {
+		if j.Enabled {
+			return true
+		}
+	}
+	return false
+}
+
+// SetSchedulerBackgroundWake 啟用/關閉「低耗能背景喚醒」。
+// macOS：寫入/移除 user LaunchAgent（StartCalendarInterval，可從睡眠喚醒，免 sudo）。
+// 其他平台：回傳不支援錯誤。注意：關機無法喚醒，UI 須提示「請勿關機」。
+func (a *App) SetSchedulerBackgroundWake(enable bool) error {
+	if a == nil || a.schedulerService == nil {
+		return fmt.Errorf("scheduler service 尚未初始化")
+	}
+	return a.setSchedulerWake(enable)
+}
+
+// ResolveSchedulerBackgroundPrompt 前端在「關閉時背景選擇」對話框做出選擇後呼叫。
+// enable=true → 安裝背景喚醒；false → 確保移除。決定後標記 bgPromptResolved，前端再 Quit()
+// 即正常關閉（仍會走既有 save-as-sub 提示，不被本提示吃掉）。
+func (a *App) ResolveSchedulerBackgroundPrompt(enable bool) error {
+	werr := a.setSchedulerWake(enable)
+	a.closeMu.Lock()
+	a.bgPromptResolved = true
+	a.closeMu.Unlock()
+	if enable {
+		return werr // 啟用失敗要讓前端知道；停用則 best-effort
+	}
+	return nil
+}

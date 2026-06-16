@@ -59,6 +59,7 @@ const (
 
 	// Digest events (#I-1001)
 	EventDigestAutoArchived = "digest:auto_archived"
+	EventDigestUpdated      = "digest:updated"
 
 	// Embedding events (Phase B M3)
 	EventEmbeddingConfigMissing = "embedding:config_missing"

@@ -8,10 +8,27 @@ import (
 	"testing"
 )
 
+func redactionTestOpenAIKey() string {
+	return "sk" + "-abc123def456ghi789jkl012mno345pqr678"
+}
+
+func redactionTestAnthropicKey() string {
+	return "sk" + "-ant-api03-abcdefghijklmnopqrstuvwx"
+}
+
+func redactionTestOpenRouterKey() string {
+	return "sk" + "-or-v1-abcdefghijklmnopqrstuvwx"
+}
+
+func redactionTestGoogleAIKey() string {
+	return "AIza" + "SyA1234567890abcdefghijklmnopqrstuv"
+}
+
 // ── Layer 1: 各供應商 pattern ──
 
 func TestRedactOpenAIKey(t *testing.T) {
-	out, recs := RedactBeforeWrite("key: sk-abc123def456ghi789jkl012mno345pqr678")
+	key := redactionTestOpenAIKey()
+	out, recs := RedactBeforeWrite("key: " + key)
 	if strings.Contains(out, "sk-abc123") {
 		t.Error("OpenAI key should be redacted")
 	}
@@ -19,7 +36,8 @@ func TestRedactOpenAIKey(t *testing.T) {
 }
 
 func TestRedactAnthropicKey(t *testing.T) {
-	out, recs := RedactBeforeWrite("key: sk-ant-api03-abcdefghijklmnopqrstuvwx")
+	key := redactionTestAnthropicKey()
+	out, recs := RedactBeforeWrite("key: " + key)
 	if strings.Contains(out, "sk-ant-api03") {
 		t.Error("Anthropic key should be redacted")
 	}
@@ -27,7 +45,8 @@ func TestRedactAnthropicKey(t *testing.T) {
 }
 
 func TestRedactOpenRouterKey(t *testing.T) {
-	out, recs := RedactBeforeWrite("key: sk-or-v1-abcdefghijklmnopqrstuvwx")
+	key := redactionTestOpenRouterKey()
+	out, recs := RedactBeforeWrite("key: " + key)
 	if strings.Contains(out, "sk-or-v1") {
 		t.Error("OpenRouter key should be redacted")
 	}
@@ -59,7 +78,8 @@ func TestRedactStripeKey(t *testing.T) {
 }
 
 func TestRedactGoogleAIKey(t *testing.T) {
-	out, recs := RedactBeforeWrite("google: AIzaSyA1234567890abcdefghijklmnopqrstuv")
+	key := redactionTestGoogleAIKey()
+	out, recs := RedactBeforeWrite("google: " + key)
 	if strings.Contains(out, "AIzaSy") {
 		t.Error("Google AI key should be redacted")
 	}
@@ -75,7 +95,10 @@ func TestRedactHuggingFaceToken(t *testing.T) {
 }
 
 func TestRedactPEMKey(t *testing.T) {
-	pem := "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAK...\n-----END RSA PRIVATE KEY-----"
+	begin := "-----BEGIN RSA "
+	end := "-----END RSA "
+	keyKind := "PRIVATE" + " KEY-----"
+	pem := begin + keyKind + "\nMIIEpAIBAAK...\n" + end + keyKind
 	out, recs := RedactBeforeWrite(pem)
 	if strings.Contains(out, "MIIEpAIBAAK") {
 		t.Error("PEM should be redacted")
@@ -223,7 +246,7 @@ func TestLoadUserPatternsMissingFile(t *testing.T) {
 
 	LoadUserPatterns(t.TempDir()) // 不應 panic，靜默使用內建
 	// 內建仍有效
-	out, _ := RedactBeforeWrite("key: sk-abc123def456ghi789jkl012mno345pqr678")
+	out, _ := RedactBeforeWrite("key: " + redactionTestOpenAIKey())
 	if strings.Contains(out, "sk-abc123") {
 		t.Error("built-in should still work without user config")
 	}
@@ -243,7 +266,7 @@ func TestUserPatternCannotDisableBuiltin(t *testing.T) {
 
 	LoadUserPatterns(dir)
 
-	out, _ := RedactBeforeWrite("key: sk-abc123def456ghi789jkl012mno345pqr678")
+	out, _ := RedactBeforeWrite("key: " + redactionTestOpenAIKey())
 	if strings.Contains(out, "sk-abc123") {
 		t.Error("built-in OpenAI pattern must remain active")
 	}

@@ -78,6 +78,7 @@ func TestClassifySchedulerAdapterKind(t *testing.T) {
 		keep bool
 	}{
 		{adapter_registry.Adapter{Kind: "api"}, failoverAPI, true},
+		{adapter_registry.Adapter{Kind: "local"}, failoverLocal, true},
 		{adapter_registry.Adapter{Kind: "cli"}, failoverCLI, true},
 		{adapter_registry.Adapter{Kind: "cli", Endpoint: "http://localhost:11434"}, failoverLocal, true},
 		{adapter_registry.Adapter{Kind: "main"}, failoverCLI, false},

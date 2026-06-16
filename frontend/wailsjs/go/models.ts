@@ -1100,6 +1100,36 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class LearningDigestPrepareResult {
+	    has_updates: boolean;
+	    reason: string;
+	    skill_id?: string;
+	    summary: string;
+	    items_added: number;
+	    pending_candidate_count: number;
+	    recent_run_count: number;
+	    hook_review_count: number;
+	    problems?: string[];
+	    generated_at: string;
+
+	    static createFrom(source: any = {}) {
+	        return new LearningDigestPrepareResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.has_updates = source["has_updates"];
+	        this.reason = source["reason"];
+	        this.skill_id = source["skill_id"];
+	        this.summary = source["summary"];
+	        this.items_added = source["items_added"];
+	        this.pending_candidate_count = source["pending_candidate_count"];
+	        this.recent_run_count = source["recent_run_count"];
+	        this.hook_review_count = source["hook_review_count"];
+	        this.problems = source["problems"];
+	        this.generated_at = source["generated_at"];
+	    }
+	}
 	export class LearningRunExportPreview {
 	    export_type: string;
 	    run_id: string;

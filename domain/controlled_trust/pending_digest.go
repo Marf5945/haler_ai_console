@@ -37,11 +37,17 @@ const (
 type DigestItem struct {
 	ID           string             `json:"id"`
 	SourceType   string             `json:"source_type"` // pending source type
+	SourceID     string             `json:"source_id,omitempty"`
 	BackendGroup DigestGroupBackend `json:"backend_group"`
 	UIGroup      DigestGroupUI      `json:"ui_group"`
-	Summary      string             `json:"summary"`
-	Confidence   float64            `json:"confidence"`
-	AgeDays      int                `json:"age_days"`
+	// Compatibility fields used by the existing Review Panel renderer/tests.
+	// The backend groups above remain the source of truth.
+	Category   string  `json:"category,omitempty"`
+	Title      string  `json:"title,omitempty"`
+	RiskLevel  string  `json:"risk_level,omitempty"`
+	Summary    string  `json:"summary"`
+	Confidence float64 `json:"confidence"`
+	AgeDays    int     `json:"age_days"`
 }
 
 // DigestAction is the user's explicit action on a pending item.
@@ -134,6 +140,12 @@ func (s *PendingDigestService) Generate(items []DigestItem) (*PendingDigest, err
 	sourceCounts := make(map[string]int)
 	for i, item := range items {
 		item.UIGroup = backendToUI(item.BackendGroup)
+		if item.Category == "" {
+			item.Category = digestCategory(item.BackendGroup, item.UIGroup)
+		}
+		if item.RiskLevel == "" {
+			item.RiskLevel = digestRiskLevel(item.BackendGroup)
+		}
 		classified[i] = item
 		sourceCounts[item.SourceType]++
 	}
@@ -302,6 +314,42 @@ func backendToUI(group DigestGroupBackend) DigestGroupUI {
 		return UIGroupArchive
 	default:
 		return UIGroupDecide // default to visible
+	}
+}
+
+func digestCategory(group DigestGroupBackend, ui DigestGroupUI) string {
+	switch group {
+	case DigestRiskyCandidate:
+		return "risky"
+	case DigestHighValueCandidate:
+		return "high_value"
+	case DigestKeepSuggestion:
+		return "keep_suggestion"
+	case DigestArchiveSuggestion:
+		return "archive_suggestion"
+	case DigestDuplicateGroup:
+		return "duplicate_group"
+	}
+	switch ui {
+	case UIGroupDecide:
+		return "needs_decision"
+	case UIGroupLater:
+		return "can_wait"
+	case UIGroupArchive:
+		return "suggest_archive"
+	default:
+		return "needs_decision"
+	}
+}
+
+func digestRiskLevel(group DigestGroupBackend) string {
+	switch group {
+	case DigestRiskyCandidate:
+		return "high"
+	case DigestHighValueCandidate:
+		return "medium"
+	default:
+		return "low"
 	}
 }
 

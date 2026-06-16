@@ -151,6 +151,7 @@ func (svc *ArchiveService) ConfirmArchive(preview *ScanPreview) (*SkillManifest,
 		if st := strings.TrimSpace(string(em.Source.SourceType)); st != "" {
 			manifest.Source.SourceType = em.Source.SourceType
 		}
+		normalizeImportedLifecycle(manifest)
 	}
 
 	var exampleIDs, programIDs, cliMdIDs []string
@@ -321,10 +322,39 @@ func hashPathString(s string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+func normalizeImportedLifecycle(m *SkillManifest) {
+	EnsureLifecycle(m)
+	def := DefaultLifecycle(m)
+	m.Lifecycle.AutoExecute = def.AutoExecute
+}
+
+func containsArchiveTraversal(path string) bool {
+	clean := filepath.Clean(path)
+	return filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator))
+}
+
 // copyFile 將 src 的內容逐位元組複製到 dst。
 // dst 的父目錄若不存在會自動建立（0700）。
 // 目標檔案權限設定為 0600，防止其他使用者讀取。
 func copyFile(src, dst string) error {
+	srcInfo, err := os.Lstat(src)
+	if err != nil {
+		return err
+	}
+	// 不跟隨特殊檔案，避免匯入時跨出來源邊界。
+	if srcInfo.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("skill_step: symlink is not allowed: %s", src)
+	}
+	if !srcInfo.Mode().IsRegular() {
+		return fmt.Errorf("skill_step: only regular files are allowed: %s", src)
+	}
+	if dstInfo, err := os.Lstat(dst); err == nil {
+		if dstInfo.Mode()&os.ModeSymlink != 0 || !dstInfo.Mode().IsRegular() {
+			return fmt.Errorf("skill_step: unsafe destination file: %s", dst)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -356,7 +386,13 @@ func copyDir(src, dst string) error {
 		if relErr != nil {
 			return relErr
 		}
+		if containsArchiveTraversal(rel) {
+			return fmt.Errorf("skill_step: unsafe relative path %q", rel)
+		}
 		target := filepath.Join(dst, rel)
+		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(dst)+string(filepath.Separator)) && filepath.Clean(target) != filepath.Clean(dst) {
+			return fmt.Errorf("skill_step: archive path escapes destination: %s", rel)
+		}
 		if info.IsDir() {
 			return os.MkdirAll(target, 0o700)
 		}

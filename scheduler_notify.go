@@ -5,8 +5,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
+	"sync"
+	"time"
 
 	"ui_console/adapter/debugtrace"
 	"ui_console/adapter/remote_bridge"
@@ -60,6 +63,29 @@ func (a *App) dispatchSchedulerNotice(kind remote_bridge.NotificationType, title
 			"title": title,
 			"err":   err.Error(),
 		})
+	}
+}
+
+func (a *App) startSchedulerHeartbeat(ctx context.Context, title string) func() {
+	stop := make(chan struct{})
+	var once sync.Once
+	go func() {
+		timer := time.NewTimer(30 * time.Second)
+		defer timer.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-stop:
+				return
+			case <-timer.C:
+				a.dispatchSchedulerNotice(remote_bridge.NotifyHeartbeat, "排程進行中："+strings.TrimSpace(title), "長任務仍在執行中。")
+				timer.Reset(30 * time.Second)
+			}
+		}
+	}()
+	return func() {
+		once.Do(func() { close(stop) })
 	}
 }
 

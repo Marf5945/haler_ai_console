@@ -214,13 +214,14 @@ type App struct {
 	// #I-804: DAG 事件節流閥（150ms）
 	dagThrottler *cli_manager.DAGThrottler
 
-	cacheMu         sync.Mutex
-	previewCache    map[string]*skill_step.ScanPreview
-	resolveCache    map[string]*skill_step.ResolveResult
-	globalSessionID string
-	closeMu         sync.Mutex
-	allowClose      bool
-	activeAgentID   string
+	cacheMu          sync.Mutex
+	previewCache     map[string]*skill_step.ScanPreview
+	resolveCache     map[string]*skill_step.ResolveResult
+	globalSessionID  string
+	closeMu          sync.Mutex
+	allowClose       bool
+	bgPromptResolved bool // Phase G：關閉時是否已決定背景喚醒模式（避免重複詢問）
+	activeAgentID    string
 
 	// 上方互動歷史只存記憶體，不進下方主聊天 SentenceStore。
 	inspectorMu      sync.Mutex
@@ -410,6 +411,7 @@ func NewApp() *App {
 		EventBus:  a.eventBus,
 		SkillExec: schedulerSkillExecutor{app: a},
 		Notifier:  schedulerNotifier{app: a},
+		Runner:    schedulerJobRunner{app: a},
 	})
 	skill_step.RegisterDocumentBuiltins(a.skillRouter)
 	return a
@@ -1460,11 +1462,22 @@ func (a *App) PromoteDraftToPending(sandboxID, promotion string) (string, error)
 // action must be one of: keep, archive, delete, review_now, batch_archive_low_value.
 // No action is automatic — all require explicit user confirmation.
 func (a *App) AcknowledgePendingItem(itemID, action string) error {
-	return a.digestService.AcknowledgeItem(itemID, controlled_trust.DigestAction(action))
+	return a.digestService.AcknowledgeItem(itemID, normalizeDigestAction(action))
 }
 
 func (a *App) AcknowledgePendingItemWithConfirmation(itemID, action, confirmation string) error {
-	return a.digestService.AcknowledgeItemWithConfirmation(itemID, controlled_trust.DigestAction(action), confirmation)
+	return a.digestService.AcknowledgeItemWithConfirmation(itemID, normalizeDigestAction(action), confirmation)
+}
+
+func normalizeDigestAction(action string) controlled_trust.DigestAction {
+	switch strings.TrimSpace(action) {
+	case "archive":
+		return controlled_trust.DigestActionArchiveSingle
+	case "delete":
+		return controlled_trust.DigestActionDeleteSingle
+	default:
+		return controlled_trust.DigestAction(action)
+	}
 }
 
 // ---------------------------------------------------------------------------

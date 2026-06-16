@@ -396,18 +396,25 @@ func (a *App) ClearMainTalk() error {
 // 回傳 true = 阻止關閉（讓前端顯示對話框）。
 // 前端完成對話框流程後呼叫 ConfirmClose() 真正關閉。
 func (a *App) beforeClose(ctx context.Context) bool {
-	// §27: 關閉排程引擎，等待正在執行的 Job 完成
-	if a.schedulerService != nil {
-		a.schedulerService.Stop()
-	}
 	a.closeMu.Lock()
 	if a.allowClose {
 		a.allowClose = false
 		a.closeMu.Unlock()
+		// 真正放行關閉時才停排程；提示流程可能會取消關閉。
+		if a.schedulerService != nil {
+			a.schedulerService.Stop()
+		}
 		a.stopHookGeneRecorder()
 		return false
 	}
+	bgResolved := a.bgPromptResolved
 	a.closeMu.Unlock()
+
+	// Phase G：有啟用排程且尚未決定背景模式 → 先問「進入低耗能背景 / 直接關閉」。
+	if !bgResolved && a.SchedulerHasActiveJobs() {
+		a.eventBus.Emit("scheduler:background_prompt", map[string]interface{}{})
+		return true
+	}
 
 	if run, ok := a.activeTaskRunForClose(); ok {
 		a.eventBus.Emit("session:close_prompt", map[string]interface{}{
@@ -439,6 +446,9 @@ func (a *App) beforeClose(ctx context.Context) bool {
 	if !analysis.HasContent || !analysis.ShouldPrompt {
 		// 沒內容或不需要提示 → 直接清空並關閉
 		a.ClearMainTalk()
+		if a.schedulerService != nil {
+			a.schedulerService.Stop()
+		}
 		a.stopHookGeneRecorder()
 		return false // 允許關閉
 	}

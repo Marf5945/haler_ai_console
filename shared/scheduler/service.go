@@ -40,6 +40,12 @@ type SchedulerNotifier interface {
 	NotifyJobResult(job *Job, ok bool, summary string)
 }
 
+// SchedulerJobRunner 在 job 成功觸發後執行「真正做事」的協調流程（F：跑 CLI、輸出到 sub、做成 skill）。
+// 與 action（事件提醒）獨立；由 app 層實作，未設定時不影響既有行為。
+type SchedulerJobRunner interface {
+	RunJob(ctx context.Context, job *Job)
+}
+
 // --------------------------------------------------------------------------
 // 常數定義
 // --------------------------------------------------------------------------
@@ -78,6 +84,9 @@ type ServiceConfig struct {
 
 	// Notifier 在觸發/完成時推送通知（可為 nil，無通知時）。
 	Notifier SchedulerNotifier
+
+	// Runner 在成功觸發後執行 F 協調流程（可為 nil）。
+	Runner SchedulerJobRunner
 
 	// ProjectID 目前專案 ID。
 	ProjectID string
@@ -130,6 +139,9 @@ type Service struct {
 	// notifier 在觸發/完成時推送通知。
 	notifier SchedulerNotifier
 
+	// runner 在成功觸發後執行 F 協調流程。
+	runner SchedulerJobRunner
+
 	// cancel 用於停止 Ticker goroutine。
 	cancel context.CancelFunc
 
@@ -160,6 +172,7 @@ func NewService(cfg ServiceConfig) *Service {
 		reviewCreator: cfg.ReviewCreator,
 		authChecker:   cfg.AuthChecker,
 		notifier:      cfg.Notifier,
+		runner:        cfg.Runner,
 	}
 }
 
@@ -535,11 +548,13 @@ func (s *Service) executeJob(ctx context.Context, job *Job, firedAt time.Time) {
 
 		// 重試成功
 		s.recordSuccess(job, firedAt, duration+duration2, true)
+		s.runJobRunner(ctx, job)
 		return
 	}
 
 	// 第一次就成功
 	s.recordSuccess(job, firedAt, duration, false)
+	s.runJobRunner(ctx, job)
 }
 
 // --------------------------------------------------------------------------
@@ -604,6 +619,13 @@ func (s *Service) catchUp(ctx context.Context) {
 // --------------------------------------------------------------------------
 // 紀錄輔助方法
 // --------------------------------------------------------------------------
+
+// runJobRunner 在成功觸發後呼叫 F 協調流程（reminder 之後、非阻斷既有 record 流程）。
+func (s *Service) runJobRunner(ctx context.Context, job *Job) {
+	if s.runner != nil {
+		s.runner.RunJob(ctx, job)
+	}
+}
 
 // recordSuccess 記錄成功的執行結果，更新 Job 狀態並持久化。
 func (s *Service) recordSuccess(job *Job, firedAt time.Time, durationMs int64, retried bool) {
@@ -718,6 +740,69 @@ func (s *Service) BindJobSkillInSub(id, skillID, sourceSubID, actionPayload stri
 		}
 	}
 	return fmt.Errorf("scheduler: job %q not found for BindJobSkillInSub", id)
+}
+
+// GetJobByID 回傳指定 job 的副本。
+func (s *Service) GetJobByID(id string) (Job, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, j := range s.jobs {
+		if j.ID == id {
+			return *j, true
+		}
+	}
+	return Job{}, false
+}
+
+// MarkJobOutputDate 記錄本次輸出的日期鍵（YYYYMMDD）並持久化（同日去重用）。
+func (s *Service) MarkJobOutputDate(id, dateKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, j := range s.jobs {
+		if j.ID == id {
+			j.LastOutputDate = dateKey
+			return s.persistJobsLocked()
+		}
+	}
+	return fmt.Errorf("scheduler: job %q not found for MarkJobOutputDate", id)
+}
+
+// RecordJobSkill 記錄第一次做成的 skill 與來源 sub，但「不改 ActionType」
+// （維持 event：到點仍由 runner 重跑流程吐當日新資料，skill 僅為人可審核的產物）。
+func (s *Service) RecordJobSkill(id, skillID, sourceSubID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, j := range s.jobs {
+		if j.ID == id {
+			j.SkillID = skillID
+			j.SourceSubID = sourceSubID
+			j.AutoRunSkill = true
+			j.FlowHash = computeFlowHash(j.Name, j.ActionPayload, skillID)
+			return s.persistJobsLocked()
+		}
+	}
+	return fmt.Errorf("scheduler: job %q not found for RecordJobSkill", id)
+}
+
+// ResetJobSkill 在偵測到流程改變（FlowHash 不符）時清除 skill 綁定，下次重建。
+func (s *Service) ResetJobSkill(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, j := range s.jobs {
+		if j.ID == id {
+			j.SkillID = ""
+			j.SourceSubID = ""
+			j.AutoRunSkill = false
+			j.FlowHash = ""
+			return s.persistJobsLocked()
+		}
+	}
+	return fmt.Errorf("scheduler: job %q not found for ResetJobSkill", id)
+}
+
+// ExpectedFlowHash 回傳依目前 Name/ActionPayload/SkillID 算出的 flow hash，供 Phase I 比對。
+func ExpectedFlowHash(job Job) string {
+	return computeFlowHash(job.Name, job.ActionPayload, job.SkillID)
 }
 
 // recordSkipped 記錄因重疊而跳過的執行。

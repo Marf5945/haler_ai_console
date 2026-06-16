@@ -503,6 +503,8 @@ export function PrepareAvatarGenerateRequest(arg1:string,arg2:string):Promise<pe
 
 export function PrepareCloudTTSText(arg1:string):Promise<voice.CloudTTSEgressPreview>;
 
+export function PrepareLearningDigest(arg1:string):Promise<main.LearningDigestPrepareResult>;
+
 export function PreparePackageInstall(arg1:string,arg2:string):Promise<any>;
 
 export function PreparePackageInstallPayload(arg1:string,arg2:string,arg3:string):Promise<any>;
@@ -595,6 +597,8 @@ export function ResolveLightweightCard(arg1:string):Promise<void>;
 
 export function ResolveReviewCard(arg1:string):Promise<void>;
 
+export function ResolveSchedulerBackgroundPrompt(arg1:boolean):Promise<void>;
+
 export function ResolveSkillForAction(arg1:string,arg2:string):Promise<skill_step.ResolveResult>;
 
 export function ResolveStopRecoveryCard(arg1:string,arg2:string):Promise<void>;
@@ -649,6 +653,8 @@ export function ScanOrphanQuarantine():Promise<any>;
 
 export function ScanSkillFolder(arg1:string):Promise<any>;
 
+export function SchedulerHasActiveJobs():Promise<boolean>;
+
 export function SearchLearningOperations(arg1:string,arg2:number):Promise<any>;
 
 export function SearchWeb(arg1:string,arg2:number):Promise<any>;
@@ -692,6 +698,8 @@ export function SetPersonaPixelAvatarPack(arg1:string,arg2:string):Promise<void>
 export function SetPixelAvatarPack(arg1:string):Promise<void>;
 
 export function SetRemoteBridgePrimaryChannel(arg1:string):Promise<any>;
+
+export function SetSchedulerBackgroundWake(arg1:boolean):Promise<void>;
 
 export function SetToolPreference(arg1:string,arg2:string,arg3:string,arg4:number):Promise<void>;
 

@@ -540,7 +540,10 @@ func unwrapWindowsCommandLauncher(path string) string {
 			continue
 		}
 		for _, quoted := range quotedWindowsCommandParts(line) {
-			candidate := strings.ReplaceAll(quoted, "%dp0%\\", baseDir+string(filepath.Separator))
+			candidate := strings.ReplaceAll(quoted, "%~dp0\\", baseDir+string(filepath.Separator))
+			candidate = strings.ReplaceAll(candidate, "%~dp0/", baseDir+string(filepath.Separator))
+			candidate = strings.ReplaceAll(candidate, "%~dp0", baseDir)
+			candidate = strings.ReplaceAll(candidate, "%dp0%\\", baseDir+string(filepath.Separator))
 			candidate = strings.ReplaceAll(candidate, "%dp0%/", baseDir+string(filepath.Separator))
 			candidate = strings.ReplaceAll(candidate, "%dp0%", baseDir)
 			candidate = os.ExpandEnv(candidate)

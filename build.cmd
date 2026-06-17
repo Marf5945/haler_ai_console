@@ -184,6 +184,7 @@ exit /b 0
 if exist "C:\Program Files\Go\bin" set "PATH=C:\Program Files\Go\bin;%PATH%"
 if exist "%USERPROFILE%\go\bin" set "PATH=%USERPROFILE%\go\bin;%PATH%"
 if exist "%USERPROFILE%\go\bin\wails.exe" set "WAILS_EXE=%USERPROFILE%\go\bin\wails.exe"
+if exist "%USERPROFILE%\node" set "PATH=%USERPROFILE%\node;%PATH%"
 if exist "C:\Program Files\nodejs" set "PATH=C:\Program Files\nodejs;%PATH%"
 if exist "C:\Program Files\Git\cmd" set "PATH=C:\Program Files\Git\cmd;%PATH%"
 if exist "C:\Program Files (x86)\NSIS" set "PATH=C:\Program Files (x86)\NSIS;%PATH%"

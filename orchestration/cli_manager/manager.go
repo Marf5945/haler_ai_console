@@ -175,21 +175,47 @@ func (m *SidecarManager) Start(parentCtx context.Context) error {
 	return nil
 }
 
-func findNodeBinary() string {
-	if path, err := exec.LookPath("node"); err == nil {
-		return path
+func isNodeCandidateUsable(candidate string) bool {
+	if strings.TrimSpace(candidate) == "" {
+		return false
 	}
+	info, err := os.Stat(candidate)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		switch strings.ToLower(filepath.Ext(candidate)) {
+		case ".exe", ".cmd", ".bat", ".com":
+			return true
+		default:
+			return false
+		}
+	}
+	return info.Mode()&0o111 != 0
+}
+
+func findNodeBinary() string {
 	home, _ := os.UserHomeDir()
-	candidates := []string{
-		"/opt/homebrew/bin/node",
-		"/usr/local/bin/node",
-		"/usr/bin/node",
+	candidates := []string{}
+	if runtime.GOOS != "windows" {
+		candidates = append(candidates,
+			"/opt/homebrew/bin/node",
+			"/usr/local/bin/node",
+			"/usr/bin/node",
+		)
 	}
 	if home != "" {
-		candidates = append(candidates,
-			filepath.Join(home, ".local", "bin", "node"),
-			filepath.Join(home, ".nvm", "current", "bin", "node"),
-		)
+		if runtime.GOOS == "windows" {
+			candidates = append(candidates,
+				filepath.Join(home, "node", "node.exe"),
+				filepath.Join(home, "AppData", "Roaming", "npm", "node.exe"),
+			)
+		} else {
+			candidates = append(candidates,
+				filepath.Join(home, ".local", "bin", "node"),
+				filepath.Join(home, ".nvm", "current", "bin", "node"),
+			)
+		}
 		if entries, err := os.ReadDir(filepath.Join(home, ".nvm", "versions", "node")); err == nil {
 			for _, entry := range entries {
 				if entry.IsDir() {
@@ -205,8 +231,17 @@ func findNodeBinary() string {
 			}
 		}
 	}
+	if runtime.GOOS == "windows" {
+		candidates = append(candidates,
+			filepath.Join(os.Getenv("ProgramFiles"), "nodejs", "node.exe"),
+			filepath.Join(os.Getenv("ProgramFiles(x86)"), "nodejs", "node.exe"),
+		)
+	}
+	if path, err := exec.LookPath("node"); err == nil {
+		candidates = append(candidates, path)
+	}
 	for _, candidate := range candidates {
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+		if isNodeCandidateUsable(candidate) {
 			log.Printf("cli_manager: found node at candidate path: %s", candidate)
 			return candidate
 		}
@@ -228,7 +263,15 @@ func buildSidecarEnv(nodeBin string) []string {
 	}
 
 	// macOS .app 啟動時 PATH 非常短，需要主動補上常見的 CLI 安裝路徑
-	if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
+	if runtime.GOOS == "windows" {
+		if home, _ := os.UserHomeDir(); home != "" {
+			extraDirs = append(extraDirs,
+				filepath.Join(home, "node"),
+				filepath.Join(home, "AppData", "Roaming", "npm"),
+				filepath.Join(home, "go", "bin"),
+			)
+		}
+	} else if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
 		extraDirs = append(extraDirs,
 			"/opt/homebrew/bin", // Apple Silicon Homebrew
 			"/usr/local/bin",    // Intel Homebrew / 手動安裝

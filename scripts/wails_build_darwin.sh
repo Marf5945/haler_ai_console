@@ -4,6 +4,8 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_args=()
 wails_bin="${WAILS_BIN:-}"
+setup_only=0
+app_name="HaLer AI Console"
 go_version="1.26.4"
 node_version="24.16.0"
 wails_version="v2.12.0"
@@ -13,11 +15,15 @@ node_pkg_sha256="65843aafbab48999c9d5f072746836965340c9ef2fbf17a377d3f919dcb0cb7
 
 refresh_path() {
   export PATH="$HOME/go/bin:$PATH"
+  local cache_root="${TMPDIR:-/tmp}/haler-ai-console-build-cache"
+  export GOCACHE="${cache_root}/go-build"
+  export GOMODCACHE="${cache_root}/go-mod"
   if [[ -x /opt/homebrew/bin/brew ]]; then
     eval "$(/opt/homebrew/bin/brew shellenv)"
   elif [[ -x /usr/local/bin/brew ]]; then
     eval "$(/usr/local/bin/brew shellenv)"
   fi
+  mkdir -p "${GOCACHE}" "${GOMODCACHE}"
 }
 
 confirm_install() {
@@ -188,8 +194,8 @@ fi
 refresh_path
 
 echo
-echo "AI Console macOS build helper"
-echo "============================="
+echo "HaLer AI Console macOS build helper"
+echo "==================================="
 echo
 
 while [[ $# -gt 0 ]]; do
@@ -197,6 +203,10 @@ while [[ $# -gt 0 ]]; do
     --clean)
       echo "[CLEAN] Removing generated frontend dependency/build folders..."
       rm -rf "${root_dir}/frontend/node_modules" "${root_dir}/frontend/dist"
+      shift
+      ;;
+    --setup-only)
+      setup_only=1
       shift
       ;;
     *)
@@ -220,36 +230,42 @@ npm --version
 "${wails_bin}" version
 echo
 
+if [[ "${setup_only}" -eq 1 ]]; then
+  echo "Setup complete. Run bash scripts/wails_build_darwin.sh to build the app."
+  exit 0
+fi
+
 if [[ ! -f "${root_dir}/frontend/package.json" ]]; then
   echo "[ERROR] Missing frontend/package.json. Run this script from the repository root."
   exit 1
 fi
 
-pushd "${root_dir}/frontend" >/dev/null
-echo "Installing frontend dependencies..."
-if [[ -f package-lock.json ]]; then
-  npm ci --audit=false --fund=false
-else
-  npm install --audit=false --fund=false
+if [[ -d "${root_dir}/build/cache" ]]; then
+  echo "Removing legacy in-repo Go cache..."
+  rm -rf "${root_dir}/build/cache"
 fi
-popd >/dev/null
+
+if [[ -d "${root_dir}/frontend/node_modules" ]]; then
+  echo "Removing frontend/node_modules before Wails binding generation..."
+  rm -rf "${root_dir}/frontend/node_modules"
+fi
 
 echo
 echo "Running wails doctor..."
 "${wails_bin}" doctor
 
 echo
-echo "Building AI Console for macOS..."
+echo "Building ${app_name} for macOS..."
 "${wails_bin}" build -ldflags "-extldflags=-Wl,-no_warn_duplicate_libraries" "${build_args[@]}"
 
 model_src="${root_dir}/assets/models/yolox_button_s.mlmodelc"
-model_dst="${root_dir}/build/bin/ai-console.app/Contents/Resources/assets/models"
-if [[ -d "${model_src}" && -d "${root_dir}/build/bin/ai-console.app" ]]; then
+model_dst="${root_dir}/build/bin/${app_name}.app/Contents/Resources/assets/models"
+if [[ -d "${model_src}" && -d "${root_dir}/build/bin/${app_name}.app" ]]; then
   mkdir -p "${model_dst}"
   rm -rf "${model_dst}/yolox_button_s.mlmodelc"
   cp -R "${model_src}" "${model_dst}/"
   if command -v codesign >/dev/null 2>&1; then
-    codesign --force --deep --sign - "${root_dir}/build/bin/ai-console.app" >/dev/null
+    codesign --force --deep --sign - "${root_dir}/build/bin/${app_name}.app" >/dev/null
   fi
 else
   echo "[WARN] assets/models/yolox_button_s.mlmodelc not found; Visual Learning CoreML model will be unavailable."
@@ -257,8 +273,8 @@ fi
 
 echo
 echo "Build complete."
-if [[ -d "${root_dir}/build/bin/ai-console.app" ]]; then
-  echo "Output: ${root_dir}/build/bin/ai-console.app"
+if [[ -d "${root_dir}/build/bin/${app_name}.app" ]]; then
+  echo "Output: ${root_dir}/build/bin/${app_name}.app"
 else
   echo "Output folder: ${root_dir}/build/bin"
 fi

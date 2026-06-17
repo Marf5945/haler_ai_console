@@ -47,7 +47,7 @@ func main() {
 
 	// Create application with options
 	err = wails.Run(&options.App{
-		Title:     "AI Console",
+		Title:     "HaLer AI Console",
 		Width:     1536,
 		Height:    860,
 		MinWidth:  1180,

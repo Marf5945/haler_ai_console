@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="${0:A:h}"
 PROJECT="${SCRIPT_DIR:h}"
 export PATH="$PATH:/usr/local/go/bin:/opt/homebrew/bin:$HOME/go/bin"
-APP="$PROJECT/build/bin/ai-console.app"
+APP="$PROJECT/build/bin/HaLer AI Console.app"
 LOG_DIR="$PROJECT/build/logs"
 LOG_FILE="$LOG_DIR/package-latest-$(date '+%Y%m%d-%H%M%S').log"
 BUILD_HELPER="$SCRIPT_DIR/wails_build_darwin.sh"
@@ -33,7 +33,7 @@ finish() {
 }
 trap finish EXIT
 
-echo "Packaging AI Console"
+echo "Packaging HaLer AI Console"
 echo "Project: $PROJECT"
 echo "Started: $(date '+%Y-%m-%d %H:%M:%S')"
 echo
@@ -60,8 +60,8 @@ if [[ ! -d "$APP" ]]; then
 fi
 
 echo "Step 2/2: reopening exact packaged app"
-echo "Closing running ai-console windows first to avoid showing an older in-memory app."
-osascript -e 'tell application id "com.wails.ai-console" to quit' >/dev/null 2>&1 || true
+echo "Closing running HaLer AI Console windows first to avoid showing an older in-memory app."
+osascript -e 'tell application "HaLer AI Console" to quit' >/dev/null 2>&1 || true
 sleep 1
 open -n "$APP"
 echo "Finished: $(date '+%Y-%m-%d %H:%M:%S')"

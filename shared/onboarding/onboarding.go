@@ -142,7 +142,7 @@ func (s *Service) ExitReadOnly() {
 
 func defaultSteps() []Step {
 	return []Step{
-		{ID: "welcome", Title: "歡迎", Description: "認識 AI Console 的基本介面", Completed: false},
+		{ID: "welcome", Title: "歡迎", Description: "認識 Haㄌer AI Console 的基本介面", Completed: false},
 		{ID: "adapter", Title: "選擇 Adapter", Description: "選擇你要使用的 CLI（Claude / Codex / Gemini）", Completed: false},
 		{ID: "persona", Title: "設定人格", Description: "設定助手的名稱與回應風格", Completed: false},
 		{ID: "tool", Title: "試用工具", Description: "開啟工具面板，嘗試使用一個工具", Completed: false},

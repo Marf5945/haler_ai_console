@@ -12,7 +12,11 @@
 *.dylib
 *.test
 *.out
-/build/
+/build/*
+!/build/appicon.png
+!/build/windows/
+/build/windows/*
+!/build/windows/icon.ico
 /bin/
 
 # === Wails ===

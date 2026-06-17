@@ -2,6 +2,65 @@
 
 HaLer for AI Console is a Wails desktop app with a Go backend and a React/Vite frontend.
 
+## Quick Start
+
+### I just want to use it
+
+Download `HaLer AI Console` from GitHub Releases when a desktop release is
+available. Packaged releases do not require Go, Wails, Node.js, or Git.
+
+### Windows build
+
+```cmd
+git clone https://github.com/Marf5945/haler_ai_console.git
+cd haler_ai_console
+build.cmd
+```
+
+For a clean rebuild:
+
+```cmd
+build.cmd --clean
+```
+
+### macOS build
+
+```bash
+git clone https://github.com/Marf5945/haler_ai_console.git
+cd haler_ai_console
+bash scripts/wails_build_darwin.sh
+```
+
+To install/check only the pinned macOS developer tools:
+
+```bash
+bash scripts/dev_setup_macos.sh
+```
+
+To use the double-click style macOS package helper from Terminal:
+
+```bash
+open scripts/package_latest_app.command
+```
+
+### Release packaging
+
+Windows installer:
+
+```cmd
+scripts\package_windows_release.cmd
+```
+
+macOS Apple Silicon and Intel zip assets:
+
+```bash
+bash scripts/package_macos_release.sh
+```
+
+Both build helpers prompt before installing missing tools. Go, Node.js, and
+Wails are pinned to known versions; official Go/Node installers are verified
+with SHA256 before installation.
+
 ## 功能概覽（繁中）
 
 HaLer for AI Console 是一個本機優先的 AI 工作台，將多種 LLM 介面、文件資料、任務流程與安全治理集中在同一個桌面應用中。
@@ -44,6 +103,13 @@ Runtime requirements:
 - Windows: Microsoft Edge WebView2 Runtime.
 - Optional: CLI tools used by adapters, such as Codex, Claude, Gemini, or Ollama.
 
+Recommended release assets:
+
+- `HaLer-AI-Console-Windows-amd64-installer.exe`.
+- `HaLer-AI-Console-macOS-arm64.zip` or `.dmg` for Apple Silicon Macs.
+- `HaLer-AI-Console-macOS-amd64.zip` or `.dmg` for Intel Macs, if supported.
+- Optional model assets such as `yolox_button_s.onnx`.
+
 ## For Developers
 
 Install these tools before building from source:
@@ -66,16 +132,17 @@ macOS also needs:
 
 ### macOS
 
-Using Homebrew:
+Using the setup helper:
 
 ```bash
-xcode-select --install
-bash scripts/wails_build_darwin.sh
+bash scripts/dev_setup_macos.sh
 ```
 
-The macOS build helper installs pinned Go and Node.js versions from their
-official download URLs and verifies SHA256 checksums before running the package
-installers.
+The setup helper checks Xcode Command Line Tools, Git, Go, Node.js, npm, and
+Wails CLI. It installs pinned Go and Node.js versions from their official
+download URLs and verifies SHA256 checksums before running the package
+installers. To install/check tools and build in one pass, run
+`bash scripts/wails_build_darwin.sh`.
 
 Make sure Go's bin directory is in your shell path if you install tools
 manually:
@@ -130,6 +197,12 @@ From Command Prompt or PowerShell:
 build.cmd
 ```
 
+To build the formal Windows installer:
+
+```cmd
+build.cmd --installer
+```
+
 For a clean Windows rebuild, especially after copying the project from macOS:
 
 ```cmd
@@ -138,12 +211,14 @@ build.cmd --clean
 
 The helper checks the current Windows architecture, verifies pinned Go/Node/npm/Wails versions, installs frontend dependencies with `npm ci` when a lockfile exists, runs `wails doctor`, and then runs `wails build` for the current Windows target.
 If a required Windows dependency is missing, the helper now prompts whether it should install it automatically.
+Installer builds use Wails' NSIS packaging support and place installer candidates under `build/bin`.
+For a release-ready filename, run `scripts\package_windows_release.cmd`; it copies the newest installer to `build/release/HaLer-AI-Console-Windows-<arch>-installer.exe` and prints a SHA256 hash.
 
 ### macOS
 
 ```bash
-git clone https://github.com/<owner>/<repo>.git
-cd <repo>
+git clone https://github.com/Marf5945/haler_ai_console.git
+cd haler_ai_console
 bash scripts/wails_build_darwin.sh
 ```
 
@@ -154,6 +229,19 @@ bash scripts/wails_build_darwin.sh --clean
 ```
 
 The macOS helper checks Xcode Command Line Tools, Git, pinned Go, pinned Node.js, npm, and pinned Wails CLI. If a required dependency is missing or does not match the pinned version, it prompts whether it should install it automatically before continuing.
+For a Finder-friendly package flow, double-click `scripts/package_latest_app.command` or run `open scripts/package_latest_app.command`; it logs the build and opens the generated app bundle when packaging succeeds.
+For release packaging, run `bash scripts/package_macos_release.sh`; it builds and zips both `darwin/arm64` and `darwin/amd64` apps under `build/release`.
+
+## Release Signing Notes
+
+The release scripts create installable/packageable assets, but production
+distribution should still add platform signing:
+
+- Windows: sign the generated installer with an Authenticode code-signing
+  certificate before uploading it to GitHub Releases.
+- macOS: sign with a Developer ID certificate and notarize the zipped app before
+  public distribution. The current scripts use ad-hoc signing only when no
+  release signing identity is configured.
 
 Build output is generated under:
 

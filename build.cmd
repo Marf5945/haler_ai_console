@@ -12,10 +12,39 @@ set "GO_ARM64_SHA256=b87863733cd87624387ee61307a5ebaf405351bf4035a3aa7744c26a785
 set "NODE_X64_SHA256=43749d78a28ff11a36cb279407bc13e79bcfb8670e7926e469018d31c2ec6453"
 set "NODE_ARM64_SHA256=beac2056574ebc523d5feaad7cdc434cb1d752eba076db7ebb4b62bc13ec70b9"
 set "DOWNLOAD_DIR=%TEMP%\ai-console-build-tools"
+set "APP_DISPLAY_NAME=HaLer AI Console"
+set "BUILD_INSTALLER=0"
+set "CLEAN_BUILD=0"
+set "WAILS_EXE=wails"
+set "BUILD_CACHE_ROOT=%TEMP%\haler-ai-console-build-cache"
+set "GOCACHE=%BUILD_CACHE_ROOT%\go-build"
+set "GOMODCACHE=%BUILD_CACHE_ROOT%\go-mod"
+
+:parse_args
+if "%~1"=="" goto args_done
+if /i "%~1"=="--clean" (
+  set "CLEAN_BUILD=1"
+  shift
+  goto parse_args
+)
+if /i "%~1"=="--installer" (
+  set "BUILD_INSTALLER=1"
+  shift
+  goto parse_args
+)
+if /i "%~1"=="--release" (
+  set "BUILD_INSTALLER=1"
+  shift
+  goto parse_args
+)
+echo [ERROR] Unknown argument: %~1
+echo Usage: build.cmd [--clean] [--installer] [--release]
+exit /b 1
+:args_done
 
 echo.
-echo AI Console Windows build helper
-echo ===============================
+echo HaLer AI Console Windows build helper
+echo =====================================
 echo.
 
 if /i "%OS%"=="Windows_NT" (
@@ -39,6 +68,7 @@ if /i "%HOST_ARCH%"=="AMD64" (
 
 echo Host: %HOST_OS% %HOST_ARCH%
 echo Wails target: %WAILS_PLATFORM%
+if "%BUILD_INSTALLER%"=="1" echo Package: NSIS installer
 echo.
 
 call :refresh_path
@@ -47,30 +77,20 @@ call :ensure_go || exit /b 1
 call :ensure_node || exit /b 1
 call :ensure_webview2 || exit /b 1
 call :ensure_wails || exit /b 1
+if "%BUILD_INSTALLER%"=="1" call :ensure_nsis || exit /b 1
 call :refresh_path
 
 echo Tool versions:
 go version
 node --version
 call npm --version
-call wails version
+call "%WAILS_EXE%" version
 echo.
 
-if /i "%~1"=="--clean" (
+if "%CLEAN_BUILD%"=="1" (
   echo [CLEAN] Removing generated frontend dependency/build folders...
   if exist "frontend\node_modules" rmdir /s /q "frontend\node_modules"
   if exist "frontend\dist" rmdir /s /q "frontend\dist"
-)
-
-if exist "frontend\node_modules\fsevents\fsevents.node" (
-  echo [WARN] macOS-only fsevents.node was found in frontend\node_modules.
-  echo        node_modules cannot be reused across macOS and Windows.
-  choice /C YN /M "Delete frontend\node_modules and reinstall for Windows"
-  if errorlevel 2 (
-    echo [ERROR] Please remove frontend\node_modules manually, then rerun build.cmd.
-    exit /b 1
-  )
-  rmdir /s /q "frontend\node_modules"
 )
 
 if not exist "frontend\package.json" (
@@ -78,34 +98,46 @@ if not exist "frontend\package.json" (
   exit /b 1
 )
 
-pushd frontend || exit /b 1
-echo Installing frontend dependencies...
-if exist "package-lock.json" (
-  call npm ci --audit=false --fund=false
-) else (
-  call npm install --audit=false --fund=false
+if not exist "%GOCACHE%" mkdir "%GOCACHE%"
+if not exist "%GOMODCACHE%" mkdir "%GOMODCACHE%"
+
+if exist "build\cache" (
+  echo Removing legacy in-repo Go cache...
+  rmdir /s /q "build\cache"
 )
-if errorlevel 1 (
-  popd
-  echo [ERROR] npm dependency install failed.
-  exit /b 1
+
+if exist "frontend\node_modules" (
+  echo Removing frontend\node_modules before Wails binding generation...
+  rmdir /s /q "frontend\node_modules"
 )
-popd
 
 echo.
 echo Running wails doctor...
-call wails doctor
+call "%WAILS_EXE%" doctor
 if errorlevel 1 (
   echo [ERROR] wails doctor reported a problem. Fix the issue above, then rerun build.cmd.
   exit /b 1
 )
 
 echo.
-echo Building AI Console for %WAILS_PLATFORM%...
-call wails build -platform %WAILS_PLATFORM%
+echo Building HaLer AI Console for %WAILS_PLATFORM%...
+if "%BUILD_INSTALLER%"=="1" (
+  call "%WAILS_EXE%" build -platform %WAILS_PLATFORM% -nsis -webview2 download
+) else (
+  call "%WAILS_EXE%" build -platform %WAILS_PLATFORM%
+)
 if errorlevel 1 (
   echo [ERROR] Wails build failed.
   exit /b 1
+)
+
+if "%BUILD_INSTALLER%"=="1" (
+  dir /b "build\bin\*installer*.exe" >nul 2>nul
+  if errorlevel 1 (
+    echo [ERROR] Wails build completed, but no NSIS installer was produced.
+    echo         Make sure makensis.exe is installed and available on PATH, then rerun build.cmd --installer.
+    exit /b 1
+  )
 )
 
 if exist "assets\models\yolox_button_s.onnx" (
@@ -136,9 +168,13 @@ if exist "assets\runtimes\onnxruntime-directml\1.24.4\win-x64\onnxruntime.dll" (
 
 echo.
 echo Build complete.
-if exist "build\bin\ai-console.exe" (
-  echo Output: %ROOT%build\bin\ai-console.exe
-  certutil -hashfile "build\bin\ai-console.exe" SHA256
+if "%BUILD_INSTALLER%"=="1" (
+  echo Installer output candidates:
+  dir /b "build\bin\*installer*.exe" 2>nul
+  for %%F in ("build\bin\*installer*.exe") do if exist "%%~fF" certutil -hashfile "%%~fF" SHA256
+) else if exist "build\bin\%APP_DISPLAY_NAME%.exe" (
+  echo Output: %ROOT%build\bin\%APP_DISPLAY_NAME%.exe
+  certutil -hashfile "build\bin\%APP_DISPLAY_NAME%.exe" SHA256
 ) else (
   echo Output folder: %ROOT%build\bin
 )
@@ -147,8 +183,11 @@ exit /b 0
 :refresh_path
 if exist "C:\Program Files\Go\bin" set "PATH=C:\Program Files\Go\bin;%PATH%"
 if exist "%USERPROFILE%\go\bin" set "PATH=%USERPROFILE%\go\bin;%PATH%"
+if exist "%USERPROFILE%\go\bin\wails.exe" set "WAILS_EXE=%USERPROFILE%\go\bin\wails.exe"
 if exist "C:\Program Files\nodejs" set "PATH=C:\Program Files\nodejs;%PATH%"
 if exist "C:\Program Files\Git\cmd" set "PATH=C:\Program Files\Git\cmd;%PATH%"
+if exist "C:\Program Files (x86)\NSIS" set "PATH=C:\Program Files (x86)\NSIS;%PATH%"
+if exist "C:\Program Files\NSIS" set "PATH=C:\Program Files\NSIS;%PATH%"
 exit /b 0
 
 :warn_missing_git
@@ -225,7 +264,7 @@ exit /b 1
 :ensure_wails
 call :refresh_path
 set "FOUND_WAILS="
-for /f "delims=" %%V in ('wails version 2^>nul') do set "FOUND_WAILS=%%V"
+for /f "delims=" %%V in ('"%WAILS_EXE%" version 2^>nul') do if not defined FOUND_WAILS set "FOUND_WAILS=%%V"
 if defined FOUND_WAILS (
   echo !FOUND_WAILS! | findstr /C:"%PINNED_WAILS_VERSION%" >nul
   if not errorlevel 1 exit /b 0
@@ -246,10 +285,11 @@ if errorlevel 1 (
 )
 call :refresh_path
 set "FOUND_WAILS="
-for /f "delims=" %%V in ('wails version 2^>nul') do set "FOUND_WAILS=%%V"
+for /f "delims=" %%V in ('"%WAILS_EXE%" version 2^>nul') do if not defined FOUND_WAILS set "FOUND_WAILS=%%V"
 echo !FOUND_WAILS! | findstr /C:"%PINNED_WAILS_VERSION%" >nul
 if not errorlevel 1 exit /b 0
 echo [ERROR] Wails CLI %PINNED_WAILS_VERSION% is still missing after installation.
+echo         Expected executable: %WAILS_EXE%
 exit /b 1
 
 :install_msi_with_hash
@@ -329,6 +369,33 @@ reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A
 reg query "HKLM\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" /v pv >nul 2>nul && exit /b 0
 reg query "HKCU\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" /v pv >nul 2>nul && exit /b 0
 exit /b 1
+
+:ensure_nsis
+call :refresh_path
+where makensis >nul 2>nul
+if not errorlevel 1 exit /b 0
+echo [WARN] NSIS installer compiler is missing.
+echo        It is required only when building the Windows installer with --installer.
+call :prompt_install "NSIS installer compiler"
+if errorlevel 1 (
+  echo [ERROR] NSIS is required to produce the Windows installer.
+  exit /b 1
+)
+echo Installing NSIS...
+call :ensure_command winget "winget" "winget is required to auto-install NSIS." "" || exit /b 1
+cmd /c "winget install --id NSIS.NSIS -e --source winget"
+if errorlevel 1 (
+  echo [ERROR] Failed to install NSIS.
+  exit /b 1
+)
+call :refresh_path
+where makensis >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] makensis.exe is still missing after NSIS installation.
+  echo         Restart this terminal if Windows has not refreshed PATH yet.
+  exit /b 1
+)
+exit /b 0
 
 :prompt_install
 choice /C YN /M "Install %~1 now"

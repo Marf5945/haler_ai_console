@@ -4,6 +4,15 @@ setlocal EnableExtensions EnableDelayedExpansion
 set "ROOT=%~dp0"
 cd /d "%ROOT%" || exit /b 1
 
+set "PINNED_GO_VERSION=1.26.4"
+set "PINNED_NODE_VERSION=24.16.0"
+set "PINNED_WAILS_VERSION=v2.12.0"
+set "GO_AMD64_SHA256=55902c036634c7ab3159cf259af692abc86989aaefcc7f75bef888f3263031c4"
+set "GO_ARM64_SHA256=b87863733cd87624387ee61307a5ebaf405351bf4035a3aa7744c26a785a3d3e"
+set "NODE_X64_SHA256=43749d78a28ff11a36cb279407bc13e79bcfb8670e7926e469018d31c2ec6453"
+set "NODE_ARM64_SHA256=beac2056574ebc523d5feaad7cdc434cb1d752eba076db7ebb4b62bc13ec70b9"
+set "DOWNLOAD_DIR=%TEMP%\ai-console-build-tools"
+
 echo.
 echo AI Console Windows build helper
 echo ===============================
@@ -32,20 +41,13 @@ echo Host: %HOST_OS% %HOST_ARCH%
 echo Wails target: %WAILS_PLATFORM%
 echo.
 
-if exist "%USERPROFILE%\go\bin" set "PATH=%USERPROFILE%\go\bin;%PATH%"
-if exist "C:\Program Files\Go\bin" set "PATH=C:\Program Files\Go\bin;%PATH%"
-if exist "C:\Program Files\Git\cmd" set "PATH=C:\Program Files\Git\cmd;%PATH%"
-
-call :ensure_command winget "winget" "winget is required to auto-install missing Windows dependencies." "" || exit /b 1
-call :ensure_command git "Git" "Git is required to manage and build this repository." "winget install --id Git.Git -e" || exit /b 1
-call :ensure_command go "Go" "Go 1.23 or newer is required to build the backend." "winget install --id GoLang.Go -e" || exit /b 1
-if exist "%USERPROFILE%\go\bin" set "PATH=%USERPROFILE%\go\bin;%PATH%"
-if exist "C:\Program Files\Go\bin" set "PATH=C:\Program Files\Go\bin;%PATH%"
-call :ensure_command node "Node.js" "Node.js LTS is required to build the frontend." "winget install --id OpenJS.NodeJS.LTS -e" || exit /b 1
-call :ensure_command npm "npm" "npm is required to install frontend dependencies." "winget install --id OpenJS.NodeJS.LTS -e" || exit /b 1
+call :refresh_path
+call :warn_missing_git
+call :ensure_go || exit /b 1
+call :ensure_node || exit /b 1
 call :ensure_webview2 || exit /b 1
-call :ensure_command wails "Wails CLI" "Wails CLI is required to package the desktop app." "go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0" || exit /b 1
-if exist "%USERPROFILE%\go\bin" set "PATH=%USERPROFILE%\go\bin;%PATH%"
+call :ensure_wails || exit /b 1
+call :refresh_path
 
 echo Tool versions:
 go version
@@ -79,11 +81,7 @@ if not exist "frontend\package.json" (
 pushd frontend || exit /b 1
 echo Installing frontend dependencies...
 if exist "package-lock.json" (
-  if exist "node_modules" (
-    call npm install --audit=false --fund=false
-  ) else (
-    call npm ci --audit=false --fund=false
-  )
+  call npm ci --audit=false --fund=false
 ) else (
   call npm install --audit=false --fund=false
 )
@@ -146,6 +144,135 @@ if exist "build\bin\ai-console.exe" (
 )
 exit /b 0
 
+:refresh_path
+if exist "C:\Program Files\Go\bin" set "PATH=C:\Program Files\Go\bin;%PATH%"
+if exist "%USERPROFILE%\go\bin" set "PATH=%USERPROFILE%\go\bin;%PATH%"
+if exist "C:\Program Files\nodejs" set "PATH=C:\Program Files\nodejs;%PATH%"
+if exist "C:\Program Files\Git\cmd" set "PATH=C:\Program Files\Git\cmd;%PATH%"
+exit /b 0
+
+:warn_missing_git
+where git >nul 2>nul
+if not errorlevel 1 exit /b 0
+echo [WARN] Git is missing.
+echo        Git is recommended for source control, but this build can continue from an already cloned repository.
+exit /b 0
+
+:ensure_go
+call :refresh_path
+set "FOUND_GO="
+for /f "tokens=3" %%V in ('go version 2^>nul') do set "FOUND_GO=%%V"
+if "!FOUND_GO!"=="go%PINNED_GO_VERSION%" exit /b 0
+if defined FOUND_GO (
+  echo [WARN] Found Go !FOUND_GO!, but this build helper is pinned to go%PINNED_GO_VERSION%.
+) else (
+  echo [WARN] Go is missing.
+)
+echo        Installing from the official Go download URL with SHA256 verification.
+call :prompt_install "Go %PINNED_GO_VERSION%"
+if errorlevel 1 (
+  echo [ERROR] Go %PINNED_GO_VERSION% is required. Install it and rerun build.cmd.
+  exit /b 1
+)
+if /i "%WAILS_PLATFORM%"=="windows/arm64" (
+  call :install_msi_with_hash "https://go.dev/dl/go%PINNED_GO_VERSION%.windows-arm64.msi" "%DOWNLOAD_DIR%\go%PINNED_GO_VERSION%.windows-arm64.msi" "%GO_ARM64_SHA256%" "Go %PINNED_GO_VERSION%" || exit /b 1
+) else (
+  call :install_msi_with_hash "https://go.dev/dl/go%PINNED_GO_VERSION%.windows-amd64.msi" "%DOWNLOAD_DIR%\go%PINNED_GO_VERSION%.windows-amd64.msi" "%GO_AMD64_SHA256%" "Go %PINNED_GO_VERSION%" || exit /b 1
+)
+call :refresh_path
+set "FOUND_GO="
+for /f "tokens=3" %%V in ('go version 2^>nul') do set "FOUND_GO=%%V"
+if "!FOUND_GO!"=="go%PINNED_GO_VERSION%" exit /b 0
+echo [ERROR] Go %PINNED_GO_VERSION% is still missing after installation.
+echo         Restart this terminal if Windows has not refreshed PATH yet.
+exit /b 1
+
+:ensure_node
+call :refresh_path
+set "FOUND_NODE="
+for /f "delims=" %%V in ('node --version 2^>nul') do set "FOUND_NODE=%%V"
+if "!FOUND_NODE!"=="v%PINNED_NODE_VERSION%" (
+  where npm >nul 2>nul
+  if not errorlevel 1 exit /b 0
+)
+if defined FOUND_NODE (
+  echo [WARN] Found Node.js !FOUND_NODE!, but this build helper is pinned to v%PINNED_NODE_VERSION%.
+) else (
+  echo [WARN] Node.js is missing.
+)
+echo        Installing from the official Node.js LTS download URL with SHA256 verification.
+call :prompt_install "Node.js %PINNED_NODE_VERSION%"
+if errorlevel 1 (
+  echo [ERROR] Node.js %PINNED_NODE_VERSION% is required. Install it and rerun build.cmd.
+  exit /b 1
+)
+if /i "%WAILS_PLATFORM%"=="windows/arm64" (
+  call :install_msi_with_hash "https://nodejs.org/dist/v%PINNED_NODE_VERSION%/node-v%PINNED_NODE_VERSION%-arm64.msi" "%DOWNLOAD_DIR%\node-v%PINNED_NODE_VERSION%-arm64.msi" "%NODE_ARM64_SHA256%" "Node.js %PINNED_NODE_VERSION%" || exit /b 1
+) else (
+  call :install_msi_with_hash "https://nodejs.org/dist/v%PINNED_NODE_VERSION%/node-v%PINNED_NODE_VERSION%-x64.msi" "%DOWNLOAD_DIR%\node-v%PINNED_NODE_VERSION%-x64.msi" "%NODE_X64_SHA256%" "Node.js %PINNED_NODE_VERSION%" || exit /b 1
+)
+call :refresh_path
+set "FOUND_NODE="
+for /f "delims=" %%V in ('node --version 2^>nul') do set "FOUND_NODE=%%V"
+if "!FOUND_NODE!"=="v%PINNED_NODE_VERSION%" (
+  where npm >nul 2>nul
+  if not errorlevel 1 exit /b 0
+)
+echo [ERROR] Node.js %PINNED_NODE_VERSION% or npm is still missing after installation.
+echo         Restart this terminal if Windows has not refreshed PATH yet.
+exit /b 1
+
+:ensure_wails
+call :refresh_path
+set "FOUND_WAILS="
+for /f "delims=" %%V in ('wails version 2^>nul') do set "FOUND_WAILS=%%V"
+if defined FOUND_WAILS (
+  echo !FOUND_WAILS! | findstr /C:"%PINNED_WAILS_VERSION%" >nul
+  if not errorlevel 1 exit /b 0
+  echo [WARN] Found Wails CLI !FOUND_WAILS!, but this build helper is pinned to %PINNED_WAILS_VERSION%.
+) else (
+  echo [WARN] Wails CLI is missing.
+)
+call :prompt_install "Wails CLI %PINNED_WAILS_VERSION%"
+if errorlevel 1 (
+  echo [ERROR] Wails CLI %PINNED_WAILS_VERSION% is required. Install it and rerun build.cmd.
+  exit /b 1
+)
+echo Installing Wails CLI %PINNED_WAILS_VERSION%...
+go install github.com/wailsapp/wails/v2/cmd/wails@%PINNED_WAILS_VERSION%
+if errorlevel 1 (
+  echo [ERROR] Failed to install Wails CLI %PINNED_WAILS_VERSION%.
+  exit /b 1
+)
+call :refresh_path
+set "FOUND_WAILS="
+for /f "delims=" %%V in ('wails version 2^>nul') do set "FOUND_WAILS=%%V"
+echo !FOUND_WAILS! | findstr /C:"%PINNED_WAILS_VERSION%" >nul
+if not errorlevel 1 exit /b 0
+echo [ERROR] Wails CLI %PINNED_WAILS_VERSION% is still missing after installation.
+exit /b 1
+
+:install_msi_with_hash
+if not exist "%DOWNLOAD_DIR%" mkdir "%DOWNLOAD_DIR%"
+echo Downloading %~4...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri '%~1' -OutFile '%~2'"
+if errorlevel 1 (
+  echo [ERROR] Failed to download %~4.
+  exit /b 1
+)
+certutil -hashfile "%~2" SHA256 | findstr /I /C:"%~3" >nul
+if errorlevel 1 (
+  echo [ERROR] SHA256 verification failed for %~4.
+  exit /b 1
+)
+echo Installing %~4...
+start /wait msiexec.exe /i "%~2" /qn /norestart
+if errorlevel 1 (
+  echo [ERROR] Failed to install %~4.
+  exit /b 1
+)
+exit /b 0
+
 :ensure_command
 where %~1 >nul 2>nul
 if not errorlevel 1 exit /b 0
@@ -184,7 +311,8 @@ if errorlevel 1 (
   exit /b 1
 )
 echo Installing Microsoft Edge WebView2 Runtime...
-cmd /c "winget install --id Microsoft.EdgeWebView2Runtime -e"
+call :ensure_command winget "winget" "winget is required to auto-install Microsoft Edge WebView2 Runtime." "" || exit /b 1
+cmd /c "winget install --id Microsoft.EdgeWebView2Runtime -e --source winget"
 if errorlevel 1 (
   echo [ERROR] Failed to install Microsoft Edge WebView2 Runtime.
   exit /b 1

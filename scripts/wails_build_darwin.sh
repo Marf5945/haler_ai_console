@@ -4,6 +4,12 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_args=()
 wails_bin="${WAILS_BIN:-}"
+go_version="1.26.4"
+node_version="24.16.0"
+wails_version="v2.12.0"
+go_darwin_amd64_sha256="47b07b6e7515ec724f6d5015d7d5339e2b6467a9667d4029c8b7077b83f3fafe"
+go_darwin_arm64_sha256="9d35ecdcc142f3f2b9010b495ee0051e64ccd7bcf340d3c1258fe2ceb1026c87"
+node_pkg_sha256="65843aafbab48999c9d5f072746836965340c9ef2fbf17a377d3f919dcb0cb7a"
 
 refresh_path() {
   export PATH="$HOME/go/bin:$PATH"
@@ -24,42 +30,6 @@ confirm_install() {
   esac
 }
 
-ensure_brew() {
-  if command -v brew >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "[WARN] Homebrew is missing."
-  echo "       Homebrew is required to auto-install missing macOS dependencies."
-  if ! confirm_install "Homebrew"; then
-    echo "[ERROR] Homebrew is required for automatic dependency installation."
-    return 1
-  fi
-  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-  refresh_path
-  command -v brew >/dev/null 2>&1
-}
-
-ensure_brew_package() {
-  local command_name="$1"
-  local label="$2"
-  local package_name="$3"
-  local reason="$4"
-
-  if command -v "${command_name}" >/dev/null 2>&1; then
-    return 0
-  fi
-
-  echo "[WARN] ${label} is missing."
-  echo "       ${reason}"
-  ensure_brew || return 1
-  if ! confirm_install "${label}"; then
-    echo "[ERROR] ${label} is required. Install it and rerun this script."
-    return 1
-  fi
-  brew install "${package_name}"
-  command -v "${command_name}" >/dev/null 2>&1
-}
-
 ensure_xcode_clt() {
   if xcode-select -p >/dev/null 2>&1; then
     return 0
@@ -75,25 +45,137 @@ ensure_xcode_clt() {
   return 1
 }
 
+install_pkg_with_hash() {
+  local url="$1"
+  local expected_sha="$2"
+  local label="$3"
+  local file_name
+  local tmp_file
+  local actual_sha
+
+  file_name="$(basename "${url}")"
+  tmp_file="${TMPDIR:-/tmp}/${file_name}"
+  echo "Downloading ${label}..."
+  curl -fsSL "${url}" -o "${tmp_file}"
+  actual_sha="$(shasum -a 256 "${tmp_file}" | awk '{print $1}')"
+  if [[ "${actual_sha}" != "${expected_sha}" ]]; then
+    echo "[ERROR] SHA256 verification failed for ${label}."
+    echo "        Expected: ${expected_sha}"
+    echo "        Actual:   ${actual_sha}"
+    return 1
+  fi
+  echo "Installing ${label}..."
+  sudo installer -pkg "${tmp_file}" -target /
+}
+
+ensure_git() {
+  if command -v git >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "[WARN] Git is missing."
+  echo "       Git is usually provided by Xcode Command Line Tools on macOS."
+  ensure_xcode_clt || return 1
+  command -v git >/dev/null 2>&1
+}
+
+ensure_go() {
+  local found_version=""
+  local arch
+  local pkg_arch
+  local expected_sha
+
+  if command -v go >/dev/null 2>&1; then
+    found_version="$(go version | awk '{print $3}')"
+    if [[ "${found_version}" == "go${go_version}" ]]; then
+      return 0
+    fi
+  fi
+
+  if [[ -n "${found_version}" ]]; then
+    echo "[WARN] Found Go ${found_version}, but this build helper is pinned to go${go_version}."
+  else
+    echo "[WARN] Go is missing."
+  fi
+  echo "       Installing from the official Go download URL with SHA256 verification."
+  if ! confirm_install "Go ${go_version}"; then
+    echo "[ERROR] Go ${go_version} is required. Install it and rerun this script."
+    return 1
+  fi
+
+  arch="$(uname -m)"
+  case "${arch}" in
+    arm64)
+      pkg_arch="arm64"
+      expected_sha="${go_darwin_arm64_sha256}"
+      ;;
+    x86_64)
+      pkg_arch="amd64"
+      expected_sha="${go_darwin_amd64_sha256}"
+      ;;
+    *)
+      echo "[ERROR] Unsupported macOS architecture: ${arch}"
+      return 1
+      ;;
+  esac
+
+  install_pkg_with_hash "https://go.dev/dl/go${go_version}.darwin-${pkg_arch}.pkg" "${expected_sha}" "Go ${go_version}" || return 1
+  refresh_path
+  [[ "$(go version | awk '{print $3}')" == "go${go_version}" ]]
+}
+
+ensure_node() {
+  local found_version=""
+
+  if command -v node >/dev/null 2>&1; then
+    found_version="$(node --version)"
+    if [[ "${found_version}" == "v${node_version}" ]] && command -v npm >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  if [[ -n "${found_version}" ]]; then
+    echo "[WARN] Found Node.js ${found_version}, but this build helper is pinned to v${node_version}."
+  else
+    echo "[WARN] Node.js is missing."
+  fi
+  echo "       Installing from the official Node.js LTS download URL with SHA256 verification."
+  if ! confirm_install "Node.js ${node_version}"; then
+    echo "[ERROR] Node.js ${node_version} is required. Install it and rerun this script."
+    return 1
+  fi
+
+  install_pkg_with_hash "https://nodejs.org/dist/v${node_version}/node-v${node_version}.pkg" "${node_pkg_sha256}" "Node.js ${node_version}" || return 1
+  refresh_path
+  [[ "$(node --version)" == "v${node_version}" ]] && command -v npm >/dev/null 2>&1
+}
+
 ensure_wails() {
   if [[ -n "${wails_bin}" && -x "${wails_bin}" ]]; then
-    return 0
+    if "${wails_bin}" version | grep -F "${wails_version}" >/dev/null 2>&1; then
+      return 0
+    fi
+    echo "[WARN] Wails CLI at ${wails_bin} is not ${wails_version}."
   fi
   if command -v wails >/dev/null 2>&1; then
     wails_bin="$(command -v wails)"
-    return 0
+    if "${wails_bin}" version | grep -F "${wails_version}" >/dev/null 2>&1; then
+      return 0
+    fi
+    echo "[WARN] Found Wails CLI, but this build helper is pinned to ${wails_version}."
+  else
+    echo "[WARN] Wails CLI is missing."
   fi
-  echo "[WARN] Wails CLI is missing."
   echo "       Wails CLI is required to package the desktop app."
-  if ! confirm_install "Wails CLI"; then
-    echo "[ERROR] Wails CLI is required. Install it and rerun this script."
+  if ! confirm_install "Wails CLI ${wails_version}"; then
+    echo "[ERROR] Wails CLI ${wails_version} is required. Install it and rerun this script."
     return 1
   fi
-  go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+  go install "github.com/wailsapp/wails/v2/cmd/wails@${wails_version}"
   refresh_path
   if command -v wails >/dev/null 2>&1; then
     wails_bin="$(command -v wails)"
-    return 0
+    "${wails_bin}" version | grep -F "${wails_version}" >/dev/null 2>&1
+    return $?
   fi
   return 1
 }
@@ -125,20 +207,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 ensure_xcode_clt
-ensure_brew_package git "Git" "git" "Git is required to manage and build this repository."
-ensure_brew_package go "Go" "go" "Go 1.23 or newer is required to build the backend."
+ensure_git
+ensure_go
 refresh_path
-ensure_brew_package node "Node.js" "node" "Node.js LTS is required to build the frontend."
-if ! command -v npm >/dev/null 2>&1; then
-  echo "[WARN] npm is missing."
-  echo "       npm is required to install frontend dependencies."
-  ensure_brew || exit 1
-  if ! confirm_install "Node.js (includes npm)"; then
-    echo "[ERROR] npm is required. Reinstall Node.js and rerun this script."
-    exit 1
-  fi
-  brew install node
-fi
+ensure_node
 ensure_wails
 
 echo "Tool versions:"
@@ -156,11 +228,7 @@ fi
 pushd "${root_dir}/frontend" >/dev/null
 echo "Installing frontend dependencies..."
 if [[ -f package-lock.json ]]; then
-  if [[ -d node_modules ]]; then
-    npm install --audit=false --fund=false
-  else
-    npm ci --audit=false --fund=false
-  fi
+  npm ci --audit=false --fund=false
 else
   npm install --audit=false --fund=false
 fi

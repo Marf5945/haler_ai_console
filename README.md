@@ -49,9 +49,9 @@ Runtime requirements:
 Install these tools before building from source:
 
 - Git
-- Go 1.23 or newer
-- Node.js LTS, including npm
-- Wails CLI v2
+- Go 1.26.4
+- Node.js 24.16.0 LTS, including npm
+- Wails CLI v2.12.0
 
 Windows also needs:
 
@@ -69,12 +69,16 @@ macOS also needs:
 Using Homebrew:
 
 ```bash
-brew install git go node
 xcode-select --install
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
+bash scripts/wails_build_darwin.sh
 ```
 
-Make sure Go's bin directory is in your shell path:
+The macOS build helper installs pinned Go and Node.js versions from their
+official download URLs and verifies SHA256 checksums before running the package
+installers.
+
+Make sure Go's bin directory is in your shell path if you install tools
+manually:
 
 ```bash
 export PATH="$HOME/go/bin:$PATH"
@@ -88,11 +92,13 @@ Using PowerShell:
 
 ```powershell
 winget install --id Git.Git -e
-winget install --id GoLang.Go -e
-winget install --id OpenJS.NodeJS.LTS -e
 winget install --id Microsoft.EdgeWebView2Runtime -e
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
+.\build.cmd
 ```
+
+The Windows build helper installs pinned Go and Node.js versions from their
+official download URLs and verifies SHA256 checksums before launching MSI
+installers. Wails CLI is installed as `v2.12.0`.
 
 Make sure this directory is in your `PATH`, then restart PowerShell:
 
@@ -130,7 +136,7 @@ For a clean Windows rebuild, especially after copying the project from macOS:
 build.cmd --clean
 ```
 
-The helper checks the current Windows architecture, verifies Go/Node/npm/Wails, installs frontend dependencies, runs `wails doctor`, and then runs `wails build` for the current Windows target.
+The helper checks the current Windows architecture, verifies pinned Go/Node/npm/Wails versions, installs frontend dependencies with `npm ci` when a lockfile exists, runs `wails doctor`, and then runs `wails build` for the current Windows target.
 If a required Windows dependency is missing, the helper now prompts whether it should install it automatically.
 
 ### macOS
@@ -147,7 +153,7 @@ For a clean macOS rebuild:
 bash scripts/wails_build_darwin.sh --clean
 ```
 
-The macOS helper checks Xcode Command Line Tools, Git, Go, Node.js, npm, and Wails CLI. If a required dependency is missing, it prompts whether it should install it automatically before continuing.
+The macOS helper checks Xcode Command Line Tools, Git, pinned Go, pinned Node.js, npm, and pinned Wails CLI. If a required dependency is missing or does not match the pinned version, it prompts whether it should install it automatically before continuing.
 
 Build output is generated under:
 

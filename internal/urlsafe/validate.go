@@ -193,6 +193,22 @@ func ValidateLLMBaseURL(providerID, baseURL string) (needConfirm bool, hostname 
 	return false, hostname, err // 公網 http 等直接拒絕
 }
 
+// ValidateConfirmedLLMBaseURL verifies the URL that arrives through the
+// "user confirmed private network" path. It preserves the original cloud/local
+// policy first, then applies the confirmed-private policy only to endpoints
+// that actually required confirmation.
+func ValidateConfirmedLLMBaseURL(providerID, baseURL string) error {
+	baseURL = strings.TrimSpace(baseURL)
+	needConfirm, _, err := ValidateLLMBaseURL(providerID, baseURL)
+	if err != nil {
+		return err
+	}
+	if baseURL == "" || !needConfirm {
+		return nil
+	}
+	return ValidateURL(baseURL, PolicyConfirmedPrivate)
+}
+
 // PolicyForLLMEndpoint 集中決定 LLM / model endpoint 的 dial policy。
 // 2a 所有呼叫點一律由此取 policy，不要在呼叫點各自判斷。
 // 信任模型：cloud provider 的 private baseURL 能存在於設定中，必然走過

@@ -39,6 +39,58 @@ func TestCanAutoConfirmBrowserReplayRejectsDangerousBrowserText(t *testing.T) {
 	}
 }
 
+func TestCanAutoConfirmLearningReplayAllowsDesktopAppOpen(t *testing.T) {
+	step := visual_learning.LearningReplayStep{
+		Action:        "click",
+		Label:         "Claude",
+		WindowProcess: "Claude",
+		WindowTitle:   "Claude",
+	}
+	relocated := visual_learning.AnchorRelocationResult{Confidence: 0.78, Reason: "OpenCV fallback matched a candidate"}
+	if !canAutoConfirmLearningReplay(step, relocated) {
+		t.Fatal("expected simple desktop app open/switch replay to auto-confirm")
+	}
+}
+
+func TestCanAutoConfirmLearningReplayAllowsDockOwnedAppOpen(t *testing.T) {
+	step := visual_learning.LearningReplayStep{
+		Action:        "click",
+		Label:         "Cursor",
+		WindowProcess: "Window Server",
+		WindowTitle:   "Cursor",
+	}
+	relocated := visual_learning.AnchorRelocationResult{Confidence: 0.78, Reason: "OpenCV fallback matched a candidate"}
+	if !canAutoConfirmLearningReplay(step, relocated) {
+		t.Fatal("expected Dock/app icon replay to auto-confirm")
+	}
+}
+
+func TestCanAutoConfirmLearningReplayRejectsDangerousDesktopText(t *testing.T) {
+	step := visual_learning.LearningReplayStep{
+		Action:        "click",
+		Label:         "Delete",
+		WindowProcess: "Claude",
+		WindowTitle:   "Claude",
+	}
+	relocated := visual_learning.AnchorRelocationResult{Confidence: 0.9}
+	if canAutoConfirmLearningReplay(step, relocated) {
+		t.Fatal("expected dangerous desktop click to require confirmation")
+	}
+}
+
+func TestCanAutoConfirmLearningReplayRejectsLowConfidenceDesktopAppOpen(t *testing.T) {
+	step := visual_learning.LearningReplayStep{
+		Action:        "click",
+		Label:         "Claude",
+		WindowProcess: "Claude",
+		WindowTitle:   "Claude",
+	}
+	relocated := visual_learning.AnchorRelocationResult{Confidence: 0.62}
+	if canAutoConfirmLearningReplay(step, relocated) {
+		t.Fatal("expected low-confidence desktop app replay to require confirmation")
+	}
+}
+
 func TestFallbackScaledWindowAnchorRelocationUsesCurrentWindowSize(t *testing.T) {
 	step := visual_learning.LearningReplayStep{
 		X: 900,

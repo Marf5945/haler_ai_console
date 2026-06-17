@@ -54,3 +54,27 @@ func TestValidateLLMBaseURL(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateConfirmedLLMBaseURL(t *testing.T) {
+	tests := []struct {
+		name       string
+		providerID string
+		baseURL    string
+		wantErr    bool
+	}{
+		{"confirmed private allowed", "generic-api", "http://192.168.1.100:8080/v1", false},
+		{"confirmed localhost allowed", "generic-api", "http://localhost:8080/v1", false},
+		{"public https allowed", "openai", "https://api.openai.com/v1", false},
+		{"public http still rejected", "generic-api", "http://api.example.com/v1", true},
+		{"metadata host rejected", "generic-api", "http://metadata.google.internal/computeMetadata/v1", true},
+		{"link local rejected", "generic-api", "http://169.254.169.254/v1", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateConfirmedLLMBaseURL(tt.providerID, tt.baseURL)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateConfirmedLLMBaseURL(%q, %q) error=%v wantErr=%v", tt.providerID, tt.baseURL, err, tt.wantErr)
+			}
+		})
+	}
+}

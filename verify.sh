@@ -3,7 +3,7 @@
 # 用法（從任何地方都可執行）： ./verify.sh   或   bash verify.sh
 set -uo pipefail
 
-# 專案根目錄：以本腳本所在位置推導，避免把個人本機路徑寫進 repo。
+# 專案根目錄：以此腳本位置解析，避免寫死個人路徑。
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR" || { echo "❌ 找不到專案目錄：$PROJECT_DIR"; exit 1; }
 

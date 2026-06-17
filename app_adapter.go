@@ -248,6 +248,9 @@ func (a *App) ConfirmRegisterLLMAPIAdapter(providerID, providerName, baseURL, mo
 	if providerName == "" {
 		providerName = "LLM API"
 	}
+	if err := urlsafe.ValidateConfirmedLLMBaseURL(providerID, baseURL); err != nil {
+		return nil, fmt.Errorf("baseURL 確認驗證失敗 (%s): %w", baseURL, err)
+	}
 	log.Printf("ConfirmRegisterLLMAPIAdapter: user confirmed private network %s", baseURL)
 	return a.registerLLMAPIAdapterInternal(providerID, providerName, baseURL, model, apiKey)
 }

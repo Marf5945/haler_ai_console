@@ -148,6 +148,7 @@ func (a *App) executeWebSearch(req websearch.SearchRequest, traceID string) skil
 		req.Query = masked
 	}
 	a.pushActionStatus("網路", req.Query) // status rail：正在用網路搜尋「…」…
+	defer a.clearActionStatus()         // 完成/錯誤都收回 idle，避免頂部停在「正在用網路搜尋…」
 	debugtrace.Record("web_search.enter", traceID, map[string]interface{}{
 		"query": req.Query,
 		"limit": req.Limit,

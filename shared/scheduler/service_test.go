@@ -30,6 +30,16 @@ func (m *mockSchedulerNotifier) NotifyJobFired(job *Job) {
 
 func (m *mockSchedulerNotifier) NotifyJobResult(job *Job, ok bool, summary string) {}
 
+type mockSchedulerRunner struct {
+	calls int
+	jobs  []Job
+}
+
+func (m *mockSchedulerRunner) RunJob(ctx context.Context, job *Job) {
+	m.calls++
+	m.jobs = append(m.jobs, *job)
+}
+
 func TestServiceCreatePauseResumeDeletePersistsJobs(t *testing.T) {
 	svc := newTestService(t)
 	job, err := svc.CreateJob("daily", "@daily", ActionCallback, `{"callback_name":"noop"}`)
@@ -191,6 +201,40 @@ func TestServiceNotifyOnFireGatesRemoteNotifier(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("callback executions = %d, want 2", calls)
+	}
+}
+
+func TestServiceHighRiskWithRunnerUsesConfirmPath(t *testing.T) {
+	runner := &mockSchedulerRunner{}
+	svc := NewService(ServiceConfig{
+		DataRoot:  t.TempDir(),
+		EventBus:  eventbus.New(nil),
+		SkillExec: &mockSkillExecutor{},
+		Runner:    runner,
+	})
+	calls := 0
+	svc.Callbacks().Register("should-not-run", func(ctx context.Context, args string) error {
+		calls++
+		return nil
+	})
+	job, err := svc.CreateJob("confirm first", "* * * * *", ActionCallback, `{"callback_name":"should-not-run"}`, "high_non_destructive", "")
+	if err != nil {
+		t.Fatalf("CreateJob returned error: %v", err)
+	}
+
+	svc.executeJob(context.Background(), job, time.Now())
+
+	if runner.calls != 1 {
+		t.Fatalf("runner calls = %d, want 1", runner.calls)
+	}
+	if calls != 0 {
+		t.Fatalf("high-risk action executed before confirmation: calls=%d", calls)
+	}
+	if job.LastFired != "" {
+		t.Fatalf("confirm-needed path should not mark job fired before user confirms: %#v", job)
+	}
+	if job.NextFire == "" {
+		t.Fatalf("confirm-needed path should still advance next fire: %#v", job)
 	}
 }
 

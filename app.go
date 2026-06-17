@@ -1063,6 +1063,18 @@ func (a *App) pushActionStatus(action, target string) {
 	}
 }
 
+// clearActionStatus 動作完成或失敗後把 status rail 從「執行中」收回 idle，
+// 修「搜尋完成後頂部仍停在『正在搜尋本機資料…』」（搭配各 executor 的 defer）。
+func (a *App) clearActionStatus() {
+	if a == nil || a.statusRail == nil {
+		return
+	}
+	view := a.statusRail.ClearToIdle()
+	if a.eventBus != nil {
+		a.eventBus.Emit(eventbus.EventStatusRailUpdated, view)
+	}
+}
+
 func (a *App) NotifyStatusRail(source string, template string, subject string, priority string) statusrail.View {
 	return a.statusRail.AddNotice(source, toNoticeTemplate(template), subject, toNoticePriority(priority))
 }
@@ -1815,6 +1827,16 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 		if resp, ok := a.maybeHandlePendingLocalSearchWebFallback(userText, sessionID, traceID); ok {
 			return resp, nil
 		}
+		// 窄白名單 fast path：極短寒暄／確認句直接定型回覆，跳過 keyword+judge 兩次模型呼叫。
+		// 放在 consumePendingToolAnswer 之後，且僅在沒有 pending 確認時觸發，避免吃掉補答。
+		if pendingConfirmPromptContext(sessionID) == "" {
+			if reply, ok := offlineChatReply(userText); ok {
+				debugtrace.Record("go.toolRouting.fast_path_offline", traceID, map[string]interface{}{
+					"text": reply,
+				})
+				return &skill_step.CLIResponse{Text: reply}, nil
+			}
+		}
 		recentHistory := compactRoutingHistory(a.recentConversationSentences(6), userText, 3)
 		keywordResp, keywordErr := a.cliAdapter.SendMessage(skill_step.CLIMessageOptions{
 			AdapterID:      adapterID,
@@ -1832,6 +1854,12 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 			"error": keywordResp.Error,
 			"err":   errorString(keywordErr),
 		})
+		// keyword 階段命中配額／限流：跳過 judge（同一耗盡模型），直接走確定性保底路由。
+		if isRoutingQuotaHit(keywordResp.Text, keywordResp.Error, keywordErr) {
+			if resp, ok := a.routeAfterRoutingQuotaHit(adapterID, sessionID, userText, traceID, nil); ok {
+				return resp, nil
+			}
+		}
 		if keywordErr != nil || keywordResp.Error != "" || keywordResp.AuthRequired {
 			return &keywordResp, keywordErr
 		}
@@ -1853,6 +1881,12 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 		})
 		if judgeResp.AuthRequired {
 			return &judgeResp, judgeErr
+		}
+		// judge 階段命中配額／限流：用已建好的 lookup 走本機保底，不再 backoff／repair。
+		if isRoutingQuotaHit(judgeResp.Text, judgeResp.Error, judgeErr) {
+			if resp, ok := a.routeAfterRoutingQuotaHit(adapterID, sessionID, userText, traceID, &routingLookup); ok {
+				return resp, nil
+			}
 		}
 		if judgeErr != nil || judgeResp.Error != "" {
 			// judge 失敗：先用本機候選做保底路由，撈不到才把錯誤丟回。
@@ -1888,6 +1922,11 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 				"error":       repairResp.Error,
 				"judge_error": errorString(repairErr),
 			})
+			if isRoutingQuotaHit(repairResp.Text, repairResp.Error, repairErr) {
+				if resp, ok := a.routeAfterRoutingQuotaHit(adapterID, sessionID, userText, traceID, &routingLookup); ok {
+					return resp, nil
+				}
+			}
 			if repairErr == nil && repairResp.Error == "" && !repairResp.AuthRequired {
 				repaired := normalizeToolRoutingDecision(parseToolRoutingDecision(repairResp.Text), userText, routingLookup)
 				if repaired.Kind == toolRoutingDecisionAction || repaired.Kind == toolRoutingDecisionNeedTool {
@@ -1911,6 +1950,7 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 			"local_hits":     len(routingLookup.LocalMatches),
 			"judge_error":    errorString(judgeErr),
 		})
+		decision.LookupQuery = strings.TrimSpace(routingLookup.Query) // 透傳 LLM 斷詞 query 給引用內容搜尋
 		if handled, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID, userText); handled {
 			return &routedResp, nil
 		}
@@ -2247,6 +2287,16 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 		if resp, ok := a.maybeHandlePendingLocalSearchWebFallback(userText, sessionID, traceID); ok {
 			return resp, nil
 		}
+		// 窄白名單 fast path（API 路徑同 CLI）：極短寒暄／確認句直接定型回覆，跳過 keyword+judge。
+		if pendingConfirmPromptContext(sessionID) == "" {
+			if reply, ok := offlineChatReply(userText); ok {
+				debugtrace.Record("go.toolRouting.fast_path_offline", traceID, map[string]interface{}{
+					"text":         reply,
+					"adapter_kind": "api",
+				})
+				return &skill_step.CLIResponse{Text: reply}, nil
+			}
+		}
 		recentHistory := compactRoutingHistory(a.recentConversationSentences(6), userText, 3)
 		keywordText, keywordErr := callAPI(buildSearchTermExtractionPrompt("", userText, recentHistory))
 		debugtrace.Record("go.searchTerms.extract", traceID, map[string]interface{}{
@@ -2254,6 +2304,12 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 			"error":        errorString(keywordErr),
 			"adapter_kind": "api",
 		})
+		// keyword 階段命中配額／限流：跳過 judge（同一耗盡模型），走確定性保底路由。
+		if isRoutingQuotaHit(keywordText, "", keywordErr) {
+			if resp, ok := a.routeAfterRoutingQuotaHit(adapterID, sessionID, userText, traceID, nil); ok {
+				return resp, nil
+			}
+		}
 		if keywordErr != nil {
 			return &skill_step.CLIResponse{Error: keywordErr.Error()}, nil
 		}
@@ -2262,6 +2318,12 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 		// SEC-06: judge prompt 帶 pending 確認摘要（同 CLI 路徑）。
 		routingContextForToolPrompt = formatToolRoutingLookupContext(routingLookup) + pendingConfirmPromptContext(sessionID) + a.formatAvailableSkillsContext(terms) + a.formatRoutingMemoryContext(terms) // Step 4/6：注入候選 + 低敏記憶
 		judgeText, judgeErr := callAPI(buildToolRoutingDecisionPrompt("", userText, routingContextForToolPrompt, recentHistory))
+		// judge 階段命中配額／限流：用已建好的 lookup 走本機保底，不再 backoff／repair。
+		if isRoutingQuotaHit(judgeText, "", judgeErr) {
+			if resp, ok := a.routeAfterRoutingQuotaHit(adapterID, sessionID, userText, traceID, &routingLookup); ok {
+				return resp, nil
+			}
+		}
 		if judgeErr != nil {
 			// judge 失敗：先用本機候選做保底路由，撈不到才把錯誤丟回。
 			if fb, ok := fallbackDecisionFromLookup(routingLookup); ok {
@@ -2286,6 +2348,11 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 				"error":        errorString(repairErr),
 				"adapter_kind": "api",
 			})
+			if isRoutingQuotaHit(repairText, "", repairErr) {
+				if resp, ok := a.routeAfterRoutingQuotaHit(adapterID, sessionID, userText, traceID, &routingLookup); ok {
+					return resp, nil
+				}
+			}
 			if repairErr == nil {
 				repaired := normalizeToolRoutingDecision(parseToolRoutingDecision(repairText), userText, routingLookup)
 				if repaired.Kind == toolRoutingDecisionAction || repaired.Kind == toolRoutingDecisionNeedTool {
@@ -2309,6 +2376,7 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 			"local_hits":     len(routingLookup.LocalMatches),
 			"adapter_kind":   "api",
 		})
+		decision.LookupQuery = strings.TrimSpace(routingLookup.Query) // 透傳 LLM 斷詞 query 給引用內容搜尋
 		if handled, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID, userText); handled {
 			return &routedResp, nil
 		}
@@ -2498,6 +2566,9 @@ type toolRoutingDecision struct {
 	Raw     string
 	Title   string
 	Summary string
+	// LookupQuery 帶上本輪 keyword 抽詞後的 LLM query（空白分隔），供引用內容搜尋
+	// 在「無檔名」時用得到——中文無空白，需要 LLM 斷詞結果才能逐詞比對。
+	LookupQuery string
 }
 
 // fallbackDecisionFromLookup 在 judge 呼叫失敗（配額耗盡、CLI 逾時、Gemini 嘗試

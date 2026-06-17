@@ -381,3 +381,16 @@ func (a *App) ResolveSchedulerBackgroundPrompt(enable bool) error {
 	}
 	return nil
 }
+
+// ConfirmScheduledRun 使用者在 app 內按「確認執行」後呼叫：繞過高風險/付費 API 閘門，
+// 跑這一次（同日去重仍生效）。
+func (a *App) ConfirmScheduledRun(jobID string) error {
+	if a == nil || a.schedulerService == nil {
+		return fmt.Errorf("scheduler service 尚未初始化")
+	}
+	job, ok := a.schedulerService.GetJobByID(jobID)
+	if !ok {
+		return fmt.Errorf("找不到排程 %q", jobID)
+	}
+	return a.runScheduledJobOrchestrationOpt(context.Background(), job, true)
+}

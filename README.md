@@ -12,7 +12,7 @@ available. Packaged releases do not require Go, Wails, Node.js, or Git.
 ### Windows build
 
 ```cmd
-git clone https://github.com/Marf5945/haler_ai_console.git
+git clone <repository-url>
 cd haler_ai_console
 build.cmd
 ```
@@ -26,7 +26,7 @@ build.cmd --clean
 ### macOS build
 
 ```bash
-git clone https://github.com/Marf5945/haler_ai_console.git
+git clone <repository-url>
 cd haler_ai_console
 bash scripts/wails_build_darwin.sh
 ```
@@ -233,7 +233,7 @@ For a release-ready filename, run `scripts\package_windows_release.cmd`; it copi
 ### macOS
 
 ```bash
-git clone https://github.com/Marf5945/haler_ai_console.git
+git clone <repository-url>
 cd haler_ai_console
 bash scripts/wails_build_darwin.sh
 ```

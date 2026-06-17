@@ -190,6 +190,10 @@ export function ConfirmRegisterLLMAPIAdapter(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['ConfirmRegisterLLMAPIAdapter'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function ConfirmScheduledRun(arg1) {
+  return window['go']['main']['App']['ConfirmScheduledRun'](arg1);
+}
+
 export function ConfirmSkillArchive(arg1) {
   return window['go']['main']['App']['ConfirmSkillArchive'](arg1);
 }
@@ -672,6 +676,10 @@ export function HasBlockingVLReview() {
 
 export function HasOpenStopRecoveryCard() {
   return window['go']['main']['App']['HasOpenStopRecoveryCard']();
+}
+
+export function HideNativeLearningReplayCursor() {
+  return window['go']['main']['App']['HideNativeLearningReplayCursor']();
 }
 
 export function ImportGoProgramExport(arg1) {

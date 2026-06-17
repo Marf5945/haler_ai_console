@@ -5,21 +5,9 @@ import (
 	"testing"
 )
 
-func governanceTestOpenAIKey() string {
-	return "sk" + "-abc123def456ghi789jkl012mno345pqr678"
-}
-
-func governanceTestAnthropicKey() string {
-	return "sk" + "-ant-api03-abcdefghijklmnopqrstuvwx"
-}
-
-func governanceTestOpenRouterKey() string {
-	return "sk" + "-or-v1-abcdefghijklmnopqrstuvwx"
-}
-
 // 測試入口粗篩：移除 API key
 func TestEntryFilterAPIKey(t *testing.T) {
-	input := "Here is my key: " + governanceTestOpenAIKey()
+	input := "Here is my key: " + "sk-" + "abc123def456ghi789jkl012mno345pqr678"
 	cleaned, removed := EntryFilter(input)
 
 	if strings.Contains(cleaned, "sk-abc123") {
@@ -71,12 +59,12 @@ func TestEntryFilterSafeContent(t *testing.T) {
 
 // 測試出口精掃：偵測 PEM 私鑰
 func TestExitValidatePrivateKey(t *testing.T) {
-	begin := "-----BEGIN RSA "
-	end := "-----END RSA "
-	keyKind := "PRIVATE" + " KEY-----"
+	pemKind := "PRIVATE " + "KEY"
+	pemHeader := "-----BEGIN RSA " + pemKind + "-----"
+	pemFooter := "-----END RSA " + pemKind + "-----"
 	payload := &ContextPayload{
 		ContentBlocks: []ContentBlock{
-			{Source: "test", Content: begin + keyKind + "\nMIIE....\n" + end + keyKind},
+			{Source: "test", Content: pemHeader + "\nMIIE....\n" + pemFooter},
 		},
 	}
 	// 入口粗篩應已移除，但測試出口兜底
@@ -252,7 +240,7 @@ func TestEntryFilterBearerTab(t *testing.T) {
 }
 
 func TestEntryFilterAnthropicKey(t *testing.T) {
-	input := "My key is " + governanceTestAnthropicKey()
+	input := "My key is " + "sk-ant-" + "api03-abcdefghijklmnopqrstuvwx"
 	cleaned, removed := EntryFilter(input)
 	if strings.Contains(cleaned, "sk-ant-api03") {
 		t.Error("Anthropic key should be caught by entry filter")
@@ -263,7 +251,7 @@ func TestEntryFilterAnthropicKey(t *testing.T) {
 }
 
 func TestEntryFilterOpenRouterKey(t *testing.T) {
-	input := "My key is " + governanceTestOpenRouterKey()
+	input := "My key is " + "sk-or-" + "v1-abcdefghijklmnopqrstuvwx"
 	cleaned, removed := EntryFilter(input)
 	if strings.Contains(cleaned, "sk-or-v1") {
 		t.Error("OpenRouter key should be caught by entry filter")

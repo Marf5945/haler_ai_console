@@ -52,3 +52,20 @@ func TestDetectGenericAPIWithLLMHint(t *testing.T) {
 		t.Fatalf("provider=%s want generic-api", match.Provider.ID)
 	}
 }
+
+func TestRegisterRejectsLLMProviderURL(t *testing.T) {
+	svc := NewService(t.TempDir(), false)
+	if _, err := svc.Register("https://platform.deepseek.com/api_keys", "DeepSeek"); err == nil {
+		t.Fatal("expected LLM provider URL to be rejected by direct link registration")
+	}
+}
+
+func TestValidateURLBlocksPrivateExternalService(t *testing.T) {
+	svc := NewService(t.TempDir(), false)
+	if preview := svc.Preview("https://192.168.1.20/docs"); preview.Valid {
+		t.Fatalf("private external link preview valid, want rejected: %+v", preview)
+	}
+	if preview := svc.Preview("https://169.254.169.254/latest/meta-data/"); preview.Valid {
+		t.Fatalf("link-local external link preview valid, want rejected: %+v", preview)
+	}
+}

@@ -346,6 +346,12 @@ func (n *NativeInput) MoveCursorOnly(step LearningReplayStep) NativeReplayResult
 	}
 }
 
+func (n *NativeInput) ShowAgentCursor(step LearningReplayStep) NativeReplayResult {
+	return n.MoveCursorOnly(step)
+}
+
+func (n *NativeInput) HideAgentCursor() {}
+
 func (n *NativeInput) CaptureWindow(hwnd uintptr) (WindowCapture, error) {
 	if hwnd == 0 {
 		return WindowCapture{}, fmt.Errorf("native capture: window handle is required")

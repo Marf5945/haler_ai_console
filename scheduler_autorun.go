@@ -43,8 +43,14 @@ func (r schedulerJobRunner) RunJob(ctx context.Context, job *scheduler.Job) {
 	}
 }
 
-// runScheduledJobOrchestration 是 F 的核心流程。
+// runScheduledJobOrchestration 是 F 的 runner 入口（未確認）。
 func (a *App) runScheduledJobOrchestration(ctx context.Context, job scheduler.Job) error {
+	return a.runScheduledJobOrchestrationOpt(ctx, job, false)
+}
+
+// runScheduledJobOrchestrationOpt：confirmed=true 時繞過高風險閘門並允許付費 API
+// （使用者在 app 內按「確認執行」後走此路徑）。
+func (a *App) runScheduledJobOrchestrationOpt(ctx context.Context, job scheduler.Job, confirmed bool) error {
 	if a == nil || a.schedulerService == nil {
 		return fmt.Errorf("scheduler service 尚未初始化")
 	}
@@ -70,10 +76,9 @@ func (a *App) runScheduledJobOrchestration(ctx context.Context, job scheduler.Jo
 	}
 	spec := schedulerBootstrapSpecFromJob(&job)
 
-	// F-4：高風險（非 auto 等級）不自動跑，發通知請使用者確認。
-	if !scheduler.ShouldAutoExecute(job.RiskClass) {
-		a.dispatchSchedulerNotice(remote_bridge.NotifySystemWarning, "排程需確認："+spec.Title,
-			"此排程風險等級需要你在 app 內確認後才會執行。")
+	// F-4：高風險（非 auto 等級）未確認時不自動跑 → 跳「app 內確認」卡。
+	if !confirmed && !scheduler.ShouldAutoExecute(job.RiskClass) {
+		a.emitSchedulerConfirmNeeded(job, spec, confirmReasonHighRisk)
 		return nil
 	}
 
@@ -87,11 +92,10 @@ func (a *App) runScheduledJobOrchestration(ctx context.Context, job scheduler.Jo
 	prompt := schedulerRunPrompt(spec, dateKey)
 	_ = a.AppendTalkEntryForAgent(sub.ID, "user", fmt.Sprintf("[排程 %s] %s", dateKey, spec.Action))
 	stopHeartbeat := a.startSchedulerHeartbeat(ctx, spec.Title)
-	output, runErr := a.runSchedulerTurnInSub(sub.ID, prompt)
+	output, runErr := a.runSchedulerTurnInSub(sub.ID, prompt, confirmed)
 	stopHeartbeat()
 	if errors.Is(runErr, errSchedulerPaidConfirm) {
-		a.dispatchSchedulerNotice(remote_bridge.NotifySystemWarning, "排程需確認："+spec.Title,
-			"只剩付費雲端 API 可用，依設定需你確認後才會用 API 執行。")
+		a.emitSchedulerConfirmNeeded(job, spec, confirmReasonPaidAPI)
 		return nil
 	}
 	if runErr != nil {
@@ -148,7 +152,7 @@ func schedulerRunPrompt(spec schedulerBootstrapSpec, dateKey string) string {
 
 // runSchedulerTurnInSub 依 failover 順序在 sub session 內跑一輪 CLI，回傳輸出文字。
 // 付費 API（failoverAPI）不自動使用——若僅剩 API 可用，回 errSchedulerPaidConfirm。
-func (a *App) runSchedulerTurnInSub(sessionID, prompt string) (string, error) {
+func (a *App) runSchedulerTurnInSub(sessionID, prompt string, allowPaidAPI bool) (string, error) {
 	ordered := orderSchedulerFailover(a.schedulerFailoverCandidates())
 	if len(ordered) == 0 {
 		return "", fmt.Errorf("scheduler: 沒有可用的執行後端")
@@ -157,15 +161,15 @@ func (a *App) runSchedulerTurnInSub(sessionID, prompt string) (string, error) {
 	sawAPI := false
 	var lastErr error
 	for _, c := range ordered {
-		if c.Kind == failoverAPI {
+		if c.Kind == failoverAPI && !allowPaidAPI {
 			sawAPI = true
-			continue // 付費 API 不自動用（F-4）
+			continue // 付費 API 預設不自動用（F-4）；使用者確認後 allowPaidAPI=true 才放行
 		}
 		triedNonAPI = true
 		traceID := fmt.Sprintf("scheduler-run-%d", time.Now().UnixNano())
 		var resp *skill_step.CLIResponse
 		var err error
-		if c.Kind == failoverLocal {
+		if c.Kind == failoverLocal || c.Kind == failoverAPI {
 			resp, err = a.SendAPIMessage(c.AdapterID, sessionID, prompt, traceID)
 		} else {
 			if a.cliAdapter == nil {
@@ -252,4 +256,36 @@ func (a *App) sealSchedulerSkillFromRun(job *scheduler.Job, sub *CreatedSubagent
 		return "", err
 	}
 	return skillID, nil
+}
+
+// --- H/I：app 內「點一下確認」動線 ---
+
+type schedulerConfirmReason string
+
+const (
+	confirmReasonHighRisk schedulerConfirmReason = "high_risk"
+	confirmReasonPaidAPI  schedulerConfirmReason = "paid_api"
+)
+
+func schedulerConfirmReasonText(r schedulerConfirmReason) string {
+	switch r {
+	case confirmReasonPaidAPI:
+		return "只剩付費雲端 API 可用，需你確認後才會用 API 執行（可能產生費用）。"
+	default:
+		return "此排程風險等級較高，需你確認後才會執行。"
+	}
+}
+
+// emitSchedulerConfirmNeeded 跳「app 內確認」卡，同時發 remote 通知（若有綁定）。
+func (a *App) emitSchedulerConfirmNeeded(job scheduler.Job, spec schedulerBootstrapSpec, reason schedulerConfirmReason) {
+	if a.eventBus != nil {
+		a.eventBus.Emit("scheduler:confirm_needed", map[string]interface{}{
+			"job_id":  job.ID,
+			"title":   spec.Title,
+			"summary": spec.Summary,
+			"reason":  string(reason),
+		})
+	}
+	a.dispatchSchedulerNotice(remote_bridge.NotifySystemWarning, "排程需確認："+spec.Title, schedulerConfirmReasonText(reason))
+	debugtrace.Record("go.scheduler.autorun.confirm_needed", "", map[string]interface{}{"job_id": job.ID, "reason": string(reason)})
 }

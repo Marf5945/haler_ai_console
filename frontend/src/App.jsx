@@ -45,6 +45,7 @@ import {
   ListScheduledJobs,
   NormalizeSchedulerDraft,
   ResolveSchedulerBackgroundPrompt,
+  ConfirmScheduledRun,
   // #I-1002: Review Archive binding
   ListReviewArchive,
   ListTools,
@@ -83,6 +84,7 @@ import {
   SetToolPreference,
   SetTrustDomAndClick,
   ExecuteNativeLearningReplayStep,
+  HideNativeLearningReplayCursor,
   ConfirmLearningTextEvent,
   RecordLearningMouseEvent,
   RecordLearningKeyboardEvent,
@@ -677,6 +679,34 @@ const fallbackReviewState = {
   skillInjections: [],
 };
 
+function normalizeReviewState(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  const sourceHighRisk = source.highRisk && typeof source.highRisk === 'object' ? source.highRisk : {};
+  const sourceLowRisk = source.lowRiskAmbiguity && typeof source.lowRiskAmbiguity === 'object' ? source.lowRiskAmbiguity : {};
+  const sourceHookCandidates = source.hookCandidates && typeof source.hookCandidates === 'object' ? source.hookCandidates : {};
+  return {
+    ...fallbackReviewState,
+    ...source,
+    highRisk: {
+      ...fallbackReviewState.highRisk,
+      ...sourceHighRisk,
+    },
+    lowRiskAmbiguity: {
+      ...fallbackReviewState.lowRiskAmbiguity,
+      ...sourceLowRisk,
+      candidates: Array.isArray(sourceLowRisk.candidates) ? sourceLowRisk.candidates : [],
+    },
+    hookCandidates: {
+      ...fallbackReviewState.hookCandidates,
+      ...sourceHookCandidates,
+      tagPatches: Array.isArray(sourceHookCandidates.tagPatches) ? sourceHookCandidates.tagPatches : [],
+      subagentCandidates: Array.isArray(sourceHookCandidates.subagentCandidates) ? sourceHookCandidates.subagentCandidates : [],
+      registryProposals: Array.isArray(sourceHookCandidates.registryProposals) ? sourceHookCandidates.registryProposals : [],
+    },
+    pendingPackages: Array.isArray(source.pendingPackages) ? source.pendingPackages : [],
+  };
+}
+
 function createDagRunFromMessage(text) {
   const now = Date.now();
   const hasHighRiskStep = dagHighRiskPattern.test(text);
@@ -961,6 +991,10 @@ function formatVisualLearningPermissionStatus(status, requested = false) {
   }
   const list = missing.length ? missing.join('、') : '輔助使用 / 輸入監控';
   return `[系統] 已呼叫 macOS 權限請求。仍缺：${list}。請在系統對話框或 系統設定 → 隱私權與安全性 開啟 ai-console，然後重啟 app 再錄。`;
+}
+
+function isNoActiveLearningRecordingError(detail) {
+  return /no active recording/i.test(String(detail || ''));
 }
 
 function openFirstMissingVisualLearningPermission(status) {
@@ -1537,6 +1571,8 @@ function App() {
   const [sessionClosePrompt, setSessionClosePrompt] = useState(null);
   const [schedulerBgPrompt, setSchedulerBgPrompt] = useState(false);
   const [schedulerBgBusy, setSchedulerBgBusy] = useState(false);
+  const [schedulerConfirm, setSchedulerConfirm] = useState(null);
+  const [schedulerConfirmBusy, setSchedulerConfirmBusy] = useState(false);
 
   // I-2: Skill Context Orchestration
   const [appSessionId, setAppSessionId] = useState('');
@@ -2178,6 +2214,10 @@ function App() {
     const offSchedulerBgPrompt = EventsOn('scheduler:background_prompt', () => {
       setSchedulerBgPrompt(true);
     });
+    // H/I：高風險/付費 API 需確認 → 後端 emit，前端跳確認卡。
+    const offSchedulerConfirm = EventsOn('scheduler:confirm_needed', (payload) => {
+      if (payload?.job_id) setSchedulerConfirm(payload);
+    });
     const offSessionCloseConfirmed = EventsOn('session:close_confirmed', () => {
       // 後端已完成清除，下一次關閉會由 beforeClose 放行。
       Quit();
@@ -2278,6 +2318,7 @@ function App() {
       offSessionClose();
       offSessionCloseConfirmed();
       offSchedulerBgPrompt();
+      offSchedulerConfirm();
       offLearningTextConfirm();
     };
   }, []);
@@ -2522,6 +2563,18 @@ function App() {
 
   async function executeLearningOperationIntent(operationIntent, {conversationId, traceId}) {
     try {
+      if (operationIntent.mode === 'execute' && isLastLearningOperationReference(operationIntent)) {
+        postDebugTrace('ui.composer.learning_operation_last_replay', traceId, {
+          query: operationIntent.query,
+          raw: operationIntent.raw || '',
+        });
+        const plan = await callWails(GetLastLearningReplayPlan);
+        const message = formatLearningReplayPlan(plan);
+        setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, message));
+        persistConversationEntry(conversationId, 'assistant', message.replace(/^Ai:/, ''), traceId).catch(() => {});
+        await executeLearningReplayWithChat(plan, conversationId, traceId);
+        return;
+      }
       const items = await callWails(() => SearchLearningOperations(
         operationIntent.query,
         operationIntent.mode === 'query' ? 8 : 5,
@@ -2747,21 +2800,26 @@ function App() {
     if (!activeSandboxId) return;
     const conversationId = activeConversationIdRef.current || 'main';
     try {
-      if (vlLearningActive) {
+      const backendActive = await callWails(IsLearningModeActive).catch(() => vlLearningActive);
+      if (vlLearningActive || backendActive) {
         try {
-          const traceId = makeDebugTraceID('learning-metadata');
-          const run = await callWails(StopLearningMode);
-          const namedRun = await enrichStoppedLearningRun(run, traceId);
-          setConversationMessages(conversationId, (prev) => [
-            ...prev,
-            formatLearningOperationLearned(namedRun),
-          ]);
+          if (backendActive) {
+            const traceId = makeDebugTraceID('learning-metadata');
+            const run = await callWails(StopLearningMode);
+            const namedRun = await enrichStoppedLearningRun(run, traceId);
+            setConversationMessages(conversationId, (prev) => [
+              ...prev,
+              formatLearningOperationLearned(namedRun),
+            ]);
+          }
         } catch (error) {
           const detail = error?.message || String(error || '');
-          setConversationMessages(conversationId, (prev) => [
-            ...prev,
-            `[系統] 示範結束，但後端停止記錄時回報錯誤。${detail ? ` ${detail}` : ''}`,
-          ]);
+          if (!isNoActiveLearningRecordingError(detail)) {
+            setConversationMessages(conversationId, (prev) => [
+              ...prev,
+              `[系統] 示範結束，但後端停止記錄時回報錯誤。${detail ? ` ${detail}` : ''}`,
+            ]);
+          }
         }
         setVlLearningActive(false);
         setVlActiveLearningRun(null);
@@ -2871,6 +2929,7 @@ function App() {
       return;
     }
     setPendingLearningReplayConfirm(null);
+    callWails(() => HideNativeLearningReplayCursor()).catch(() => {});
     learningReplayExecutingRef.current = true;
     try {
       const confirmedStep = {
@@ -2908,6 +2967,7 @@ function App() {
 
   function cancelLearningReplayConfirm() {
     setPendingLearningReplayConfirm(null);
+    callWails(() => HideNativeLearningReplayCursor()).catch(() => {});
   }
 
   // #I-301 Contextual Risk Override
@@ -6574,19 +6634,23 @@ function App() {
     if (wasEnabled) {
       // 關閉學習模式
       try {
-        const traceId = makeDebugTraceID('learning-metadata');
-        const run = await callWails(StopLearningMode);
-        const namedRun = await enrichStoppedLearningRun(run, traceId);
-        setConversationMessages(conversationId, (prev) => [
-          ...prev,
-          formatLearningOperationLearned(namedRun),
-        ]);
+        if (backendActive) {
+          const traceId = makeDebugTraceID('learning-metadata');
+          const run = await callWails(StopLearningMode);
+          const namedRun = await enrichStoppedLearningRun(run, traceId);
+          setConversationMessages(conversationId, (prev) => [
+            ...prev,
+            formatLearningOperationLearned(namedRun),
+          ]);
+        }
       } catch (error) {
         const detail = error?.message || String(error || '');
-        setConversationMessages(conversationId, (prev) => [
-          ...prev,
-          `[系統] 示範結束，但後端停止記錄時回報錯誤。${detail ? ` ${detail}` : ''}`,
-        ]);
+        if (!isNoActiveLearningRecordingError(detail)) {
+          setConversationMessages(conversationId, (prev) => [
+            ...prev,
+            `[系統] 示範結束，但後端停止記錄時回報錯誤。${detail ? ` ${detail}` : ''}`,
+          ]);
+        }
       }
       setLearningEnabled(false);
       setVlLearningActive(false);
@@ -6730,6 +6794,8 @@ function App() {
     });
   }, [settingsState.personas.map((persona) => persona.id).join('|'), JSON.stringify(avatarConfigs)]);
 
+  const panelTheme = panelStyleTheme(settingsState.panel.panelStyle);
+
   /* i18n: apply language + direction attributes to root shell */
   const _i18nLang = useI18n(s => s.language);
   const _i18nDir  = useI18n(s => s.getDirection)();
@@ -6761,7 +6827,7 @@ function App() {
   return (
     <div
       className={`console-shell ${activePanel === 'settings' ? 'settings-open' : ''}`}
-      data-theme={panelStyleTheme(settingsState.panel.panelStyle)}
+      data-theme={panelTheme}
       data-lang={_i18nLang}
       dir={_i18nDir}
       onDragOver={handleGlobalFileDragOver}
@@ -7222,6 +7288,10 @@ function App() {
               onTemporaryRemoteBridgeTest={sendTemporaryRemoteBridgeTest}
               onSaveRemoteBridgeInboundSecret={saveRemoteBridgeInboundSecret}
               onMakeRemoteBridgePrimary={makeRemoteBridgePrimary}
+              panelTheme={panelTheme}
+              taskLoopRounds={taskLoopRounds}
+              taskLoopReply={taskLoopReply}
+              onTaskLoopReplyChange={setTaskLoopReply}
               subExportCapabilities={subExportCapabilities}
               onRenameHaora={renameSubagent}
               activeHaoraId={activeHaoraId}
@@ -7758,6 +7828,46 @@ function App() {
         <PackageErrorToast message={packageInstallError} onClose={() => setPackageInstallError('')}/>
       )}
 
+      {/* H/I：排程需確認執行卡 */}
+      {schedulerConfirm && (
+        <div className="session-close-overlay" role="dialog" aria-modal="true" aria-label="排程確認執行">
+          <div className="session-close-dialog">
+            <h3>排程需要你確認：{schedulerConfirm.title || '排程任務'}</h3>
+            <p className="session-close-hint">
+              {schedulerConfirm.reason === 'paid_api'
+                ? '只剩付費雲端 API 可用，確認後才會用 API 執行（可能產生費用）。'
+                : '此排程風險等級較高，確認後才會執行。'}
+              {schedulerConfirm.summary ? ` 內容：${schedulerConfirm.summary}` : ''}
+            </p>
+            <div className="session-close-actions">
+              <button
+                type="button"
+                className="session-close-btn session-close-save"
+                disabled={schedulerConfirmBusy}
+                onClick={async () => {
+                  setSchedulerConfirmBusy(true);
+                  try {
+                    await callWails(() => ConfirmScheduledRun(schedulerConfirm.job_id));
+                    setToolResult({toolId: 'scheduler', ok: true, message: `已確認執行：${schedulerConfirm.title || ''}`});
+                    setSchedulerConfirm(null);
+                  } catch (error) {
+                    setToolResult({toolId: 'scheduler', ok: false, message: `執行失敗：${error?.message || error}`});
+                  } finally {
+                    setSchedulerConfirmBusy(false);
+                  }
+                }}
+              >確認執行</button>
+              <button
+                type="button"
+                className="session-close-btn session-close-discard"
+                disabled={schedulerConfirmBusy}
+                onClick={() => setSchedulerConfirm(null)}
+              >略過</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Phase G：關閉前的背景喚醒選擇 */}
       {schedulerBgPrompt && (
         <div className="session-close-overlay" role="dialog" aria-modal="true" aria-label="排程背景模式">
@@ -7910,9 +8020,16 @@ function operationIntentFromCLIResponse(resp) {
     return {mode: 'query', query: normalizeLearningOperationQuery(target) || target};
   }
   if (action === '操作' || action === '操做') {
-    return {mode: 'execute', query: normalizeLearningOperationQuery(target) || target};
+    return {mode: 'execute', query: normalizeLearningOperationQuery(target) || target, raw: target};
   }
   return null;
+}
+
+function isLastLearningOperationReference(operationIntent) {
+  const haystack = `${operationIntent?.raw || ''} ${operationIntent?.query || ''}`.toLowerCase();
+  if (!haystack.trim()) return false;
+  return /上次|上一個|上一筆|剛剛|剛才|再一次|再執行一次|重跑一次|重新.*一次/.test(haystack)
+    || /last|previous|again|one more time|rerun/.test(haystack);
 }
 
 function resolveLearningOperationMatch(matches) {
@@ -8211,6 +8328,7 @@ async function executeLearningReplayStep(step) {
 
   const bySelector = findReplayElementBySelector(selector);
   if (bySelector) {
+    await showLearningReplayWebCursor(bySelector.x, bySelector.y);
     clickReplayElement(bySelector.element, bySelector.x, bySelector.y);
     return {
       ok: true,
@@ -8242,6 +8360,7 @@ async function executeLearningReplayStep(step) {
         error: '座標落在系統控制項，已略過',
       };
     }
+    await showLearningReplayWebCursor(point.x, point.y);
     clickReplayElement(interactive, point.x, point.y);
     return {
       ok: true,
@@ -8485,6 +8604,140 @@ function normalizeReplayPoint(step) {
 function clampReplayCoordinate(value, min, max) {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, value));
+}
+
+const learningReplayWebCursorState = {
+  cursor: null,
+  trail: [],
+  x: null,
+  y: null,
+  hideTimer: null,
+};
+
+function ensureLearningReplayWebCursor() {
+  if (typeof document === 'undefined') return null;
+  if (learningReplayWebCursorState.cursor?.isConnected) {
+    return learningReplayWebCursorState.cursor;
+  }
+  const cursor = document.createElement('div');
+  cursor.setAttribute('aria-hidden', 'true');
+  cursor.style.position = 'fixed';
+  cursor.style.left = '0px';
+  cursor.style.top = '0px';
+  cursor.style.width = '24px';
+  cursor.style.height = '24px';
+  cursor.style.zIndex = '2147483600';
+  cursor.style.pointerEvents = 'none';
+  cursor.style.transform = 'translate(-50%, -50%)';
+  cursor.style.filter = 'drop-shadow(0 2px 5px rgba(0, 0, 0, 0.34))';
+  cursor.style.transition = 'opacity 160ms ease';
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', '0 0 32 32');
+  svg.setAttribute('width', '24');
+  svg.setAttribute('height', '24');
+  svg.setAttribute('focusable', 'false');
+  svg.setAttribute('aria-hidden', 'true');
+  const paths = [
+    {
+      d: 'M6.5 12.2 10.5 4.8 14 10.2c1.3-.6 2.8-.6 4 0l3.5-5.4 4 7.4c1 5.8-2.1 10.3-9.5 15.2-7.4-4.9-10.5-9.4-9.5-15.2Z',
+      fill: 'rgba(238,238,232,0.96)',
+      stroke: 'rgba(24,24,22,0.92)',
+      'stroke-width': '1.7',
+      'stroke-linejoin': 'round',
+    },
+    {
+      d: 'M11.2 18.4 16 25.8l4.8-7.4c-1.6 1.1-3.2 1.5-4.8 1.5s-3.2-.4-4.8-1.5Z',
+      fill: 'rgba(160,160,154,0.38)',
+    },
+    {
+      d: 'M11.6 14.2h2.4M18 14.2h2.4',
+      stroke: 'rgba(20,20,18,0.95)',
+      'stroke-width': '1.8',
+      'stroke-linecap': 'round',
+    },
+    {
+      d: 'M14.1 19.4c.5-.7 3.3-.7 3.8 0-.3 1.1-.9 1.7-1.9 1.7s-1.6-.6-1.9-1.7Z',
+      fill: 'rgba(20,20,18,0.95)',
+    },
+  ];
+  paths.forEach((attrs) => {
+    const path = document.createElementNS(svgNS, 'path');
+    Object.entries(attrs).forEach(([name, value]) => path.setAttribute(name, value));
+    svg.appendChild(path);
+  });
+  const focusRing = document.createElementNS(svgNS, 'circle');
+  focusRing.setAttribute('cx', '16');
+  focusRing.setAttribute('cy', '16');
+  focusRing.setAttribute('r', '3.1');
+  focusRing.setAttribute('fill', 'none');
+  focusRing.setAttribute('stroke', 'rgba(20,20,18,0.78)');
+  focusRing.setAttribute('stroke-width', '1.2');
+  svg.appendChild(focusRing);
+  cursor.appendChild(svg);
+  document.body.appendChild(cursor);
+  learningReplayWebCursorState.cursor = cursor;
+  return cursor;
+}
+
+function addLearningReplayWebCursorTrailDot(x, y) {
+  if (typeof document === 'undefined') return;
+  const dot = document.createElement('div');
+  dot.setAttribute('aria-hidden', 'true');
+  dot.style.position = 'fixed';
+  dot.style.left = `${Math.round(x)}px`;
+  dot.style.top = `${Math.round(y)}px`;
+  dot.style.width = '4px';
+  dot.style.height = '4px';
+  dot.style.borderRadius = '999px';
+  dot.style.background = 'rgba(238, 238, 232, 0.72)';
+  dot.style.boxShadow = '0 0 0 1px rgba(20, 20, 18, 0.22)';
+  dot.style.zIndex = '2147483599';
+  dot.style.pointerEvents = 'none';
+  dot.style.transform = 'translate(-50%, -50%)';
+  dot.style.transition = 'opacity 420ms ease';
+  document.body.appendChild(dot);
+  learningReplayWebCursorState.trail.push(dot);
+  while (learningReplayWebCursorState.trail.length > 10) {
+    learningReplayWebCursorState.trail.shift()?.remove();
+  }
+  window.setTimeout(() => {
+    dot.style.opacity = '0';
+    window.setTimeout(() => dot.remove(), 460);
+  }, 130);
+}
+
+async function showLearningReplayWebCursor(x, y) {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  const targetX = Number(x);
+  const targetY = Number(y);
+  if (!Number.isFinite(targetX) || !Number.isFinite(targetY)) return;
+  const cursor = ensureLearningReplayWebCursor();
+  if (!cursor) return;
+  if (learningReplayWebCursorState.hideTimer) {
+    window.clearTimeout(learningReplayWebCursorState.hideTimer);
+    learningReplayWebCursorState.hideTimer = null;
+  }
+  cursor.style.opacity = '1';
+  const hasPrevious = Number.isFinite(learningReplayWebCursorState.x) && Number.isFinite(learningReplayWebCursorState.y);
+  const startX = hasPrevious ? learningReplayWebCursorState.x : targetX - 28;
+  const startY = hasPrevious ? learningReplayWebCursorState.y : targetY + 18;
+  const frames = 9;
+  for (let index = 1; index <= frames; index += 1) {
+    const ratio = index / frames;
+    const eased = 1 - Math.pow(1 - ratio, 3);
+    const currentX = startX + (targetX - startX) * eased;
+    const currentY = startY + (targetY - startY) * eased;
+    cursor.style.left = `${Math.round(currentX)}px`;
+    cursor.style.top = `${Math.round(currentY)}px`;
+    addLearningReplayWebCursorTrailDot(currentX, currentY);
+    await delayLearningReplay(18);
+  }
+  learningReplayWebCursorState.x = targetX;
+  learningReplayWebCursorState.y = targetY;
+  learningReplayWebCursorState.hideTimer = window.setTimeout(() => {
+    cursor.style.opacity = '0';
+  }, 900);
 }
 
 function clickReplayElement(element, x, y) {
@@ -10759,6 +11012,24 @@ function LearningReplayStartConfirmCard({pending, onConfirm, onCancel}) {
   )))).filter(Boolean).slice(0, 3);
   const first = steps[0] || {};
   const target = first.window_title || first.label || first.role || first.css_selector || first.tag || `座標 (${first.x || 0}, ${first.y || 0})`;
+  const actionInvokedRef = useRef(false);
+  const invokeOnce = (handler) => (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (actionInvokedRef.current) return;
+    actionInvokedRef.current = true;
+    handler?.();
+    window.setTimeout(() => {
+      actionInvokedRef.current = false;
+    }, 0);
+  };
+  const confirm = invokeOnce(onConfirm);
+  const cancel = invokeOnce(onCancel);
+  const keyActivate = (handler) => (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      handler(event);
+    }
+  };
   return (
     <div className="learning-replay-confirm" role="dialog" aria-label="Replay start confirmation">
       <header>
@@ -10774,8 +11045,8 @@ function LearningReplayStartConfirmCard({pending, onConfirm, onCancel}) {
         {windows.length > 0 && <><span>Windows</span><strong>{windows.join(', ')}</strong></>}
       </div>
       <footer>
-        <button type="button" onClick={onCancel}>先不要</button>
-        <button type="button" className="learning-replay-confirm-primary" onClick={onConfirm}>執行 replay</button>
+        <button type="button" onPointerUp={cancel} onKeyDown={keyActivate(cancel)} onClick={cancel}>先不要</button>
+        <button type="button" className="learning-replay-confirm-primary" onPointerUp={confirm} onKeyDown={keyActivate(confirm)} onClick={confirm}>執行 replay</button>
       </footer>
     </div>
   );
@@ -10784,13 +11055,31 @@ function LearningReplayStartConfirmCard({pending, onConfirm, onCancel}) {
 function LearningReplayConfirmCard({pending, onConfirm, onCancel}) {
   const step = pending?.result?.steps?.[pending?.stoppedStepOffset] || {};
   const label = step.label || step.window_title || step.window_process || 'native-window';
+  const actionInvokedRef = useRef(false);
+  const invokeOnce = (handler) => (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (actionInvokedRef.current) return;
+    actionInvokedRef.current = true;
+    handler?.();
+    window.setTimeout(() => {
+      actionInvokedRef.current = false;
+    }, 0);
+  };
+  const confirm = invokeOnce(onConfirm);
+  const cancel = invokeOnce(onCancel);
+  const keyActivate = (handler) => (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      handler(event);
+    }
+  };
   return (
     <div className="learning-replay-confirm" role="dialog" aria-label="Replay confirmation">
       <header>
         <strong>確認這一步</strong>
         <span>OpenCV fallback</span>
       </header>
-      <p>已把游標移到候選位置。確認後會點擊這一步並繼續剩餘 replay。</p>
+      <p>狼頭游標正在標出候選位置。確認後才會使用系統滑鼠點擊這一步並繼續剩餘 replay。</p>
       <div className="learning-replay-confirm-grid">
         <span>Step</span><strong>{step.index || pending?.stoppedStepOffset + 1}</strong>
         <span>Target</span><strong>{label}</strong>
@@ -10798,8 +11087,8 @@ function LearningReplayConfirmCard({pending, onConfirm, onCancel}) {
       </div>
       {step.error && <small>{step.error}</small>}
       <footer>
-        <button type="button" onClick={onCancel}>取消</button>
-        <button type="button" className="learning-replay-confirm-primary" onClick={onConfirm}>確認繼續</button>
+        <button type="button" onPointerUp={cancel} onKeyDown={keyActivate(cancel)} onClick={cancel}>取消</button>
+        <button type="button" className="learning-replay-confirm-primary" onPointerUp={confirm} onKeyDown={keyActivate(confirm)} onClick={confirm}>確認繼續</button>
       </footer>
     </div>
   );
@@ -12424,11 +12713,11 @@ function AvatarUploadModal({persona, onApply, onClose}) {
 function TopConsole({
   activePersona, activeAvatarConfig, avatarExpression, avatarModeNotice, avatarProvider, avatarSrc,
   browserPref, greeting, haoras, subagentTabs, personaJob, personaName,
-  dagRun, reviewState, reviewPopup, skillInjections, snoozeHours,
-  systemStatusHistory, reviewArchive,
+  dagRun, reviewState = fallbackReviewState, reviewPopup, skillInjections = [], snoozeHours,
+  systemStatusHistory = [], reviewArchive = [],
   showSkillFirstUseCard, onDismissSkillFirstUse,
-  w3aImportPopup, w3aDetail, w3aPollutionResult, w3aTransferGuidance, w3aTrustList,
-  w3aActionBusy, w3aActionError, w3aStatusConfig, w3aToastMsg,
+  w3aImportPopup, w3aDetail, w3aPollutionResult, w3aTransferGuidance, w3aTrustList = [],
+  w3aActionBusy = '', w3aActionError = '', w3aStatusConfig = {}, w3aToastMsg,
   onLoadW3AInfo, onDetectW3APollution, onShowW3AGuidance, onTrustW3ADeveloper, onExportW3ACopy,
   onDismissW3AImportPopup, onShowW3AToast, onDismissW3AToast,
   onAvatarProviderSelect, onAvatarLoad, onAvatarStateSelect, onPersonaJobChange, onPersonaNameChange,
@@ -12440,10 +12729,14 @@ function TopConsole({
   onToggleRemoteBridge, onOpenRemoteBridgeMode, onSwitchRemoteBridgeMode,
   onRemoveRemoteBridge, onCloseRemoteBridgeModePopup,
   onOpenRemoteBridgeSetup, onRemoteBridgeRename, onTemporaryRemoteBridgeTest, onSaveRemoteBridgeInboundSecret, onMakeRemoteBridgePrimary,
+  panelTheme = 'onanegiku', taskLoopRounds = {}, taskLoopReply = {}, onTaskLoopReplyChange = () => {},
   subExportCapabilities,
   activeHaoraId, onHaoraSelect, onRenameHaora, onHaorasReordered, onSubagentsChanged,
 }) {
   const {t} = useI18n();
+  const safeReviewState = normalizeReviewState(reviewState);
+  const safeSkillInjections = Array.isArray(skillInjections) ? skillInjections : [];
+  const safeSystemStatusHistory = Array.isArray(systemStatusHistory) ? systemStatusHistory : [];
   const [editingName, setEditingName] = useState(false);
   const [editingJob, setEditingJob] = useState(false);
   const [personaInfoOpen, setPersonaInfoOpen] = useState(false);
@@ -13211,10 +13504,10 @@ function TopConsole({
           </div>
         )}
         {/* #I-1001: 系統狀態歷史紀錄 — 自動封存等事件留存於此供後續查閱 */}
-        {systemStatusHistory.length > 0 && (
+        {safeSystemStatusHistory.length > 0 && (
           <div className="system-status-history">
             <span className="system-status-history-label">{t('persona.systemStatus')}</span>
-            {systemStatusHistory.slice(-5).map((entry, i) => (
+            {safeSystemStatusHistory.slice(-5).map((entry, i) => (
               <div key={i} className="system-status-entry">
                 <span className="system-status-time">{new Date(entry.time).toLocaleTimeString()}</span>
                 <span className="system-status-text">{entry.text}</span>
@@ -13225,8 +13518,8 @@ function TopConsole({
         <div className="review-strip">
           <span className="review-strip-label">Review Panel</span>
           <span className="review-strip-hint">{t('review.highRiskTitle')} · Skill Activity · Pending Digest</span>
-          <span className={`review-strip-status review-status-${reviewState.highRisk.status}`}>
-            {reviewStatusLabel(reviewState.highRisk.status)}
+          <span className={`review-strip-status review-status-${safeReviewState.highRisk.status}`}>
+            {reviewStatusLabel(safeReviewState.highRisk.status)}
           </span>
         </div>
         <ReviewPanel
@@ -13236,7 +13529,7 @@ function TopConsole({
           onSkillSelect={onSkillSelect}
           onSnooze={onSnooze}
           onSnoozeHoursChange={onSnoozeHoursChange}
-          reviewState={reviewState}
+          reviewState={safeReviewState}
           snoozeHours={snoozeHours}
           onAcknowledgeDigestItem={onAcknowledgeDigestItem}
           onConfirmSkillBuild={onConfirmSkillBuild}
@@ -13258,9 +13551,13 @@ function TopConsole({
           onDismissW3AImportPopup={onDismissW3AImportPopup}
           onShowW3AToast={onShowW3AToast}
           onDismissW3AToast={onDismissW3AToast}
+          panelTheme={panelTheme}
+          taskLoopRounds={taskLoopRounds}
+          taskLoopReply={taskLoopReply}
+          onTaskLoopReplyChange={onTaskLoopReplyChange}
         />
-        {skillInjections.length > 0 && (
-          <SkillActivityCard injections={skillInjections} />
+        {safeSkillInjections.length > 0 && (
+          <SkillActivityCard injections={safeSkillInjections} />
         )}
         {/* #I-207: 初次使用說明卡，注入成功且尚未顯示過時出現 */}
         {showSkillFirstUseCard && (
@@ -13944,9 +14241,12 @@ function ReviewPanel({
   onLoadW3AInfo = () => {}, onDetectW3APollution = () => {}, onShowW3AGuidance = () => {},
   onTrustW3ADeveloper = () => {}, onExportW3ACopy = () => {},
   onDismissW3AImportPopup = () => {}, onShowW3AToast = () => {}, onDismissW3AToast = () => {},
+  panelTheme = 'onanegiku',
+  taskLoopRounds = {}, taskLoopReply = {}, onTaskLoopReplyChange = () => {},
 }) {
   const t = useI18n(s => s.t);
-  const {highRisk, lowRiskAmbiguity, hookCandidates, pendingDigest, pendingPackages} = reviewState;
+  const normalizedReviewState = normalizeReviewState(reviewState);
+  const {highRisk, lowRiskAmbiguity, hookCandidates, pendingDigest, pendingPackages} = normalizedReviewState;
   const ambiguityHidden = Boolean(lowRiskAmbiguity.dismissedUntil);
   const panelRef = useRef(null);
   const [popupFrame, setPopupFrame] = useState(null);
@@ -14048,6 +14348,7 @@ function ReviewPanel({
       {activePopup === 'dag' && popupFrame && createPortal(
         <article
           className="review-card review-card-popup review-card-dag"
+          data-theme={panelTheme}
           style={{left: `${popupFrame.left}px`, top: `${popupFrame.top}px`, width: `${popupFrame.width}px`}}
         >
           <header>
@@ -14085,15 +14386,15 @@ function ReviewPanel({
                             placeholder="輸入補充資訊後送出"
                             onChange={(e) => {
                               const value = e.target.value;
-                              setTaskLoopReply((prev) => ({...prev, [node.id]: value}));
+                              onTaskLoopReplyChange((prev) => ({...prev, [node.id]: value}));
                             }}
                             onKeyDown={(e) => {
                               if (e.key !== 'Enter') return;
                               const reply = (taskLoopReply[node.id] || '').trim();
                               if (!reply) return;
                               callWails(() => SubmitTaskLoopInput(dagRun.id, node.id, reply))
-                                .then(() => setTaskLoopReply((prev) => ({...prev, [node.id]: ''})))
-                                .catch((error) => setTaskLoopReply((prev) => ({...prev, [node.id]: reply, [`${node.id}:error`]: error?.message || String(error)})));
+                                .then(() => onTaskLoopReplyChange((prev) => ({...prev, [node.id]: ''})))
+                                .catch((error) => onTaskLoopReplyChange((prev) => ({...prev, [node.id]: reply, [`${node.id}:error`]: error?.message || String(error)})));
                             }}
                           />
                           {taskLoopReply[`${node.id}:error`] && <small className="dag-loop-error">{taskLoopReply[`${node.id}:error`]}</small>}
@@ -14127,6 +14428,7 @@ function ReviewPanel({
       {activePopup === 'risk' && popupFrame && createPortal(
         <article
           className={`review-card review-card-popup review-card-risk review-card-${highRisk.status}`}
+          data-theme={panelTheme}
           style={{left: `${popupFrame.left}px`, top: `${popupFrame.top}px`, width: `${popupFrame.width}px`}}
         >
           <header>
@@ -14165,6 +14467,7 @@ function ReviewPanel({
       {activePopup === 'skills' && !ambiguityHidden && popupFrame && createPortal(
         <article
           className="review-card review-card-popup review-card-skills skill-ambiguity-card"
+          data-theme={panelTheme}
           style={{left: `${popupFrame.left}px`, top: `${popupFrame.top}px`, width: `${popupFrame.width}px`}}
         >
           <header>
@@ -14206,6 +14509,7 @@ function ReviewPanel({
       {activePopup === 'digest' && popupFrame && createPortal(
         <article
           className="review-card review-card-popup review-card-digest"
+          data-theme={panelTheme}
           style={{left: `${popupFrame.left}px`, top: `${popupFrame.top}px`, width: `${popupFrame.width}px`}}
         >
           <header>

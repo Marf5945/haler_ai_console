@@ -119,6 +119,8 @@ export function ConfirmPackageInstall(arg1:string):Promise<void>;
 
 export function ConfirmRegisterLLMAPIAdapter(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<any>;
 
+export function ConfirmScheduledRun(arg1:string):Promise<void>;
+
 export function ConfirmSkillArchive(arg1:string):Promise<any>;
 
 export function ConfirmSkillExecution(arg1:string,arg2:string,arg3:string):Promise<main.SkillExecutionDecision>;
@@ -360,6 +362,8 @@ export function HasBlockingReviewCard():Promise<boolean>;
 export function HasBlockingVLReview():Promise<boolean>;
 
 export function HasOpenStopRecoveryCard():Promise<boolean>;
+
+export function HideNativeLearningReplayCursor():Promise<void>;
 
 export function ImportGoProgramExport(arg1:string):Promise<main.GoProgramAuthoringCatalogItem>;
 

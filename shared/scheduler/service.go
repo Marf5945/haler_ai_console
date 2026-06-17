@@ -474,6 +474,13 @@ func (s *Service) tick(ctx context.Context, now time.Time) {
 //  5. 記錄執行歷史 + 發送事件通知
 func (s *Service) executeJob(ctx context.Context, job *Job, firedAt time.Time) {
 	// — Risk gate —
+	if !ShouldAutoExecute(job.RiskClass) && s.runner != nil {
+		// App-owned scheduler flows surface an explicit confirmation card from the
+		// runner instead of silently skipping at the shared service layer.
+		s.runJobRunner(ctx, job)
+		s.updateNextFire(job)
+		return
+	}
 	if ShouldBlockExecution(job.RiskClass) {
 		// Destructive+: 只建提醒，不執行
 		if s.reviewCreator != nil {

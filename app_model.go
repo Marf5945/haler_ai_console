@@ -84,11 +84,17 @@ func quotaSwitchModelNotice(adapterID string, resp *skill_step.CLIResponse, err 
 	if !isQuotaExhaustedError(strings.Join(parts, "\n")) {
 		return "", false
 	}
+	return quotaSwitchModelMessage(adapterID), true
+}
+
+// quotaSwitchModelMessage 產生「請切換模型」提示文字（不含偵測，純組字串），
+// 供 quotaSwitchModelNotice 與 routing 層 quota fast-fail 共用。
+func quotaSwitchModelMessage(adapterID string) string {
 	name := strings.TrimSpace(adapterID)
 	if name == "" {
 		name = "目前的模型"
 	}
-	return "⚠️ " + name + " 配額已用盡或被限流，暫時無法回應。請在上方模型選單切換到其他模型後重試。", true
+	return "⚠️ " + name + " 配額已用盡或被限流，暫時無法回應。請在上方模型選單切換到其他模型後重試。"
 }
 
 // buildLocalModelPrompt produces a dead-simple prompt for small local models.

@@ -285,7 +285,7 @@ func TestFSGrepSearch_FindsKeyword(t *testing.T) {
 		t.Errorf("expected hits for 教學|tutorial")
 	}
 	for _, hit := range r.Hits {
-		if !strings.Contains(strings.ToLower(hit.File), "references/files") {
+		if !strings.Contains(strings.ToLower(filepath.ToSlash(hit.File)), "references/files") {
 			t.Errorf("hit not in references/files cache: %s", hit.File)
 		}
 	}

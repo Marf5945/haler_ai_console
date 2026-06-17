@@ -508,6 +508,9 @@ func (a *App) OpenExternalURL(rawURL string) error {
 }
 
 func appDataRoot() string {
+	if override := strings.TrimSpace(os.Getenv("AI_CONSOLE_DATA_ROOT")); override != "" {
+		return override
+	}
 	configDir, err := os.UserConfigDir()
 	if err == nil && configDir != "" {
 		return filepath.Join(configDir, "ai-console")

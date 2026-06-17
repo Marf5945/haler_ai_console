@@ -76,6 +76,22 @@ HaLer for AI Console 是一個本機優先的 AI 工作台，將多種 LLM 介�
 - **安全治理**：包含 OS-backed credential store、source trust allowlist、LLM context 過濾、Controlled Trust、draft sandbox、package import review、W3A media provenance 與模型污染風險檢查。
 - **個人化工作區**：支援 persona / avatar、主對話與 subagent 匯出、排程任務、Status Rail、語音設定與多語系 UI。
 
+## Encoding Policy
+
+All source, script, config, and documentation files in this repository should
+be saved as `UTF-8` without BOM.
+
+- The repository default is defined in `.editorconfig`.
+- Windows scripts keep `CRLF`; most other text files keep `LF`.
+- To scan the tree for files that still need normalization, run
+  `go run ./tools/utf8norm`.
+- To rewrite detected text files as `UTF-8` without BOM, run
+  `go run ./tools/utf8norm -write`.
+
+If a Windows terminal shows garbled Chinese while the files themselves are
+already valid UTF-8, switch the terminal to UTF-8 before inspecting content,
+for example with `chcp 65001`.
+
 ## Feature Overview (English)
 
 HaLer for AI Console is a local-first AI workbench that brings LLM adapters, documents, task automation, and safety controls into one desktop app.

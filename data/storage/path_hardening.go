@@ -144,11 +144,15 @@ func RejectSpecialFile(path string) error {
 // ValidateZipEntry 驗證 zip 內的檔案路徑是否安全（防止 zip-slip 攻擊）。
 // destDir 為解壓縮目標目錄，entryName 為 zip 內的路徑。
 func ValidateZipEntry(destDir, entryName string) (string, error) {
+	if strings.HasPrefix(entryName, "/") || strings.HasPrefix(entryName, `\`) {
+		return "", fmt.Errorf("zip entry 不能是絕對路徑: %s", entryName)
+	}
+
 	// 清理路徑
 	cleanName := filepath.Clean(entryName)
 
 	// 拒絕絕對路徑
-	if filepath.IsAbs(cleanName) {
+	if filepath.IsAbs(cleanName) || filepath.VolumeName(cleanName) != "" {
 		return "", fmt.Errorf("zip entry 不能是絕對路徑: %s", entryName)
 	}
 

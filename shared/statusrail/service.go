@@ -124,6 +124,17 @@ func (s *Service) SetText(text string) View {
 	return s.viewLocked(s.lastActivity)
 }
 
+// ClearToIdle 把目前顯示文字收回 idle 層；動作（搜尋/網路等）完成或失敗後呼叫，
+// 避免頂部狀態一直停在「正在…」執行中狀態。
+func (s *Service) ClearToIdle() View {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.currentText = s.idlePhraseLocked()
+	s.currentLayer = LayerIdle
+	s.lastActivity = time.Now()
+	return s.viewLocked(s.lastActivity)
+}
+
 func (s *Service) RecordMainInteraction() View {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -40,6 +40,27 @@
     --left-rail-width: clamp(220px, 17.2vw, 352px);
     --right-rail-width: clamp(210px, 16vw, 328px);
     --ui-font-scale: 1;
+    --bg: #050505;
+    --surface: #0b0b0a;
+    --surface-2: #181715;
+    --surface-3: #2a2824;
+    --text: #fff8ef;
+    --text-primary: rgba(255,248,239,.88);
+    --text-secondary: rgba(255,248,239,.64);
+    --muted: rgba(255,248,239,.44);
+    --amber: #ffba55;
+    --amber-soft: #ffd281;
+    --amber-hot: #eb8804;
+    --accent: #ffba55;
+    --accent-rgb: 255,186,85;
+    --info: #6ed7cf;
+    --info-rgb: 110,215,207;
+    --msg: #7f2d20;
+    --review-card-bg: linear-gradient(180deg, var(--surface, #151412), var(--bg, #050505));
+    --review-subtle-bg: rgba(255,255,255,.035);
+    --review-border: rgba(255,255,255,.18);
+    --review-inner-border: rgba(255,255,255,.10);
+    --review-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 10px 22px rgba(0,0,0,.26);
     @apply relative grid h-screen min-h-[560px] min-w-[1180px] bg-console-black py-3 text-text-warm;
     column-gap: var(--shell-gap);
     padding-left: var(--shell-pad-left);
@@ -1891,8 +1912,10 @@
 
   .review-card {
     @apply min-h-0 overflow-y-auto rounded-[8px] border border-white/18 p-3 text-[11px] font-bold text-white/68;
-    background: linear-gradient(180deg, rgba(18,17,16,.96), rgba(7,7,7,.98));
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 10px 22px rgba(0,0,0,.26);
+    border-color: var(--review-border, rgba(255,255,255,.18));
+    background: var(--review-card-bg, linear-gradient(180deg, rgba(18,17,16,.96), rgba(7,7,7,.98)));
+    color: var(--text-secondary, rgba(255,248,239,.64));
+    box-shadow: var(--review-shadow, inset 0 1px 0 rgba(255,255,255,.05), 0 10px 22px rgba(0,0,0,.26));
   }
 
   .review-summary-row {
@@ -1902,8 +1925,10 @@
 
   .review-summary-btn {
     @apply flex min-h-[38px] items-center gap-3 rounded-[8px] border border-white/18 px-3 text-left text-[12px] font-black text-white/62;
-    background: linear-gradient(180deg, rgba(18,17,16,.96), rgba(7,7,7,.98));
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 8px 18px rgba(0,0,0,.20);
+    border-color: var(--review-border, rgba(255,255,255,.18));
+    background: var(--review-card-bg, linear-gradient(180deg, rgba(18,17,16,.96), rgba(7,7,7,.98)));
+    color: var(--text-secondary, rgba(255,248,239,.64));
+    box-shadow: var(--review-shadow, inset 0 1px 0 rgba(255,255,255,.05), 0 8px 18px rgba(0,0,0,.20));
   }
 
   .review-summary-btn span {
@@ -1912,26 +1937,34 @@
 
   .review-summary-btn strong {
     @apply shrink-0 rounded-full border border-[#ffba55]/32 px-2 py-0.5 text-[10px] font-black text-[#ffd281];
-    background: rgba(255,186,85,.08);
+    border-color: rgba(var(--accent-rgb, 255,186,85), .32);
+    background: rgba(var(--accent-rgb, 255,186,85), .08);
+    color: var(--amber-soft, #ffd281);
   }
 
   .review-summary-hot {
     @apply border-[#ffba55]/55 text-[#ffe4a8];
+    border-color: rgba(var(--accent-rgb, 255,186,85), .55);
+    color: var(--text-primary, #ffe4a8);
     box-shadow:
       inset 0 1px 0 rgba(255,255,255,.08),
-      0 0 0 1px rgba(255,186,85,.16),
-      0 0 24px rgba(255,186,85,.18);
+      0 0 0 1px rgba(var(--accent-rgb, 255,186,85), .16),
+      0 0 24px rgba(var(--accent-rgb, 255,186,85), .18);
   }
 
   .review-summary-dag strong {
     @apply border-cyan-300/35 text-cyan-100;
-    background: rgba(45,212,191,.10);
+    border-color: rgba(var(--info-rgb, 110,215,207), .35);
+    background: rgba(var(--info-rgb, 110,215,207), .10);
+    color: var(--info, #6ed7cf);
   }
 
   /* Review popups live in the viewport layer so conversation panes cannot cover them. */
   .review-card-popup {
     @apply fixed z-[90] max-h-[min(360px,60vh)] overflow-auto shadow-[0_24px_60px_rgba(0,0,0,.60)];
-    background: linear-gradient(180deg, #11100f, #050505);
+    background: var(--review-card-bg, linear-gradient(180deg, #11100f, #050505));
+    color: var(--text-secondary, rgba(255,248,239,.64));
+    box-shadow: var(--review-shadow, 0 24px 60px rgba(0,0,0,.60));
   }
 
   /* I-7 DAG popup: execution timeline and Hook Run identifiers live in Review's viewport layer. */
@@ -1946,7 +1979,8 @@
   .dag-node-item {
     @apply grid items-center gap-2 rounded-[7px] border border-white/12 p-2;
     grid-template-columns: 12px minmax(0, 1fr) minmax(96px, auto);
-    background: rgba(255,255,255,.035);
+    border-color: var(--review-inner-border, rgba(255,255,255,.12));
+    background: var(--review-subtle-bg, rgba(255,255,255,.035));
   }
 
   .dag-node-item > div {
@@ -1961,15 +1995,19 @@
 
   .dag-node-item strong {
     @apply text-[12px] text-white/86;
+    color: var(--text-primary, rgba(255,248,239,.86));
   }
 
   .dag-node-item span,
   .dag-node-item small {
     @apply text-[10px] text-white/58;
+    color: var(--text-secondary, rgba(255,248,239,.58));
   }
 
   .dag-node-item em {
     @apply max-w-full rounded-full border border-white/14 px-2 py-0.5 text-right text-[9px] not-italic text-white/58;
+    border-color: var(--review-inner-border, rgba(255,255,255,.14));
+    color: var(--text-secondary, rgba(255,248,239,.58));
     overflow-wrap: anywhere;
     white-space: normal;
   }
@@ -2001,12 +2039,14 @@
 
   .dag-node-blocked {
     @apply border-[#ffba55]/50;
-    background: rgba(255,186,85,.08);
+    border-color: rgba(var(--accent-rgb, 255,186,85), .50);
+    background: rgba(var(--accent-rgb, 255,186,85), .08);
   }
 
   .dag-node-waiting_review {
     @apply border-[#ffba55]/50;
-    background: rgba(255,186,85,.08);
+    border-color: rgba(var(--accent-rgb, 255,186,85), .50);
+    background: rgba(var(--accent-rgb, 255,186,85), .08);
   }
 
   .dag-node-cancelled,
@@ -2017,6 +2057,8 @@
 
   .task-debug-box {
     @apply grid gap-2 rounded-[7px] border border-white/12 p-2 text-[10px] text-white/68;
+    border-color: var(--review-inner-border, rgba(255,255,255,.12));
+    color: var(--text-secondary, rgba(255,248,239,.68));
   }
 
   .task-debug-box button {
@@ -2025,51 +2067,62 @@
 
   .task-debug-box pre {
     @apply max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-[6px] bg-black/35 p-2;
+    background: color-mix(in srgb, var(--bg, #050505) 76%, transparent);
   }
 
   .review-card-risk {
     @apply left-auto;
-    border-color: rgba(219,85,38,.34);
-    color: #4a2619;
-    background: linear-gradient(180deg, #fff8f3, #ffe6d7);
-    box-shadow:
-      inset 0 1px 0 rgba(255,255,255,.82),
-      0 18px 42px rgba(151,64,24,.22),
-      0 0 0 1px rgba(219,85,38,.08);
-  }
-
-  .review-card-risk > header span {
-    color: #5b2d1b;
-  }
-
-  .review-card-risk > header strong {
-    border-color: rgba(217,119,6,.32);
-    color: #9a4f05;
-    background: rgba(255,222,199,.74);
+    border-color: rgba(var(--accent-rgb, 255,186,85), .30);
+    background: var(--review-card-bg, linear-gradient(180deg, rgba(20,18,16,.98), rgba(7,7,7,.99)));
+    box-shadow: var(--review-shadow, 0 24px 60px rgba(0,0,0,.60));
   }
 
   .review-card-risk .review-detail-row > div {
-    border-color: rgba(190,92,48,.22);
-    background: rgba(255,255,255,.56);
-  }
-
-  .review-card-risk .review-detail-row span {
-    color: rgba(88,45,27,.58);
-  }
-
-  .review-card-risk p,
-  .review-card-risk small {
-    color: rgba(70,37,24,.78);
+    border-color: var(--review-inner-border, rgba(255,255,255,.10));
+    background: var(--review-subtle-bg, rgba(255,255,255,.035));
   }
 
   .review-card-risk .review-action-row {
-    border-top-color: rgba(190,92,48,.18);
+    border-top-color: var(--review-inner-border, rgba(255,255,255,.10));
   }
 
   .review-card-risk .review-confirm-btn {
-    background: linear-gradient(180deg, #d97706, #a94b00);
-    color: #fffaf5;
-    box-shadow: 0 8px 18px rgba(169,75,0,.22);
+    border: 1px solid rgba(var(--accent-rgb, 255,186,85), .50);
+    background: linear-gradient(180deg, rgba(var(--accent-rgb, 255,186,85), .38), rgba(var(--accent-rgb, 255,186,85), .18));
+    color: var(--text, #fff8ef);
+    box-shadow: 0 8px 18px rgba(var(--accent-rgb, 255,186,85), .18);
+  }
+
+  .review-card-pending {
+    border-color: rgba(var(--accent-rgb, 255,186,85), .50);
+  }
+
+  .review-card-pending > header strong {
+    border-color: rgba(var(--accent-rgb, 255,186,85), .52);
+    color: var(--amber-soft, #ffe0a3);
+    background: rgba(var(--accent-rgb, 255,186,85), .12);
+  }
+
+  .review-card-approved {
+    border-color: rgba(139,209,104,.32);
+  }
+
+  .review-card-approved > header strong {
+    border-color: rgba(139,209,104,.42);
+    color: #b8f3a2;
+    background: rgba(139,209,104,.10);
+  }
+
+  .review-card-rejected,
+  .review-card-expired {
+    border-color: rgba(255,107,107,.32);
+  }
+
+  .review-card-rejected > header strong,
+  .review-card-expired > header strong {
+    border-color: rgba(255,107,107,.42);
+    color: #ffb3b3;
+    background: rgba(255,107,107,.10);
   }
 
   .review-card-skills {
@@ -2082,15 +2135,19 @@
 
   .review-card > header span {
     @apply text-[12px] font-black text-white/86;
+    color: var(--text-primary, rgba(255,248,239,.86));
   }
 
   .review-card > header strong {
     @apply ml-auto rounded-full border border-[#ffba55]/36 px-2 py-0.5 text-[10px] font-black text-[#ffd281];
-    background: rgba(255,186,85,.08);
+    border-color: rgba(var(--accent-rgb, 255,186,85), .36);
+    background: rgba(var(--accent-rgb, 255,186,85), .08);
+    color: var(--amber-soft, #ffd281);
   }
 
   .review-card p {
     @apply m-0 leading-snug text-white/58;
+    color: var(--text-secondary, rgba(255,248,239,.58));
     overflow-wrap: anywhere;
     word-break: break-word;
   }
@@ -2098,16 +2155,19 @@
   .review-meta-grid {
     @apply mt-2 grid gap-x-3 gap-y-1 rounded-[6px] border border-white/10 p-2;
     grid-template-columns: max-content minmax(0, 1fr);
-    background: rgba(255,255,255,.035);
+    border-color: var(--review-inner-border, rgba(255,255,255,.10));
+    background: var(--review-subtle-bg, rgba(255,255,255,.035));
   }
 
   .review-meta-grid span,
   .review-detail-row span {
     @apply text-[10px] uppercase tracking-[.04em] text-white/34;
+    color: var(--muted, rgba(255,248,239,.44));
   }
 
   .review-meta-grid strong {
     @apply min-w-0 whitespace-normal break-words text-[10px] text-white/72;
+    color: var(--text-primary, rgba(255,248,239,.72));
   }
 
   .review-detail-row {
@@ -2117,31 +2177,26 @@
 
   .review-detail-row > div {
     @apply rounded-[6px] border border-white/10 p-2;
-    background: rgba(255,255,255,.03);
+    border-color: var(--review-inner-border, rgba(255,255,255,.10));
+    background: var(--review-subtle-bg, rgba(255,255,255,.03));
   }
 
   .review-detail-row code,
   .review-diff code {
     @apply block min-w-0 whitespace-normal break-words rounded-[4px] px-1.5 py-0.5 text-[10px] text-[#ffd281];
-    background: rgba(255,186,85,.08);
+    background: rgba(var(--accent-rgb, 255,186,85), .08);
+    color: var(--amber-soft, #ffd281);
   }
 
   .review-diff {
     @apply mt-2 grid gap-1 rounded-[6px] border border-[#ffba55]/18 p-2;
-    background: rgba(255,186,85,.045);
+    border-color: rgba(var(--accent-rgb, 255,186,85), .18);
+    background: rgba(var(--accent-rgb, 255,186,85), .045);
   }
 
   .review-card small {
     @apply mt-2 block text-[10px] font-bold leading-snug text-white/42;
-  }
-
-  .review-card-approved {
-    border-color: rgba(139,209,104,.32);
-  }
-
-  .review-card-rejected,
-  .review-card-expired {
-    border-color: rgba(255,107,107,.32);
+    color: var(--muted, rgba(255,248,239,.42));
   }
 
   .skill-choice-list {
@@ -2150,25 +2205,30 @@
 
   .skill-choice-list button {
     @apply rounded-[6px] border border-white/12 px-2 py-1.5 text-left;
-    background: rgba(255,255,255,.04);
+    border-color: var(--review-inner-border, rgba(255,255,255,.12));
+    background: var(--review-subtle-bg, rgba(255,255,255,.04));
   }
 
   .skill-choice-list button span {
     @apply block truncate text-[11px] font-black text-white/76;
+    color: var(--text-primary, rgba(255,248,239,.76));
   }
 
   .skill-choice-list button small {
     @apply mt-0.5 block truncate text-[10px] text-white/38;
+    color: var(--muted, rgba(255,248,239,.44));
   }
 
   .skill-choice-list .skill-choice-active {
-    border-color: rgba(255,186,85,.55);
-    background: rgba(255,186,85,.10);
+    border-color: rgba(var(--accent-rgb, 255,186,85), .55);
+    background: rgba(var(--accent-rgb, 255,186,85), .10);
   }
 
   .skill-snooze-row {
     @apply mt-2 flex items-center gap-2 rounded-[6px] border border-white/10 p-2 text-[10px] font-black text-white/48;
-    background: rgba(255,255,255,.03);
+    border-color: var(--review-inner-border, rgba(255,255,255,.10));
+    background: var(--review-subtle-bg, rgba(255,255,255,.03));
+    color: var(--muted, rgba(255,248,239,.48));
   }
 
   .skill-snooze-row label {
@@ -2177,11 +2237,16 @@
 
   .skill-snooze-row input {
     @apply h-7 w-12 rounded-[5px] border border-white/16 bg-black/35 text-center text-white outline-none;
+    border-color: var(--review-inner-border, rgba(255,255,255,.16));
+    background: color-mix(in srgb, var(--bg, #050505) 72%, transparent);
+    color: var(--text, #fff8ef);
   }
 
   .skill-snooze-row button {
     @apply h-7 rounded-[5px] border border-[#ffba55]/35 px-2 text-[#ffd281];
-    background: rgba(255,186,85,.08);
+    border-color: rgba(var(--accent-rgb, 255,186,85), .35);
+    background: rgba(var(--accent-rgb, 255,186,85), .08);
+    color: var(--amber-soft, #ffd281);
   }
 
   .review-card-muted {
@@ -2328,11 +2393,12 @@
   /* Task review card: put high-risk confirmation directly in the chat flow. */
   .task-review-inline-card {
     @apply self-start max-w-[min(92%,720px)] rounded-[8px] border p-4 shadow-[0_14px_34px_rgba(151,64,24,.20)];
-    border-color: rgba(219,85,38,.38);
-    color: #4a2619;
+    border-color: rgba(var(--accent-rgb, 255,186,85), .38);
+    color: var(--text-secondary, rgba(255,248,239,.64));
     background:
-      linear-gradient(90deg, rgba(219,85,38,.12), transparent 32%),
-      linear-gradient(180deg, #fff8f3, #ffe7da);
+      linear-gradient(90deg, rgba(var(--accent-rgb, 255,186,85), .12), transparent 32%),
+      var(--review-card-bg, linear-gradient(180deg, rgba(18,17,16,.96), rgba(7,7,7,.98)));
+    box-shadow: var(--review-shadow, 0 14px 34px rgba(0,0,0,.24));
   }
 
   .task-review-inline-card header {
@@ -2341,14 +2407,14 @@
 
   .task-review-inline-card header strong {
     @apply min-w-0 flex-1 text-[14px] font-black leading-snug;
-    color: #552816;
+    color: var(--text-primary, rgba(255,248,239,.88));
   }
 
   .task-review-inline-card header span {
     @apply rounded-full border px-2 py-0.5 text-[10px] font-black;
-    border-color: rgba(217,119,6,.32);
-    color: #9a4f05;
-    background: rgba(255,222,199,.74);
+    border-color: rgba(var(--accent-rgb, 255,186,85), .32);
+    color: var(--amber-soft, #ffd281);
+    background: rgba(var(--accent-rgb, 255,186,85), .12);
   }
 
   .task-review-inline-grid {
@@ -2358,24 +2424,24 @@
 
   .task-review-inline-grid > div {
     @apply min-w-0 rounded-[6px] border p-2;
-    border-color: rgba(190,92,48,.22);
-    background: rgba(255,255,255,.56);
+    border-color: var(--review-inner-border, rgba(255,255,255,.10));
+    background: var(--review-subtle-bg, rgba(255,255,255,.035));
   }
 
   .task-review-inline-card small {
     @apply block text-[10px] font-black;
-    color: rgba(88,45,27,.58);
+    color: var(--muted, rgba(255,248,239,.44));
   }
 
   .task-review-inline-card p {
     @apply m-0 min-w-0 whitespace-normal break-words text-[12px] font-black leading-relaxed;
-    color: rgba(70,37,24,.78);
+    color: var(--text-secondary, rgba(255,248,239,.68));
   }
 
   .task-review-inline-impact {
     @apply mt-2 rounded-[6px] border p-2;
-    border-color: rgba(190,92,48,.18);
-    background: rgba(255,255,255,.42);
+    border-color: rgba(var(--accent-rgb, 255,186,85), .18);
+    background: rgba(var(--accent-rgb, 255,186,85), .08);
   }
 
   .task-review-inline-card footer {
@@ -2388,21 +2454,24 @@
 
   .task-review-detail-btn {
     @apply border text-[#6f3a22];
-    border-color: rgba(111,58,34,.22);
-    background: rgba(255,255,255,.48);
+    border-color: var(--review-inner-border, rgba(255,255,255,.18));
+    background: var(--review-subtle-bg, rgba(255,255,255,.04));
+    color: var(--text-primary, rgba(255,248,239,.80));
   }
 
   .task-review-cancel-btn {
     @apply border text-[#76503f];
-    border-color: rgba(111,58,34,.18);
-    background: rgba(255,255,255,.36);
+    border-color: var(--review-inner-border, rgba(255,255,255,.18));
+    background: color-mix(in srgb, var(--surface-2, #181715) 72%, transparent);
+    color: var(--text-secondary, rgba(255,248,239,.70));
   }
 
   .task-review-confirm-btn {
     @apply border text-white;
-    border-color: rgba(169,75,0,.38);
-    background: linear-gradient(180deg, #d97706, #a94b00);
-    box-shadow: 0 8px 18px rgba(169,75,0,.22);
+    border-color: rgba(var(--accent-rgb, 255,186,85), .45);
+    background: linear-gradient(180deg, rgba(var(--accent-rgb, 255,186,85), .42), rgba(var(--accent-rgb, 255,186,85), .20));
+    color: var(--text, #fff8ef);
+    box-shadow: 0 8px 18px rgba(var(--accent-rgb, 255,186,85), .18);
   }
 
   @media (max-width: 760px) {
@@ -3490,6 +3559,130 @@
   .settings-segments .segment-active {
     @apply text-[#ffaf2f];
     box-shadow: inset 0 0 0 1px #ff9900, 0 0 18px rgba(255,153,0,.18);
+  }
+
+  .review-card-popup[data-theme="onanegiku"] {
+    --bg: #050505;
+    --surface: #0b0b0a;
+    --surface-2: #181715;
+    --surface-3: #2a2824;
+    --text: #fff8ef;
+    --text-primary: rgba(255,248,239,.88);
+    --text-secondary: rgba(255,248,239,.64);
+    --muted: rgba(255,248,239,.44);
+    --amber: #ffba55;
+    --amber-soft: #ffd281;
+    --amber-hot: #eb8804;
+    --accent: #ffba55;
+    --accent-rgb: 255,186,85;
+    --info: #6ed7cf;
+    --info-rgb: 110,215,207;
+    --msg: #7f2d20;
+    --review-card-bg: linear-gradient(180deg, var(--surface), var(--bg));
+    --review-subtle-bg: rgba(255,255,255,.035);
+    --review-border: rgba(255,255,255,.18);
+    --review-inner-border: rgba(255,255,255,.10);
+    --review-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 24px 60px rgba(0,0,0,.60);
+  }
+
+  .console-shell[data-theme="white"],
+  .review-card-popup[data-theme="white"] {
+    --bg: #ffffff;
+    --surface: #f5f5f5;
+    --surface-2: #e4e4e4;
+    --surface-3: #d2d2d2;
+    --text: #202020;
+    --text-primary: rgba(32,32,32,.90);
+    --text-secondary: rgba(32,32,32,.68);
+    --muted: rgba(32,32,32,.48);
+    --amber: #a55f08;
+    --amber-soft: #7a420d;
+    --amber-hot: #8a4b00;
+    --accent: #a55f08;
+    --accent-rgb: 165,95,8;
+    --info: #2a6f75;
+    --info-rgb: 42,111,117;
+    --msg: #9b4b22;
+    --review-card-bg: linear-gradient(180deg, #ffffff, #f0f0f0);
+    --review-subtle-bg: rgba(0,0,0,.035);
+    --review-border: rgba(0,0,0,.14);
+    --review-inner-border: rgba(0,0,0,.10);
+    --review-shadow: inset 0 1px 0 rgba(255,255,255,.88), 0 18px 42px rgba(0,0,0,.14);
+  }
+
+  .console-shell[data-theme="pink-black"],
+  .review-card-popup[data-theme="pink-black"] {
+    --bg: #000000;
+    --surface: #080808;
+    --surface-2: #1c1c1c;
+    --surface-3: #333333;
+    --text: #fff4fb;
+    --text-primary: rgba(255,244,251,.90);
+    --text-secondary: rgba(255,244,251,.66);
+    --muted: rgba(255,244,251,.46);
+    --amber: #ff3aa9;
+    --amber-soft: #ff9bd2;
+    --amber-hot: #ff1493;
+    --accent: #ff1493;
+    --accent-rgb: 255,20,147;
+    --info: #ffba55;
+    --info-rgb: 255,186,85;
+    --msg: #a0005c;
+    --review-card-bg: linear-gradient(180deg, #111111, #000000);
+    --review-subtle-bg: rgba(255,20,147,.08);
+    --review-border: rgba(255,83,174,.34);
+    --review-inner-border: rgba(255,83,174,.20);
+    --review-shadow: inset 0 1px 0 rgba(255,20,147,.16), 0 24px 60px rgba(255,20,147,.16);
+  }
+
+  .console-shell[data-theme="green"],
+  .review-card-popup[data-theme="green"] {
+    --bg: #fff9e5;
+    --surface: #fff4d2;
+    --surface-2: #e2d29b;
+    --surface-3: #b7a66e;
+    --text: #193015;
+    --text-primary: rgba(25,48,21,.90);
+    --text-secondary: rgba(25,48,21,.68);
+    --muted: rgba(25,48,21,.50);
+    --amber: #2d5a27;
+    --amber-soft: #193015;
+    --amber-hot: #244a20;
+    --accent: #2d5a27;
+    --accent-rgb: 45,90,39;
+    --info: #6a7e25;
+    --info-rgb: 106,126,37;
+    --msg: #4f6d21;
+    --review-card-bg: linear-gradient(180deg, #fff4d2, #fff9e5);
+    --review-subtle-bg: rgba(45,90,39,.07);
+    --review-border: rgba(45,90,39,.38);
+    --review-inner-border: rgba(45,90,39,.22);
+    --review-shadow: inset 0 1px 0 rgba(255,255,255,.75), 0 18px 42px rgba(45,90,39,.16);
+  }
+
+  .console-shell[data-theme="blue"],
+  .review-card-popup[data-theme="blue"] {
+    --bg: #0a192f;
+    --surface: #10223c;
+    --surface-2: #173452;
+    --surface-3: #245878;
+    --text: #dff8ff;
+    --text-primary: rgba(223,248,255,.92);
+    --text-secondary: rgba(223,248,255,.68);
+    --muted: rgba(223,248,255,.48);
+    --amber: #64ffda;
+    --amber-soft: #bfffee;
+    --amber-hot: #2fd6bd;
+    --accent: #64ffda;
+    --accent-rgb: 100,255,218;
+    --info: #89b8ff;
+    --info-rgb: 137,184,255;
+    --msg: #1e6670;
+    --review-card-bg: linear-gradient(180deg, rgba(26,62,92,.98), rgba(10,25,47,.98));
+    --review-subtle-bg: rgba(100,255,218,.08);
+    --review-border: rgba(100,255,218,.26);
+    --review-inner-border: rgba(100,255,218,.16);
+    --review-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 24px 60px rgba(0,20,55,.58);
   }
 
   .console-shell[data-theme="white"] {

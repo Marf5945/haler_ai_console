@@ -28,8 +28,7 @@ func TestAppendTalkEntryWithRedaction(t *testing.T) {
 	p := NewPipeline(tmpDir)
 
 	// 寫入含 API key 的內容
-	key := redactionTestOpenAIKey()
-	records, err := p.AppendTalkEntry("user", "My key is "+key)
+	records, err := p.AppendTalkEntry("user", "My key is "+"sk-"+"abc123def456ghi789jkl012mno345pqr678")
 	if err != nil {
 		t.Fatalf("append failed: %v", err)
 	}
@@ -40,7 +39,7 @@ func TestAppendTalkEntryWithRedaction(t *testing.T) {
 	// 驗證寫入的內容不含原始 key
 	data, _ := os.ReadFile(filepath.Join(tmpDir, "memory", FileTalkFull))
 	content := string(data)
-	if strings.Contains(content, key[:9]) {
+	if strings.Contains(content, "sk-abc123") {
 		t.Error("redacted content should not contain original key")
 	}
 	if !strings.Contains(content, "[REDACTED") {

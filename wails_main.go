@@ -5,6 +5,7 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	"os"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -39,6 +40,8 @@ func cspMiddleware(next http.Handler) http.Handler {
 func main() {
 	// Create an instance of the app structure
 	app := NewApp()
+	// Phase G：LaunchAgent 以 --scheduled-wake 喚醒 → 隱藏視窗最小背景模式啟動。
+	scheduledWake := hasScheduledWakeFlag(os.Args)
 	frontendAssets, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
 		println("Error:", err.Error())
@@ -61,6 +64,13 @@ func main() {
 			DisableWebViewDrop: true,
 		},
 		BackgroundColour: &options.RGBA{R: 5, G: 5, B: 5, A: 255},
+		// Phase G：排程喚醒時不跳視窗（隱藏啟動）。
+		StartHidden: scheduledWake,
+		// 單一實例鎖：避免每次喚醒堆積行程／重複執行；第二實例會被導回第一實例。
+		SingleInstanceLock: &options.SingleInstanceLock{
+			UniqueId:               "com.aiconsole.singleinstance",
+			OnSecondInstanceLaunch: app.onSecondInstanceLaunch,
+		},
 		OnStartup:        app.startup,
 		// §30: 關閉視窗時攔截，讓前端顯示「存成 sub」對話框
 		OnBeforeClose: func(ctx context.Context) (prevent bool) {

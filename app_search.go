@@ -131,6 +131,7 @@ func rememberLocalSearchWebFallback(sessionID string, req localsearch.SearchRequ
 
 func (a *App) executeLocalSearch(req localsearch.SearchRequest, sessionID, traceID string) skill_step.CLIResponse {
 	a.pushActionStatus("搜尋", req.Query) // status rail：正在搜尋本機資料「…」…
+	defer a.clearActionStatus()         // 完成/錯誤都收回 idle，避免頂部停在「正在搜尋…」
 	debugtrace.Record("local_search.enter", traceID, map[string]interface{}{
 		"query": req.Query,
 		"scope": req.Scope,

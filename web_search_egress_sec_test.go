@@ -10,17 +10,13 @@ import (
 	"ui_console/data/memory"
 )
 
-func webSearchEgressTestKey() string {
-	return "sk" + "-abcdefghijklmnopqrstuvwxyz123456"
-}
-
 func TestEgressDetectsAPIKeyInQuery(t *testing.T) {
-	key := webSearchEgressTestKey()
-	masked, records := memory.RedactBeforeWrite("幫我查 " + key + " 是哪家的金鑰")
+	secret := "sk-" + "abcdefghijklmnopqrstuvwxyz123456"
+	masked, records := memory.RedactBeforeWrite("幫我查 " + secret + " 是哪家的金鑰")
 	if len(records) == 0 {
 		t.Fatal("API 金鑰應被偵測")
 	}
-	if strings.Contains(masked, key) {
+	if strings.Contains(masked, secret) {
 		t.Fatal("遮蔽版不應殘留原始金鑰")
 	}
 	if !strings.Contains(masked, "[REDACTED:") {
@@ -36,7 +32,7 @@ func TestEgressCleanQueryPasses(t *testing.T) {
 }
 
 func TestDescribeEgressHitsNoLeak(t *testing.T) {
-	secret := webSearchEgressTestKey()
+	secret := "sk-" + "abcdefghijklmnopqrstuvwxyz123456"
 	_, records := memory.RedactBeforeWrite("query with " + secret)
 	desc := describeEgressHits(records)
 	if desc == "" {

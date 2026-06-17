@@ -914,10 +914,10 @@ func (a *App) ExecuteNativeLearningReplayStep(payload string) (interface{}, erro
 	}
 	if relocated, ok := a.relocateNativeReplayStep(step); ok {
 		a.emitHookGeneDataProcessed(replayGeneSkillID, invocationID)
-		if relocated.NeedsConfirmation && canAutoConfirmBrowserReplay(step, relocated) {
+		if relocated.NeedsConfirmation && canAutoConfirmLearningReplay(step, relocated) {
 			relocated.NeedsConfirmation = false
 			relocated.OK = true
-			relocated.Reason = "browser page replay auto-confirmed for non-dangerous page click"
+			relocated.Reason = learningReplayAutoConfirmReason(step)
 		}
 		if relocated.NeedsConfirmation {
 			previewStep := step
@@ -926,9 +926,9 @@ func (a *App) ExecuteNativeLearningReplayStep(payload string) (interface{}, erro
 			preview := visual_learning.NativeReplayResult{OK: false}
 			previewError := relocated.Reason
 			if relocated.Method != "capture_guard" {
-				preview = a.nativeInput.MoveCursorOnly(previewStep)
+				preview = a.nativeInput.ShowAgentCursor(previewStep)
 				if preview.Error != "" {
-					previewError = strings.TrimSpace(previewError + "; preview move failed: " + preview.Error)
+					previewError = strings.TrimSpace(previewError + "; pointer preview failed: " + preview.Error)
 				}
 			}
 			a.emitHookGenePaused(replayGeneSkillID, invocationID)
@@ -976,6 +976,12 @@ func (a *App) ExecuteNativeLearningReplayStep(payload string) (interface{}, erro
 	result := a.nativeInput.Click(step)
 	a.emitHookGeneDataLeft(replayGeneSkillID, invocationID, true)
 	return frontendDTO(result), nil
+}
+
+func (a *App) HideNativeLearningReplayCursor() {
+	if a != nil && a.nativeInput != nil {
+		a.nativeInput.HideAgentCursor()
+	}
 }
 
 func (a *App) relocateNativeReplayStep(step visual_learning.LearningReplayStep) (visual_learning.AnchorRelocationResult, bool) {
@@ -1229,6 +1235,10 @@ func saveReplayRelocationDebugInfo(path string, step visual_learning.LearningRep
 	return os.WriteFile(path, data, 0o600)
 }
 
+func canAutoConfirmLearningReplay(step visual_learning.LearningReplayStep, relocated visual_learning.AnchorRelocationResult) bool {
+	return canAutoConfirmBrowserReplay(step, relocated) || canAutoConfirmDesktopAppReplay(step, relocated)
+}
+
 func canAutoConfirmBrowserReplay(step visual_learning.LearningReplayStep, relocated visual_learning.AnchorRelocationResult) bool {
 	if relocated.Confidence < 0.5 {
 		return false
@@ -1242,6 +1252,55 @@ func canAutoConfirmBrowserReplay(step visual_learning.LearningReplayStep, reloca
 	default:
 		return false
 	}
+	return !learningReplayHasDangerText(step, relocated)
+}
+
+func canAutoConfirmDesktopAppReplay(step visual_learning.LearningReplayStep, relocated visual_learning.AnchorRelocationResult) bool {
+	if relocated.Confidence < 0.7 || !isLearningReplayClickOnly(step) || learningReplayHasDangerText(step, relocated) {
+		return false
+	}
+	label := strings.TrimSpace(step.Label)
+	process := learningReplayProcessName(step.WindowProcess)
+	title := strings.TrimSpace(step.WindowTitle)
+	if label == "" {
+		return false
+	}
+	if len([]rune(label)) > 36 || strings.ContainsAny(label, "\n\r\t") {
+		return false
+	}
+	normalizedLabel := strings.ToLower(label)
+	normalizedProcess := strings.ToLower(process)
+	if normalizedProcess == "window server" || normalizedProcess == "dock" {
+		return isLikelyAppNameLabel(label)
+	}
+	if normalizedProcess != "" && (normalizedProcess == normalizedLabel || strings.Contains(strings.ToLower(title), normalizedLabel)) {
+		return true
+	}
+	return false
+}
+
+func isLearningReplayClickOnly(step visual_learning.LearningReplayStep) bool {
+	return strings.EqualFold(strings.TrimSpace(step.Action), "click") &&
+		strings.TrimSpace(step.Text) == "" &&
+		strings.TrimSpace(step.Key) == "" &&
+		len(step.Modifiers) == 0
+}
+
+func isLikelyAppNameLabel(label string) bool {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return false
+	}
+	lower := strings.ToLower(label)
+	for _, word := range []string{"ok", "yes", "no", "cancel", "confirm", "save", "open", "close", "確定", "取消", "確認", "儲存", "開啟", "關閉"} {
+		if lower == word {
+			return false
+		}
+	}
+	return true
+}
+
+func learningReplayHasDangerText(step visual_learning.LearningReplayStep, relocated visual_learning.AnchorRelocationResult) bool {
 	text := strings.ToLower(strings.Join([]string{
 		step.WindowTitle,
 		step.Label,
@@ -1256,10 +1315,26 @@ func canAutoConfirmBrowserReplay(step visual_learning.LearningReplayStep, reloca
 		"下載", "另存", "設定", "系統設定", "刪除", "移除", "送出", "提交", "付款", "購買", "結帳", "轉帳",
 	} {
 		if strings.Contains(text, word) {
-			return false
+			return true
 		}
 	}
-	return true
+	return false
+}
+
+func learningReplayProcessName(processPath string) string {
+	processPath = strings.ReplaceAll(strings.TrimSpace(processPath), "\\", "/")
+	return strings.TrimSpace(filepath.Base(processPath))
+}
+
+func learningReplayAutoConfirmReason(step visual_learning.LearningReplayStep) string {
+	process := strings.ToLower(learningReplayProcessName(step.WindowProcess))
+	switch process {
+	case "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe",
+		"google chrome", "google chrome beta", "microsoft edge", "firefox", "safari", "brave browser", "opera", "vivaldi", "arc":
+		return "browser page replay auto-confirmed for non-dangerous page click"
+	default:
+		return "desktop app replay auto-confirmed for non-dangerous app launch/switch click"
+	}
 }
 
 // ResolveWindowsClickAnchor creates a compact Windows visual anchor for one

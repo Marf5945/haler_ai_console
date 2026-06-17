@@ -32,15 +32,18 @@ package visual_learning
 
 /*
 #cgo CFLAGS: -x objective-c
-#cgo LDFLAGS: -framework ApplicationServices -framework CoreFoundation -framework CoreGraphics
+#cgo LDFLAGS: -framework ApplicationServices -framework AppKit -framework CoreFoundation -framework CoreGraphics -framework Foundation
 
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
+#include <math.h>
 #include <dlfcn.h>
+#include <dispatch/dispatch.h>
 #include <ApplicationServices/ApplicationServices.h>
+#import <AppKit/AppKit.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include "screencapture_darwin.h"
 
@@ -55,7 +58,123 @@ typedef struct {
 } NativeTap;
 
 // 單一錄製器假設：保存 tap 供 timeout 後重新啟用。
+@class AIConsoleWolfCursorView;
 static CFMachPortRef gTap = NULL;
+static NSWindow *gAgentCursorWindow = nil;
+static AIConsoleWolfCursorView *gAgentCursorView = nil;
+static uint64_t gAgentCursorGeneration = 0;
+static double gAgentCursorLastX = 0;
+static double gAgentCursorLastY = 0;
+static int gAgentCursorHasLast = 0;
+
+@interface AIConsoleWolfCursorView : NSView
+{
+    NSMutableArray *trailPoints;
+    NSPoint cursorPoint;
+    BOOL hasCursor;
+}
+- (void)showAtPoint:(NSPoint)point;
+- (void)hideCursor;
+@end
+
+@implementation AIConsoleWolfCursorView
+- (instancetype)initWithFrame:(NSRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) {
+        trailPoints = [[NSMutableArray alloc] init];
+        cursorPoint = NSMakePoint(0, 0);
+        hasCursor = NO;
+    }
+    return self;
+}
+
+- (BOOL)isFlipped { return YES; }
+
+- (void)showAtPoint:(NSPoint)point {
+    cursorPoint = point;
+    hasCursor = YES;
+    [trailPoints addObject:[NSValue valueWithPoint:point]];
+    while ([trailPoints count] > 9) {
+        [trailPoints removeObjectAtIndex:0];
+    }
+    [self setNeedsDisplay:YES];
+}
+
+- (void)hideCursor {
+    hasCursor = NO;
+    [trailPoints removeAllObjects];
+    [self setNeedsDisplay:YES];
+}
+
+- (void)drawRect:(NSRect)dirtyRect {
+    [[NSColor clearColor] setFill];
+    NSRectFill(dirtyRect);
+
+    NSUInteger count = [trailPoints count];
+    if (count > 1) {
+        for (NSUInteger i = 1; i < count; i++) {
+            NSPoint from = [[trailPoints objectAtIndex:i - 1] pointValue];
+            NSPoint to = [[trailPoints objectAtIndex:i] pointValue];
+            CGFloat alpha = 0.12 + 0.38 * ((CGFloat)i / (CGFloat)count);
+            NSBezierPath *segment = [NSBezierPath bezierPath];
+            [segment moveToPoint:from];
+            [segment lineToPoint:to];
+            [segment setLineWidth:1.2];
+            [[NSColor colorWithCalibratedWhite:0.92 alpha:alpha] setStroke];
+            [segment stroke];
+
+            NSBezierPath *dot = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(from.x - 1.5, from.y - 1.5, 3, 3)];
+            [[NSColor colorWithCalibratedWhite:0.92 alpha:alpha] setFill];
+            [dot fill];
+        }
+    }
+    if (!hasCursor) return;
+
+    CGFloat size = 30.0;
+    CGFloat left = cursorPoint.x - size / 2.0;
+    CGFloat top = cursorPoint.y - size / 2.0;
+    NSColor *ink = [NSColor colorWithCalibratedWhite:0.09 alpha:0.92];
+    NSColor *paper = [NSColor colorWithCalibratedWhite:0.92 alpha:0.96];
+    NSColor *soft = [NSColor colorWithCalibratedWhite:0.72 alpha:0.34];
+
+    NSBezierPath *shadow = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(left + 6, top + 23, 18, 4)];
+    [[NSColor colorWithCalibratedWhite:0 alpha:0.22] setFill];
+    [shadow fill];
+
+    NSBezierPath *head = [NSBezierPath bezierPath];
+    [head moveToPoint:NSMakePoint(left + 6, top + 10)];
+    [head lineToPoint:NSMakePoint(left + 10, top + 3)];
+    [head lineToPoint:NSMakePoint(left + 13, top + 8)];
+    [head curveToPoint:NSMakePoint(left + 17, top + 8) controlPoint1:NSMakePoint(left + 14, top + 6.5) controlPoint2:NSMakePoint(left + 16, top + 6.5)];
+    [head lineToPoint:NSMakePoint(left + 20, top + 3)];
+    [head lineToPoint:NSMakePoint(left + 24, top + 10)];
+    [head curveToPoint:NSMakePoint(left + 21, top + 19) controlPoint1:NSMakePoint(left + 25, top + 15) controlPoint2:NSMakePoint(left + 24, top + 18)];
+    [head curveToPoint:NSMakePoint(left + 15, top + 24) controlPoint1:NSMakePoint(left + 19, top + 21) controlPoint2:NSMakePoint(left + 17, top + 22)];
+    [head curveToPoint:NSMakePoint(left + 9, top + 19) controlPoint1:NSMakePoint(left + 12, top + 22) controlPoint2:NSMakePoint(left + 10, top + 21)];
+    [head curveToPoint:NSMakePoint(left + 6, top + 10) controlPoint1:NSMakePoint(left + 6, top + 18) controlPoint2:NSMakePoint(left + 5, top + 14)];
+    [head closePath];
+    [paper setFill];
+    [head fill];
+    [ink setStroke];
+    [head setLineWidth:1.2];
+    [head stroke];
+
+    NSBezierPath *muzzle = [NSBezierPath bezierPathWithRoundedRect:NSMakeRect(left + 11, top + 16, 8, 6) xRadius:4 yRadius:3];
+    [soft setFill];
+    [muzzle fill];
+
+    [ink setFill];
+    [NSBezierPath fillRect:NSMakeRect(left + 11, top + 12, 2.2, 1.6)];
+    [NSBezierPath fillRect:NSMakeRect(left + 17, top + 12, 2.2, 1.6)];
+    NSBezierPath *nose = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(left + 13.5, top + 18, 3, 2.4)];
+    [nose fill];
+
+    NSBezierPath *target = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(cursorPoint.x - 3, cursorPoint.y - 3, 6, 6)];
+    [target setLineWidth:1.0];
+    [ink setStroke];
+    [target stroke];
+}
+@end
 
 static CGEventRef nativeTapCallback(CGEventTapProxy proxy, CGEventType type,
                                     CGEventRef event, void *refcon) {
@@ -421,6 +540,92 @@ static int nativeCurrentMouseLocation(double *x, double *y) {
     *x = p.x;
     *y = p.y;
     return 1;
+}
+
+static CGFloat nativeCocoaYForPoint(double y) {
+    NSScreen *screen = [NSScreen mainScreen];
+    if (screen == nil) return (CGFloat)y;
+    return NSMaxY([screen frame]) - (CGFloat)y;
+}
+
+static NSPoint nativeAgentCursorLocalPoint(double x, double y) {
+    NSScreen *screen = [NSScreen mainScreen];
+    NSRect frame = screen ? [screen frame] : NSMakeRect(0, 0, 0, 0);
+    return NSMakePoint((CGFloat)x - frame.origin.x, (CGFloat)y);
+}
+
+static void nativeShowAgentCursor(double x, double y) {
+    gAgentCursorGeneration++;
+    uint64_t generation = gAgentCursorGeneration;
+    double startX = x - 28;
+    double startY = y + 18;
+    if (gAgentCursorHasLast) {
+        startX = gAgentCursorLastX;
+        startY = gAgentCursorLastY;
+    } else {
+        nativeCurrentMouseLocation(&startX, &startY);
+    }
+    gAgentCursorLastX = x;
+    gAgentCursorLastY = y;
+    gAgentCursorHasLast = 1;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @autoreleasepool {
+            NSScreen *screen = [NSScreen mainScreen];
+            NSRect frame = screen ? [screen frame] : NSMakeRect(0, 0, 80, 80);
+            if (gAgentCursorWindow == nil) {
+                gAgentCursorWindow = [[NSWindow alloc] initWithContentRect:frame
+                                                                  styleMask:NSWindowStyleMaskBorderless
+                                                                    backing:NSBackingStoreBuffered
+                                                                      defer:NO];
+                [gAgentCursorWindow setOpaque:NO];
+                [gAgentCursorWindow setBackgroundColor:[NSColor clearColor]];
+                [gAgentCursorWindow setIgnoresMouseEvents:YES];
+                [gAgentCursorWindow setHasShadow:NO];
+                [gAgentCursorWindow setLevel:NSScreenSaverWindowLevel + 1];
+                [gAgentCursorWindow setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces |
+                                                         NSWindowCollectionBehaviorFullScreenAuxiliary |
+                                                         NSWindowCollectionBehaviorStationary];
+                gAgentCursorView = [[AIConsoleWolfCursorView alloc] initWithFrame:NSMakeRect(0, 0, frame.size.width, frame.size.height)];
+                [gAgentCursorWindow setContentView:gAgentCursorView];
+            } else if (screen) {
+                [gAgentCursorWindow setFrame:frame display:NO];
+                [gAgentCursorView setFrame:NSMakeRect(0, 0, frame.size.width, frame.size.height)];
+            }
+            [gAgentCursorWindow orderFrontRegardless];
+            const int frames = 10;
+            for (int i = 1; i <= frames; i++) {
+                double ratio = (double)i / (double)frames;
+                double eased = 1.0 - pow(1.0 - ratio, 3.0);
+                double frameX = startX + (x - startX) * eased;
+                double frameY = startY + (y - startY) * eased;
+                int64_t delay = (int64_t)(i * 22) * NSEC_PER_MSEC;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delay), dispatch_get_main_queue(), ^{
+                    if (generation == gAgentCursorGeneration && gAgentCursorWindow != nil) {
+                        [gAgentCursorView showAtPoint:nativeAgentCursorLocalPoint(frameX, frameY)];
+                        [gAgentCursorWindow orderFrontRegardless];
+                    }
+                });
+            }
+
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                if (generation == gAgentCursorGeneration && gAgentCursorWindow != nil) {
+                    [gAgentCursorView hideCursor];
+                    [gAgentCursorWindow orderOut:nil];
+                }
+            });
+        }
+    });
+}
+
+static void nativeHideAgentCursor(void) {
+    gAgentCursorGeneration++;
+    gAgentCursorHasLast = 0;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (gAgentCursorWindow != nil) {
+            [gAgentCursorView hideCursor];
+            [gAgentCursorWindow orderOut:nil];
+        }
+    });
 }
 
 // 點擊（clicks=1 單擊、2 雙擊）。雙擊必須在每個 down/up 事件設
@@ -1158,7 +1363,8 @@ func (n *NativeInput) Click(step LearningReplayStep) NativeReplayResult {
 	// 目標視窗被蓋住，所有點擊都會打在本 app 或別的視窗上。
 	foregroundOK, frontTitle, frontProcess := n.activateStepWindow(step)
 
-	n.moveCursorSmooth(step.X, step.Y)
+	preview := n.ShowAgentCursor(step)
+	defer n.HideAgentCursor()
 	time.Sleep(450 * time.Millisecond)
 	rightButton := 0
 	if strings.EqualFold(step.Button, "right") || strings.EqualFold(step.Action, "right_click") {
@@ -1185,9 +1391,12 @@ func (n *NativeInput) Click(step LearningReplayStep) NativeReplayResult {
 		}
 	}
 	time.Sleep(220 * time.Millisecond)
-	warning := ""
+	warnings := []string{}
 	if !foregroundOK {
-		warning = "target window could not be confirmed as frontmost before the click; the click may have hit another window"
+		warnings = append(warnings, "target window could not be confirmed as frontmost before the click; the click may have hit another window")
+	}
+	if preview.Error != "" {
+		warnings = append(warnings, preview.Error)
 	}
 	return NativeReplayResult{
 		OK:                true,
@@ -1201,7 +1410,7 @@ func (n *NativeInput) Click(step LearningReplayStep) NativeReplayResult {
 		ForegroundOK:      foregroundOK,
 		ForegroundTitle:   frontTitle,
 		ForegroundProcess: frontProcess,
-		Warning:           warning,
+		Warning:           strings.Join(warnings, "; "),
 	}
 }
 
@@ -1424,6 +1633,23 @@ func (n *NativeInput) MoveCursorOnly(step LearningReplayStep) NativeReplayResult
 		X:       step.X,
 		Y:       step.Y,
 	}
+}
+
+func (n *NativeInput) ShowAgentCursor(step LearningReplayStep) NativeReplayResult {
+	C.nativeShowAgentCursor(C.double(step.X), C.double(step.Y))
+	return NativeReplayResult{
+		OK:      true,
+		Skipped: true,
+		Method:  "native_agent_cursor",
+		Index:   step.Index,
+		Label:   step.Label,
+		X:       step.X,
+		Y:       step.Y,
+	}
+}
+
+func (n *NativeInput) HideAgentCursor() {
+	C.nativeHideAgentCursor()
 }
 
 // CaptureWindow 截取單一視窗（macOS 14+ 用 ScreenCaptureKit，否則 legacy）。

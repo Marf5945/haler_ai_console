@@ -13,10 +13,6 @@ import (
 
 const testPassword = "correct-horse-9"
 
-func backupTestAPIKey() string {
-	return "sk" + "-abcdefghijklmnopqrstuvwxyz123456"
-}
-
 // buildTestProject 建立含對話、設定與 runtime 暫存的假專案。
 func buildTestProject(t *testing.T, baseDir, projectID string) string {
 	t.Helper()
@@ -31,7 +27,8 @@ func buildTestProject(t *testing.T, baseDir, projectID string) string {
 			t.Fatal(err)
 		}
 	}
-	mustWrite("memory/talk_full.md", "user: 幫我查訂單\nassistant: 好的\napi key 是 "+backupTestAPIKey()+"\n")
+	secret := "sk-" + "abcdefghijklmnopqrstuvwxyz123456"
+	mustWrite("memory/talk_full.md", "user: 幫我查訂單\nassistant: 好的\napi key 是 "+secret+"\n")
 	mustWrite("memory/memory_manifest.json", `{"version":1}`)
 	mustWrite("dag_runs/run1.json", `{"status":"done"}`)
 	mustWrite("runtime/temp_sessions/tmp.json", `{"junk":true}`)
@@ -224,7 +221,7 @@ func TestRedactOptionMasksSecrets(t *testing.T) {
 		t.Fatal("manifest 應標記 redacted")
 	}
 	talk, _ := os.ReadFile(filepath.Join(dst, "data", "projects", "default", "memory", "talk_full.md"))
-	if strings.Contains(string(talk), backupTestAPIKey()) {
+	if strings.Contains(string(talk), "sk-"+"abcdefghijklmnopqrstuvwxyz123456") {
 		t.Fatal("API key 未被遮蔽")
 	}
 	if !strings.Contains(string(talk), "[REDACTED:") {

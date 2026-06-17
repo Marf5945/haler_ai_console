@@ -19,12 +19,15 @@ package external_link
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"ui_console/data/storage"
+	"ui_console/internal/urlsafe"
 )
 
 // ──────────────────────────────────────────────
@@ -147,14 +150,10 @@ func (s *Service) Register(url, label string) (*ExternalLink, error) {
 	if err := s.validateURL(url); err != nil {
 		return nil, err
 	}
-	lt := classifyURL(url)
 	if match, ok := DetectLLMProviderURL(url); ok {
-		lt = LinkLLMProvider
-		label = strings.TrimSpace(label)
-		if label == "" {
-			label = match.Provider.Name
-		}
+		return nil, fmt.Errorf("external_link: LLM/API provider URL %q (%s) must go through API setup, not direct link registration", url, match.Provider.Name)
 	}
+	lt := classifyURL(url)
 	if lt == LinkUnsupported {
 		return nil, fmt.Errorf("external_link: URL %q is unsupported and cannot be registered", url)
 	}
@@ -233,22 +232,44 @@ func isMCPServerURL(url string) bool {
 // #47 路徑分離：此驗證僅適用於 external_service / documentation / adapter_candidate。
 func (s *Service) validateURL(url string) error {
 	url = strings.TrimSpace(url)
+	lower := strings.ToLower(url)
 	if url == "" {
 		return fmt.Errorf("external_link: URL must not be empty")
 	}
-	if strings.HasPrefix(url, "https://") {
-		return nil // always accepted
-	}
-	if strings.HasPrefix(url, "http://localhost") || strings.HasPrefix(url, "http://127.0.0.1") {
+	if isLocalhostURL(url) {
 		if s.devModeFlag {
+			if err := urlsafe.ValidateURL(url, urlsafe.PolicyWebhookDev); err != nil {
+				return fmt.Errorf("external_link: unsafe localhost URL: %w", err)
+			}
 			return nil // localhost only in dev mode for external_service / documentation
 		}
 		return fmt.Errorf("external_link: localhost URLs are only accepted in dev mode for external_service/documentation; MCP server registration uses a separate quarantine flow")
 	}
-	if strings.HasPrefix(url, "http://") {
+	if strings.HasPrefix(lower, "https://") {
+		if err := urlsafe.ValidateURL(url, urlsafe.PolicyWebhook); err != nil {
+			return fmt.Errorf("external_link: unsafe URL: %w", err)
+		}
+		return nil
+	}
+	if strings.HasPrefix(lower, "http://") {
 		return fmt.Errorf("external_link: plain http:// is not accepted in release mode; use https://")
 	}
 	return fmt.Errorf("external_link: unsupported URL scheme: %q", url)
+}
+
+func isLocalhostURL(rawURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "localhost" || host == "localhost." {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 // classifyURL heuristically determines the link type from the URL.

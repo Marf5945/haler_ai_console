@@ -272,6 +272,16 @@ func normalizeToolRoutingDecision(decision toolRoutingDecision, userText string,
 		decision.Next = "文件"
 		return decision
 	}
+	// 使用者明講已載入引用檔名、且非製作/處理類意圖 → 走引用檔內容搜尋（dispatch 精確過濾到該檔）。
+	if len(lookup.RecentReferences) > 0 &&
+		namedReferenceFile(userText, lookup.RecentReferences) != "" &&
+		!containsAny(userText, []string{"產生", "生成", "製作", "做", "分析", "比較", "轉換", "匯出", "處理", "簡報", "報告"}) {
+		decision.Kind = toolRoutingDecisionAction
+		decision.Action = "搜尋"
+		decision.Target = "引用文件"
+		decision.Next = "文件"
+		return decision
+	}
 	if shouldRouteUserTextToWebSearch(userText) && shouldPromoteDecisionToWebSearch(decision) {
 		target := firstNonEmpty(decision.Target, lookup.Query, compactReferenceQuery(userText), userText)
 		if strings.TrimSpace(target) != "" {
@@ -341,7 +351,7 @@ func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sess
 	if len(userTextOpt) > 0 && strings.TrimSpace(userTextOpt[0]) != "" {
 		userText = strings.TrimSpace(userTextOpt[0])
 	}
-	if isLoadedReferenceVisibilityQuestion(userText) {
+	if isReferenceListingQuestion(userText) {
 		if refs := a.recentReferenceFilesForRouting(6); len(refs) > 0 {
 			return true, skill_step.CLIResponse{
 				Text:   formatRecentReferenceFilesAnswer(refs),
@@ -382,6 +392,18 @@ func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sess
 				Target: decision.Target,
 				Next:   decision.Next,
 			}
+		}
+		// 引用文件 sentinel：查已載入引用檔的「內容」（清單問句已在上方短路為列檔）。
+		if isReferenceSearchSentinel(decision.Target) {
+			refResp := a.executeReferenceContentSearch(userText, decision.LookupQuery, sessionID, traceID)
+			refResp.Action = decision.Action
+			if strings.TrimSpace(refResp.Target) == "" {
+				refResp.Target = decision.Target
+			}
+			if strings.TrimSpace(refResp.Next) == "" {
+				refResp.Next = decision.Next
+			}
+			return true, refResp
 		}
 		// Step 2：背景只進 judge/composer context，不再拼進搜尋 query。
 		target := decision.Target

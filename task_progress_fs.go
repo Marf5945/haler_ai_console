@@ -151,6 +151,10 @@ func fsCheckPath(allowedRoots []string, target string) (string, error) {
 	if target == "" {
 		return "", fmt.Errorf("fs: empty path")
 	}
+	if runtime.GOOS == "windows" && filepath.VolumeName(target) == "" &&
+		(strings.HasPrefix(target, "/") || strings.HasPrefix(target, `\`)) {
+		return "", fmt.Errorf("fs: path outside allowed roots: %s", target)
+	}
 
 	cleaned := filepath.Clean(target)
 
@@ -413,6 +417,7 @@ func fsGlob(allowedRoots []string, pattern string) (string, error) {
 		if err != nil {
 			return nil
 		}
+		rel = filepath.ToSlash(rel)
 		matched := false
 		for _, pat := range expanded {
 			if globMatch(pat, rel) {

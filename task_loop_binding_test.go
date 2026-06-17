@@ -102,6 +102,7 @@ func TestApplyLoopPendingInputEndToEnd(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)            // macOS: UserConfigDir 用 HOME
 	t.Setenv("XDG_CONFIG_HOME", tmp) // Linux: 優先用 XDG
+	t.Setenv("AI_CONSOLE_DATA_ROOT", tmp)
 	app := &App{}
 	state := &dag.LoopState{RunID: "r", NodeID: "n",
 		PendingInput: &dag.PendingInput{Tool: "xlsx_write", SchemaID: "xlsx_write.v1"}}

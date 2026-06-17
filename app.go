@@ -14,12 +14,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"ui_console/adapter/adapter_registry"
 	"ui_console/adapter/debugtrace"
@@ -872,10 +872,24 @@ func (a *App) RunSummarizationNow(adapterID string) (string, error) {
 	return sum.Content, nil
 }
 
-// validAgentID SEC-W03 第二刀（2026-05-24）：agentID 只允許英數、底線、連字號。
-// 例外 white-list：空字串 / "main" / "主haㄌer" 由上方 if 早退。
-// 與 sub_export_binding.go 的 validSubID 風格一致。
-var validAgentID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+// isSafeConversationAgentID keeps agent IDs to a single directory name.
+// Sub export/import system codes intentionally include the display name
+// prefix, so Unicode names such as "排程：..._SUB_..." must remain valid while
+// traversal and separator payloads stay rejected.
+func isSafeConversationAgentID(id string) bool {
+	if id == "" || strings.Trim(id, ".") == "" || !utf8.ValidString(id) {
+		return false
+	}
+	if strings.ContainsAny(id, `/\:`) || filepath.Base(id) != id {
+		return false
+	}
+	for _, r := range id {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
 
 func conversationRootForAgent(agentID string) (string, error) {
 	projectRoot := storage.ProjectRoot(appDataRoot(), "default")
@@ -883,8 +897,9 @@ func conversationRootForAgent(agentID string) (string, error) {
 	if id == "" || id == "main" || id == "主haㄌer" {
 		return projectRoot, nil
 	}
-	// SEC-W03: regex 拒絕 .. / . / 路徑分隔符 / 控制字元，比舊版 ContainsAny 嚴格。
-	if !validAgentID.MatchString(id) {
+	// SEC-W03: keep the ID as one safe path segment. Unicode display-name
+	// prefixes are allowed because sub export/import generates them locally.
+	if !isSafeConversationAgentID(id) {
 		return "", fmt.Errorf("invalid agent id: %s", id)
 	}
 	subRoot := filepath.Join(projectRoot, "subagents", "callable", id)

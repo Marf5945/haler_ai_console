@@ -50,6 +50,7 @@ import {
   ListTools,
   PollStatusRail,
   PrepareLearningDigest,
+  PreparePackageInstall,
   PreparePackageInstallPayload,
   PromoteDraftToPending,
   ListExternalLinksByType,
@@ -3201,6 +3202,19 @@ function App() {
       // 不是錄製匯出時繼續試 skill。
     }
     try {
+      const name = basenameForDisplay(path) || t('package.unnamedItem');
+      const manifestJSON = buildPersonaPackageManifest(name, path);
+      const pending = await callWails(() => PreparePackageInstall(path, manifestJSON));
+      if (pending?.persona) {
+        setPendingImport(pending);
+        setPendingPackageData(pending.persona);
+        setPackageInstallError('');
+        return true;
+      }
+    } catch {
+      // 不是 persona 匯出時繼續試 skill。
+    }
+    try {
       const preview = await callWails(() => ScanSkillFolder(path));
       const resources = preview?.Resources || preview?.resources || [];
       const hasSkillMarker = preview?.HasManifest || preview?.has_manifest ||
@@ -5299,14 +5313,11 @@ function App() {
     } catch {
       parsedData = {name: fileName.replace(/\.[^.]+$/, ''), identity: t('persona.droppedRolepackIdentity')};
     }
-    const manifestJSON = JSON.stringify({
-      name: parsedData.name || fileName.replace(/\.[^.]+$/, ''),
-      version: parsedData.version || '0.0.1',
-      source_path: fileName,
-      risk_tag: parsedData.risk_tag || 'unknown',
-      required_perms: parsedData.required_perms || [],
-      write_targets: [],
-    });
+    const manifestJSON = buildPersonaPackageManifest(
+      parsedData.name || fileName.replace(/\.[^.]+$/, ''),
+      fileName,
+      parsedData,
+    );
     try {
       const pending = await callWails(() => PreparePackageInstallPayload(fileName, fileContent, manifestJSON));
       setPendingImport(pending);
@@ -8426,6 +8437,18 @@ function basenameForDisplay(value) {
   if (!text) return '';
   const parts = text.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] || text;
+}
+
+function buildPersonaPackageManifest(name, sourcePath, packageData = {}) {
+  return JSON.stringify({
+    name: name || basenameForDisplay(sourcePath) || 'persona',
+    version: packageData.version || '0.0.1',
+    package_type: 'persona',
+    source_path: sourcePath || '',
+    risk_tag: packageData.risk_tag || 'unknown',
+    required_perms: packageData.required_perms || [],
+    write_targets: [],
+  });
 }
 
 function findReplayElementBySelector(selector) {

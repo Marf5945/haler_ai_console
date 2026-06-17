@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
 set "ROOT=%~dp0"
 cd /d "%ROOT%" || exit /b 1
@@ -36,10 +36,16 @@ if exist "%USERPROFILE%\go\bin" set "PATH=%USERPROFILE%\go\bin;%PATH%"
 if exist "C:\Program Files\Go\bin" set "PATH=C:\Program Files\Go\bin;%PATH%"
 if exist "C:\Program Files\Git\cmd" set "PATH=C:\Program Files\Git\cmd;%PATH%"
 
-call :need go "Go is missing. Install from https://go.dev/dl/ or run: winget install --id GoLang.Go -e" || exit /b 1
-call :need node "Node.js is missing. Install Node.js LTS or run: winget install --id OpenJS.NodeJS.LTS -e" || exit /b 1
-call :need npm "npm is missing. Reinstall Node.js LTS." || exit /b 1
-call :need wails "Wails CLI is missing. Run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0" || exit /b 1
+call :ensure_command winget "winget" "winget is required to auto-install missing Windows dependencies." "" || exit /b 1
+call :ensure_command git "Git" "Git is required to manage and build this repository." "winget install --id Git.Git -e" || exit /b 1
+call :ensure_command go "Go" "Go 1.23 or newer is required to build the backend." "winget install --id GoLang.Go -e" || exit /b 1
+if exist "%USERPROFILE%\go\bin" set "PATH=%USERPROFILE%\go\bin;%PATH%"
+if exist "C:\Program Files\Go\bin" set "PATH=C:\Program Files\Go\bin;%PATH%"
+call :ensure_command node "Node.js" "Node.js LTS is required to build the frontend." "winget install --id OpenJS.NodeJS.LTS -e" || exit /b 1
+call :ensure_command npm "npm" "npm is required to install frontend dependencies." "winget install --id OpenJS.NodeJS.LTS -e" || exit /b 1
+call :ensure_webview2 || exit /b 1
+call :ensure_command wails "Wails CLI" "Wails CLI is required to package the desktop app." "go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0" || exit /b 1
+if exist "%USERPROFILE%\go\bin" set "PATH=%USERPROFILE%\go\bin;%PATH%"
 
 echo Tool versions:
 go version
@@ -140,10 +146,63 @@ if exist "build\bin\ai-console.exe" (
 )
 exit /b 0
 
-:need
+:ensure_command
 where %~1 >nul 2>nul
-if errorlevel 1 (
-  echo [ERROR] %~2
+if not errorlevel 1 exit /b 0
+echo [WARN] %~2 is missing.
+echo        %~3
+if "%~4"=="" (
+  echo [ERROR] Unable to auto-install %~2. Please install it manually, then rerun build.cmd.
   exit /b 1
 )
+call :prompt_install "%~2"
+if errorlevel 1 (
+  echo [ERROR] %~2 is required. Install it and rerun build.cmd.
+  exit /b 1
+)
+echo Installing %~2...
+cmd /c "%~4"
+if errorlevel 1 (
+  echo [ERROR] Failed to install %~2.
+  exit /b 1
+)
+where %~1 >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] %~2 is still missing after installation.
+  exit /b 1
+)
+exit /b 0
+
+:ensure_webview2
+call :has_webview2
+if not errorlevel 1 exit /b 0
+echo [WARN] Microsoft Edge WebView2 Runtime is missing.
+echo        It is required to run the packaged Windows app.
+call :prompt_install "Microsoft Edge WebView2 Runtime"
+if errorlevel 1 (
+  echo [ERROR] WebView2 Runtime is required. Install it and rerun build.cmd.
+  exit /b 1
+)
+echo Installing Microsoft Edge WebView2 Runtime...
+cmd /c "winget install --id Microsoft.EdgeWebView2Runtime -e"
+if errorlevel 1 (
+  echo [ERROR] Failed to install Microsoft Edge WebView2 Runtime.
+  exit /b 1
+)
+call :has_webview2
+if errorlevel 1 (
+  echo [ERROR] WebView2 Runtime is still missing after installation.
+  exit /b 1
+)
+exit /b 0
+
+:has_webview2
+reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" /v pv >nul 2>nul && exit /b 0
+reg query "HKLM\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" /v pv >nul 2>nul && exit /b 0
+reg query "HKCU\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" /v pv >nul 2>nul && exit /b 0
+exit /b 1
+
+:prompt_install
+choice /C YN /M "Install %~1 now"
+if errorlevel 2 exit /b 1
 exit /b 0

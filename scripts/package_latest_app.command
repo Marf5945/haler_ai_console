@@ -4,10 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="${0:A:h}"
 PROJECT="${SCRIPT_DIR:h}"
 export PATH="$PATH:/usr/local/go/bin:/opt/homebrew/bin:$HOME/go/bin"
-WAILS="${WAILS:-$(command -v wails || true)}"
 APP="$PROJECT/build/bin/ai-console.app"
 LOG_DIR="$PROJECT/build/logs"
 LOG_FILE="$LOG_DIR/package-latest-$(date '+%Y%m%d-%H%M%S').log"
+BUILD_HELPER="$SCRIPT_DIR/wails_build_darwin.sh"
 
 mkdir -p "$LOG_DIR"
 exec > >(tee "$LOG_FILE") 2>&1
@@ -43,19 +43,15 @@ if [[ ! -d "$PROJECT" ]]; then
   exit 1
 fi
 
-if [[ -z "$WAILS" || ! -x "$WAILS" ]]; then
-  echo "Wails executable not found. Install Wails or set WAILS=/path/to/wails before running."
+if [[ ! -f "$BUILD_HELPER" ]]; then
+  echo "Build helper not found: $BUILD_HELPER"
   exit 1
 fi
 
 cd "$PROJECT"
 
-echo "Step 1/3: frontend build"
-(cd frontend && npm run build)
-echo
-
-echo "Step 2/3: Wails package build"
-"$WAILS" build
+echo "Step 1/2: dependency checks and package build"
+bash "$BUILD_HELPER"
 echo
 
 if [[ ! -d "$APP" ]]; then
@@ -63,7 +59,7 @@ if [[ ! -d "$APP" ]]; then
   exit 1
 fi
 
-echo "Step 3/3: reopening exact packaged app"
+echo "Step 2/2: reopening exact packaged app"
 echo "Closing running ai-console windows first to avoid showing an older in-memory app."
 osascript -e 'tell application id "com.wails.ai-console" to quit' >/dev/null 2>&1 || true
 sleep 1

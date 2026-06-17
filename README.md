@@ -131,17 +131,23 @@ build.cmd --clean
 ```
 
 The helper checks the current Windows architecture, verifies Go/Node/npm/Wails, installs frontend dependencies, runs `wails doctor`, and then runs `wails build` for the current Windows target.
+If a required Windows dependency is missing, the helper now prompts whether it should install it automatically.
 
 ### macOS
 
 ```bash
 git clone https://github.com/<owner>/<repo>.git
 cd <repo>
-cd frontend
-npm install
-cd ..
-wails build
+bash scripts/wails_build_darwin.sh
 ```
+
+For a clean macOS rebuild:
+
+```bash
+bash scripts/wails_build_darwin.sh --clean
+```
+
+The macOS helper checks Xcode Command Line Tools, Git, Go, Node.js, npm, and Wails CLI. If a required dependency is missing, it prompts whether it should install it automatically before continuing.
 
 Build output is generated under:
 

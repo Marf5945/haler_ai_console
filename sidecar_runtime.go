@@ -23,6 +23,7 @@ const {spawn} = require("child_process");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const {TextDecoder} = require("util");
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -154,6 +155,107 @@ function isGeminiAdapter(adapterID, cliPath) {
 function isWindowsCommandLauncher(filePath) {
   if (process.platform !== "win32") return false;
   return /\.(cmd|bat)$/i.test(String(filePath || ""));
+}
+
+function expandWindowsBatchPath(rawPath, baseDir) {
+  let candidate = String(rawPath || "");
+  candidate = candidate.replace(/%~dp0\\/gi, baseDir + "\\");
+  candidate = candidate.replace(/%~dp0\//gi, baseDir + "\\");
+  candidate = candidate.replace(/%~dp0/gi, baseDir);
+  candidate = candidate.replace(/%dp0%\\/gi, baseDir + "\\");
+  candidate = candidate.replace(/%dp0%\//gi, baseDir + "\\");
+  candidate = candidate.replace(/%dp0%/gi, baseDir);
+  return candidate;
+}
+
+function quotedWindowsCommandParts(line) {
+  const parts = [];
+  let rest = String(line || "");
+  while (true) {
+    const start = rest.indexOf("\"");
+    if (start < 0) break;
+    rest = rest.slice(start + 1);
+    const end = rest.indexOf("\"");
+    if (end < 0) break;
+    parts.push(rest.slice(0, end));
+    rest = rest.slice(end + 1);
+  }
+  return parts;
+}
+
+function resolveWindowsLauncherCommand(filePath, originalArgs) {
+  if (!isWindowsCommandLauncher(filePath)) return null;
+  try {
+    const content = fs.readFileSync(filePath, "utf8");
+    const baseDir = path.dirname(filePath);
+    const lines = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+
+    for (const line of lines) {
+      if (!line.includes("%*")) continue;
+      const quoted = quotedWindowsCommandParts(line);
+      const scriptPart = quoted.find((part) => /node_modules[\\/].+\.(?:c?js|mjs)$/i.test(part));
+      if (scriptPart) {
+        const scriptPath = expandWindowsBatchPath(scriptPart, baseDir);
+        const bundledNode = path.join(baseDir, "node.exe");
+        const nodePath = fs.existsSync(bundledNode) ? bundledNode : "node";
+        return {cmd: nodePath, args: [scriptPath, ...(originalArgs || [])], shell: false};
+      }
+      for (const part of quoted) {
+        const candidate = expandWindowsBatchPath(part, baseDir);
+        if (/\.(exe|com)$/i.test(candidate) && fs.existsSync(candidate)) {
+          return {cmd: candidate, args: [...(originalArgs || [])], shell: false};
+        }
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function concatLimitedBuffer(current, chunk, limit) {
+  const next = Buffer.concat([current, Buffer.from(chunk)]);
+  if (next.length <= limit) return next;
+  return next.slice(next.length - limit);
+}
+
+function decodeWithEncoding(buffer, encoding, fatal) {
+  try {
+    return new TextDecoder(encoding, {fatal: !!fatal}).decode(buffer);
+  } catch {
+    return null;
+  }
+}
+
+function decodeWindowsCLIText(buffer) {
+  if (!buffer || !buffer.length) return "";
+  const utf8Strict = decodeWithEncoding(buffer, "utf-8", true);
+  if (utf8Strict !== null) return utf8Strict;
+
+  const candidates = [
+    decodeWithEncoding(buffer, "big5", false),
+    decodeWithEncoding(buffer, "gbk", false),
+    decodeWithEncoding(buffer, "utf-8", false),
+  ].filter((text) => text !== null);
+
+  if (candidates.length === 0) return Buffer.from(buffer).toString("utf8");
+
+  let best = candidates[0];
+  let bestPenalty = Number.POSITIVE_INFINITY;
+  for (const text of candidates) {
+    const penalty = (String(text).match(/\uFFFD/g) || []).length;
+    if (penalty < bestPenalty) {
+      best = text;
+      bestPenalty = penalty;
+    }
+  }
+  return best;
+}
+
+function decodeCLIText(buffer) {
+  if (!buffer || !buffer.length) return "";
+  if (process.platform === "win32") {
+    return decodeWindowsCLIText(buffer);
+  }
+  return Buffer.from(buffer).toString("utf8");
 }
 
 // --- CLI 指令對應表 ---
@@ -295,11 +397,18 @@ function runCLI(params) {
 
     const model = params.model || "";
     const spec = commandFor(adapterID, cliPath, prompt, model);
-    traceNode("sidecar.spawn.command", traceID, {
+    const launcherSpec = resolveWindowsLauncherCommand(spec.cmd, spec.args);
+    const runSpec = launcherSpec || {
       cmd: spec.cmd,
-      args: traceArgs(traceID, spec.args),
-      cwd: workspaceDir || process.cwd(),
+      args: spec.args,
       shell: isWindowsCommandLauncher(spec.cmd),
+    };
+    traceNode("sidecar.spawn.command", traceID, {
+      cmd: runSpec.cmd,
+      args: traceArgs(traceID, runSpec.args),
+      cwd: workspaceDir || process.cwd(),
+      shell: !!runSpec.shell,
+      launcher_resolved: !!launcherSpec,
     });
     const env = {...process.env};
     env.PATH = [
@@ -321,19 +430,21 @@ function runCLI(params) {
       env,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
-      shell: isWindowsCommandLauncher(spec.cmd),
+      shell: !!runSpec.shell,
     };
-    const child = spawn(spec.cmd, spec.args, spawnOptions);
+    const child = spawn(runSpec.cmd, runSpec.args, spawnOptions);
     traceNode("sidecar.spawn.started", traceID, {
       pid: child.pid,
-      cmd: spec.cmd,
-      args: traceArgs(traceID, spec.args),
+      cmd: runSpec.cmd,
+      args: traceArgs(traceID, runSpec.args),
       cwd: workspaceDir || process.cwd(),
     });
     if (traceID) runningByTraceID.set(traceID, child);
 
-    let stdout = "";
-    let stderr = "";
+    let stdoutBytes = Buffer.alloc(0);
+    let stderrBytes = Buffer.alloc(0);
+    let stdoutPreview = "";
+    let stderrPreview = "";
     let settled = false;
     const limit = 5 * 1024 * 1024;
 
@@ -343,6 +454,8 @@ function runCLI(params) {
       clearTimeout(timer);
       if (traceID) runningByTraceID.delete(traceID);
       try { child.kill("SIGTERM"); } catch {}
+      const stdout = decodeCLIText(stdoutBytes);
+      const stderr = decodeCLIText(stderrBytes);
       const publicError = publicCLIErrorMessage(err, stdout, stderr);
       traceNode("sidecar.runCLI.fail", traceID, {
         error: publicError,
@@ -374,8 +487,8 @@ function runCLI(params) {
       try { child.kill("SIGTERM"); } catch {}
       traceNode("sidecar.auth.detected", traceID, {
         auth_url: authURL,
-        stdout,
-        stderr,
+        stdout: decodeCLIText(stdoutBytes),
+        stderr: decodeCLIText(stderrBytes),
       });
       resolve({
         auth_required: true,
@@ -390,22 +503,24 @@ function runCLI(params) {
     }, 88000);
 
     child.stdout.on("data", (chunk) => {
-      const text = chunk.toString();
-      stdout += text;
-      if (stdout.length > limit) stdout = stdout.slice(-limit);
+      const text = chunk.toString("utf8");
+      stdoutBytes = concatLimitedBuffer(stdoutBytes, chunk, limit);
+      stdoutPreview += text;
+      if (stdoutPreview.length > limit) stdoutPreview = stdoutPreview.slice(-limit);
       traceNode("sidecar.stdout.chunk", traceID, {text});
       // 即時偵測授權提示，不等 close 事件
-      if (hasAuthPrompt(stdout)) {
-        handleAuthDetected(stdout + "\n" + stderr);
+      if (hasAuthPrompt(stdoutPreview)) {
+        handleAuthDetected(stdoutPreview + "\n" + stderrPreview);
       }
     });
     child.stderr.on("data", (chunk) => {
-      const text = chunk.toString();
-      stderr += text;
-      if (stderr.length > limit) stderr = stderr.slice(-limit);
+      const text = chunk.toString("utf8");
+      stderrBytes = concatLimitedBuffer(stderrBytes, chunk, limit);
+      stderrPreview += text;
+      if (stderrPreview.length > limit) stderrPreview = stderrPreview.slice(-limit);
       traceNode("sidecar.stderr.chunk", traceID, {text});
-      if (hasAuthPrompt(stderr)) {
-        handleAuthDetected(stdout + "\n" + stderr);
+      if (hasAuthPrompt(stderrPreview)) {
+        handleAuthDetected(stdoutPreview + "\n" + stderrPreview);
       }
     });
 
@@ -419,6 +534,8 @@ function runCLI(params) {
     child.on("close", (code) => {
       if (traceID) runningByTraceID.delete(traceID);
       if (settled) return;
+      const stdout = decodeCLIText(stdoutBytes);
+      const stderr = decodeCLIText(stderrBytes);
       const text = stdout.trim();
       const errText = stderr.trim();
       traceNode("sidecar.close", traceID, {

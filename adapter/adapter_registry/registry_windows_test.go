@@ -50,7 +50,7 @@ func TestUnwrapWindowsCommandLauncherReturnsRealExecutable(t *testing.T) {
 		t.Fatal(err)
 	}
 	launcher := filepath.Join(dir, "claude.cmd")
-	content := "@ECHO off\r\n\"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe\"   %*\r\n"
+	content := "@ECHO off\r\n\"%~dp0\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe\"   %*\r\n"
 	if err := os.WriteFile(launcher, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}

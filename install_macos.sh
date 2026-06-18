@@ -5,8 +5,8 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 build_helper="${root_dir}/scripts/wails_build_darwin.sh"
 app_name="HaLer AI Console"
 open_app=1
-clean_args=()
-passthrough_args=()
+clean_arg=""
+setup_only_arg=""
 
 usage() {
   cat <<'USAGE'
@@ -37,11 +37,11 @@ USAGE
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --clean)
-      clean_args+=("--clean")
+      clean_arg="--clean"
       shift
       ;;
     --setup-only)
-      passthrough_args+=("--setup-only")
+      setup_only_arg="--setup-only"
       open_app=0
       shift
       ;;
@@ -87,7 +87,15 @@ echo
 echo "You may be asked for your Mac password if a signed official .pkg installer is needed."
 echo
 
-bash "${build_helper}" "${clean_args[@]}" "${passthrough_args[@]}"
+if [[ -n "${clean_arg}" && -n "${setup_only_arg}" ]]; then
+  bash "${build_helper}" "${clean_arg}" "${setup_only_arg}"
+elif [[ -n "${clean_arg}" ]]; then
+  bash "${build_helper}" "${clean_arg}"
+elif [[ -n "${setup_only_arg}" ]]; then
+  bash "${build_helper}" "${setup_only_arg}"
+else
+  bash "${build_helper}"
+fi
 
 app_path="${root_dir}/build/bin/${app_name}.app"
 if [[ "${open_app}" -eq 1 ]]; then

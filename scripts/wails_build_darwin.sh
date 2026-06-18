@@ -14,7 +14,6 @@ go_darwin_arm64_sha256="9d35ecdcc142f3f2b9010b495ee0051e64ccd7bcf340d3c1258fe2ce
 node_pkg_sha256="65843aafbab48999c9d5f072746836965340c9ef2fbf17a377d3f919dcb0cb7a"
 
 refresh_path() {
-  export PATH="$HOME/go/bin:$PATH"
   local cache_root="${TMPDIR:-/tmp}/haler-ai-console-build-cache"
   export GOCACHE="${cache_root}/go-build"
   export GOMODCACHE="${cache_root}/go-mod"
@@ -23,6 +22,7 @@ refresh_path() {
   elif [[ -x /usr/local/bin/brew ]]; then
     eval "$(/usr/local/bin/brew shellenv)"
   fi
+  export PATH="$HOME/go/bin:/usr/local/go/bin:/usr/local/bin:$PATH"
   mkdir -p "${GOCACHE}" "${GOMODCACHE}"
 }
 
@@ -126,7 +126,14 @@ ensure_go() {
 
   install_pkg_with_hash "https://go.dev/dl/go${go_version}.darwin-${pkg_arch}.pkg" "${expected_sha}" "Go ${go_version}" || return 1
   refresh_path
-  [[ "$(go version | awk '{print $3}')" == "go${go_version}" ]]
+  found_version="$(go version | awk '{print $3}')"
+  if [[ "${found_version}" == "go${go_version}" ]]; then
+    return 0
+  fi
+  echo "[ERROR] Go ${go_version} was installed, but PATH still resolves ${found_version}."
+  echo "        Current go: $(command -v go)"
+  echo "        Try opening a new Terminal, or run: export PATH=\"/usr/local/go/bin:\$PATH\""
+  return 1
 }
 
 ensure_node() {
@@ -152,7 +159,14 @@ ensure_node() {
 
   install_pkg_with_hash "https://nodejs.org/dist/v${node_version}/node-v${node_version}.pkg" "${node_pkg_sha256}" "Node.js ${node_version}" || return 1
   refresh_path
-  [[ "$(node --version)" == "v${node_version}" ]] && command -v npm >/dev/null 2>&1
+  found_version="$(node --version 2>/dev/null || true)"
+  if [[ "${found_version}" == "v${node_version}" ]] && command -v npm >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "[ERROR] Node.js ${node_version} was installed, but PATH still resolves ${found_version:-no node}."
+  echo "        Current node: $(command -v node || echo not found)"
+  echo "        Try opening a new Terminal, or run: export PATH=\"/usr/local/bin:\$PATH\""
+  return 1
 }
 
 ensure_wails() {
@@ -261,7 +275,11 @@ echo "Running wails doctor..."
 
 echo
 echo "Building ${app_name} for macOS..."
-"${wails_bin}" build -ldflags "-extldflags=-Wl,-no_warn_duplicate_libraries" "${build_args[@]}"
+if [[ "${#build_args[@]}" -gt 0 ]]; then
+  "${wails_bin}" build -ldflags "-extldflags=-Wl,-no_warn_duplicate_libraries" "${build_args[@]}"
+else
+  "${wails_bin}" build -ldflags "-extldflags=-Wl,-no_warn_duplicate_libraries"
+fi
 
 model_src="${root_dir}/assets/models/yolox_button_s.mlmodelc"
 model_dst="${root_dir}/build/bin/${app_name}.app/Contents/Resources/assets/models"

@@ -5024,7 +5024,7 @@
   box-shadow: 0 0 0 2px rgba(255,255,255,0.16), 0 10px 22px rgba(0,0,0,0.24);
 }
 
-.console-shell .floating-candidate-btn.is-selected {
+.console-shell[data-theme] .floating-candidate-btn.is-selected {
   background: var(--floating-candidate-selected-bg, #fff8ef);
   border-color: var(--floating-candidate-selected-border, rgba(255,248,239,0.9));
   color: var(--floating-candidate-selected-fg, #15120c);

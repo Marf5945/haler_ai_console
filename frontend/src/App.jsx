@@ -239,7 +239,6 @@ import {
   // UpdateReadinessGateState — 後端 pipeline 內部呼叫，前端 import-only 預留
   // RecordReadinessTrace — 後端自動記錄，前端 import-only 預留
   // ListReadinessTraces — 預留給未來開發者除錯面板
-  SelectFloatingCandidate,
   DismissFloatingCandidates,
   // §30: 關閉視窗流程
   ConfirmClose,
@@ -550,6 +549,19 @@ function stripInternalControlDraft(draft) {
 const LONG_PRESS_DURATION_MS = 800;
 // 轉蛋動畫各階段時間（毫秒）
 const GACHA_COLLAPSE_MS = 300;
+function candidateReplyText(candidate) {
+  const draft = stripInternalControlDraft(candidate?.draft || candidate?.label || '');
+  return draft.startsWith('input:') ? draft.slice('input:'.length).trim() : draft.trim();
+}
+
+function isExclusiveCandidateSet(candidates = []) {
+  if (candidates.length !== 2) return false;
+  const labels = candidates.map((candidate) => String(candidate?.label || '').trim().toLowerCase());
+  const yesLike = /^(是|對|好|可以|要|確認|同意|執行|yes|y|ok|okay|confirm|proceed|continue)$/i;
+  const noLike = /^(否|不是|不|不要|取消|拒絕|略過|no|n|cancel)$/i;
+  return labels.some((label) => yesLike.test(label)) && labels.some((label) => noLike.test(label));
+}
+
 const GACHA_PULSE_MS = 500;
 const GACHA_PARTICLE_MS = 600;
 // 粒子爆發方向角度（8 個粒子均分 360 度）
@@ -1633,13 +1645,22 @@ function App() {
   // gachaPhase          : 轉蛋動畫階段（null | 'collapse' | 'pulse' | 'particles' | 'reveal'）
   // riskImpactExpanded  : 高風險影響說明面板是否已展開（第三層確認流程）
   const [readinessGate, setReadinessGate] = useState(fallbackReadinessGate);
+  const [selectedFloatingCandidateIDs, setSelectedFloatingCandidateIDs] = useState([]);
   const [longPressActive, setLongPressActive] = useState(false);
   const [longPressProgress, setLongPressProgress] = useState(0);
   const [gachaPhase, setGachaPhase] = useState(null);
   const [riskImpactExpanded, setRiskImpactExpanded] = useState(false);
+  const floatingCandidateKey = (readinessGate.floating_candidates || [])
+    .map((candidate) => String(candidate?.id || ''))
+    .join('|');
   const longPressTimerRef = useRef(null);
   const longPressStartRef = useRef(null);
   const manualGreetingLockedRef = useRef(false);
+
+  useEffect(() => {
+    const liveIDs = new Set((readinessGate.floating_candidates || []).map((candidate) => candidate?.id));
+    setSelectedFloatingCandidateIDs((prev) => prev.filter((id) => liveIDs.has(id)));
+  }, [floatingCandidateKey]);
 
   function unlockManualGreeting() {
     manualGreetingLockedRef.current = false;
@@ -4347,7 +4368,13 @@ function App() {
 
   async function sendMessage(event, images = []) {
     event.preventDefault();
-    submitComposerText(draft, images);
+    const selectedText = selectedFloatingCandidateIDs
+      .map((candidateID) => (readinessGate.floating_candidates || []).find((candidate) => candidate.id === candidateID))
+      .map(candidateReplyText)
+      .filter(Boolean)
+      .join('\n');
+    const typedText = String(draft || '').trim();
+    submitComposerText([selectedText, typedText].filter(Boolean).join('\n'), images);
   }
 
   async function submitComposerText(rawText, images = []) {
@@ -4387,6 +4414,7 @@ function App() {
       }
     };
     setDraft('');
+    setSelectedFloatingCandidateIDs([]);
     try {
       await persistConversationEntry(conversationId, 'user', text, traceId);
     } catch (err) {
@@ -4553,25 +4581,15 @@ function App() {
   }
 
   async function handleSelectCandidate(candidateID) {
-    // §12A.1: 點擊 Candidate → 低風險候選直接送出；input: 候選只預填讓使用者補字。
-    const candidate = readinessGate.floating_candidates?.find((c) => c.id === candidateID);
-    if (candidate?.draft) {
-      const draft = stripInternalControlDraft(candidate.draft);
-      if (draft.startsWith('input:')) {
-        setDraft(draft.slice('input:'.length));
-      } else if (String(candidateID || '').startsWith('intent-option-')) {
-        const conversationId = activeConversationIdRef.current || 'main';
-        const traceId = makeDebugTraceID('choice');
-        // 純選項卡只是替使用者做選擇，不再把選項送回模型重判。
-        setConversationMessages(conversationId, (prev) => [...prev, draft]);
-        persistConversationEntry(conversationId, 'user', draft, traceId).catch(() => {});
-      } else {
-        submitComposerText(draft);
+    const candidates = readinessGate.floating_candidates || [];
+    if (!candidates.some((candidate) => candidate.id === candidateID)) return;
+    const exclusive = isExclusiveCandidateSet(candidates);
+    setSelectedFloatingCandidateIDs((prev) => {
+      if (prev.includes(candidateID)) {
+        return prev.filter((id) => id !== candidateID);
       }
-    }
-    callWails(() => SelectFloatingCandidate(candidateID))
-      .then((nextState) => { if (nextState) setReadinessGate(nextState); })
-      .catch(() => {});
+      return exclusive ? [candidateID] : [...prev, candidateID];
+    });
   }
 
   function handleLongPressStart() {
@@ -7433,6 +7451,7 @@ function App() {
               activeConversationId={activeConversationIdRef.current || 'main'}
               // v3.6.4 Readiness Gate UI Interaction Layer props
               readinessGate={readinessGate}
+              selectedFloatingCandidateIDs={selectedFloatingCandidateIDs}
               longPressProgress={longPressProgress}
               gachaPhase={gachaPhase}
               riskImpactExpanded={riskImpactExpanded}
@@ -13785,17 +13804,21 @@ function LongPressConfirmButton({label, danger = false, progress = 0, gachaPhase
  *
  * Props:
  *   candidates — 候選陣列 [{id, label, draft}]
- *   onSelect   — 點擊候選回呼 (candidateID) => void
+ *   selectedIDs — 已選候選 id
+ *   onSelect    — 點擊候選回呼 (candidateID) => void
  */
-function FloatingCandidateActions({candidates = [], onSelect}) {
+function FloatingCandidateActions({candidates = [], selectedIDs = [], onSelect}) {
   if (!candidates.length) return null;
+  const selectedSet = new Set(selectedIDs);
+  const selectionMode = isExclusiveCandidateSet(candidates) ? 'single' : 'multiple';
   return (
-    <div className="floating-candidates">
+    <div className="floating-candidates" data-selection-mode={selectionMode}>
       {candidates.slice(0, 3).map((candidate) => (
         <button
           key={candidate.id}
           type="button"
-          className="floating-candidate-btn"
+          className={`floating-candidate-btn ${selectedSet.has(candidate.id) ? 'is-selected' : ''}`}
+          aria-pressed={selectedSet.has(candidate.id)}
           onClick={() => onSelect(candidate.id)}
         >
           {candidate.label}
@@ -14002,6 +14025,7 @@ function ConversationPanel({
   onInjectText, activeConversationId,
   // v3.6.4 Readiness Gate props
   readinessGate = fallbackReadinessGate,
+  selectedFloatingCandidateIDs = [],
   longPressProgress = 0, gachaPhase = null, riskImpactExpanded = false,
   onSelectCandidate, onNormalConfirm, onNormalReject, onHighRiskYes,
   onLongPressStart, onLongPressEnd,
@@ -14026,6 +14050,8 @@ function ConversationPanel({
   const micAvailable = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
   const voiceDisabled = voiceBusy || !voiceReady || !micAvailable;
   const voiceTitle = voiceReady ? t('composer.voiceHold') : voiceStatusLabel(voiceState?.status);
+  const hasSelectedFloatingCandidates = selectedFloatingCandidateIDs.length > 0;
+  const composerReady = !!draft.trim() || hasSelectedFloatingCandidates;
   const displayMessage = (message) => stripComposerPendingMarker(message)
     .replace(/^Ai:/, personaName + ':')
     .replace(/^輸入:/, '');
@@ -14177,6 +14203,7 @@ function ConversationPanel({
           {/* §12A.1: Floating Candidate Actions — 最多 3 個意圖候選 */}
           <FloatingCandidateActions
             candidates={readinessGate.floating_candidates || []}
+            selectedIDs={selectedFloatingCandidateIDs}
             onSelect={onSelectCandidate}
           />
           {/* §12A.3: Missing Slot Capsule — 缺欄位膠囊 */}
@@ -14213,7 +14240,7 @@ function ConversationPanel({
           // submitComposerText 對空字串會 return；只有真的有文字送出時才連帶清縮圖，
           // 純貼圖尚未送出時保留，避免誤刪使用者剛貼上的圖。
           onSend(event, imagePreviews);
-          if (draft.trim()) {
+          if (draft.trim() || hasSelectedFloatingCandidates) {
             setImagePreviews([]);
             setImageError('');
           }
@@ -14309,7 +14336,7 @@ function ConversationPanel({
               }
             }}
           />
-          <button className="send-btn" type="submit"><span>◢</span>{t('composer.send')}</button>
+          <button className={`send-btn ${composerReady ? 'send-btn-ready' : ''}`} type="submit"><span>◢</span>{t('composer.send')}</button>
         </div>
         {(voiceStatus || voiceError || voiceState?.status !== 'ready') && (
           <div className={`voice-status ${voiceError ? 'voice-status-error' : ''}`}>

@@ -397,16 +397,20 @@ func (a *App) ListAvailableAdapters() interface{} {
 		if kind == "" {
 			kind = "cli"
 		}
+		modelCatalog := a.describeAdapterModelCatalog(adapter.ID)
 		items = append(items, map[string]interface{}{
-			"id":         adapter.ID,
-			"name":       adapter.Name,
-			"icon":       adapter.Icon,
-			"path":       adapter.Path,
-			"endpoint":   adapter.Endpoint,
-			"model":      adapter.Model,
-			"status":     adapter.Status,
-			"last_check": adapter.LastCheck,
-			"kind":       kind,
+			"id":                  adapter.ID,
+			"name":                adapter.Name,
+			"icon":                adapter.Icon,
+			"path":                adapter.Path,
+			"endpoint":            adapter.Endpoint,
+			"model":               adapter.Model,
+			"status":              adapter.Status,
+			"last_check":          adapter.LastCheck,
+			"kind":                kind,
+			"cli_version":         modelCatalog.CLIVersion,
+			"model_option_source": modelCatalog.Source,
+			"model_option_note":   modelCatalog.Note,
 		})
 	}
 

@@ -1,27 +1,18 @@
-// adapter_model_binding.go — UI 雙擊 adapter 卡片開啟 model 選單的 Wails binding。
-//
-// 流程：
-//
-//	UI 雙擊 → ListAdapterModelOptions 拿候選清單 → 彈窗點選 → SetAdapterModelChoice 寫入
-//	settings.adapterModelChoices → 下次 sendMessage 時 sidecarAdapter.modelProvider
-//	查詢這份 map → 把 model 塞進 sidecar IPC → commandFor 加 --model 旗標。
-//
-// 設計原則：
-//   - 不抽 helper struct；只是 3 個 thin forwarding method。
-//   - Gemini 優先掃 CLI bundle；Claude/Codex 用輕量候選清單；Ollama 走 scanOllamaModels() 動態。
-//   - 無候選清單時回 nil，前端負責不渲染 badge。
 package main
 
 import (
+	"bytes"
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
+	"time"
 )
 
-// adapterModelPresets — CLI kind adapter 的 model 彈窗候選。
-// 想加新 CLI 或換 model 名稱，改這一個 map 就好，不必動其他地方。
 var adapterModelPresets = map[string][]string{
 	"gemini-cli": {
 		"gemini-3.5-flash",
@@ -35,8 +26,13 @@ var adapterModelPresets = map[string][]string{
 	"codex-cli":  {"gpt-5.5", "o4", "o4-mini"},
 }
 
-// GetAdapterModelChoices 回傳目前所有 adapter 的 model 偏好。
-// 前端開機時呼叫一次塞進 state，之後跟著 SetAdapterModelChoice 同步即可。
+type adapterModelCatalog struct {
+	Options    []string
+	Source     string
+	CLIVersion string
+	Note       string
+}
+
 func (a *App) GetAdapterModelChoices() map[string]string {
 	if a.settingsService == nil {
 		return map[string]string{}
@@ -52,8 +48,6 @@ func (a *App) GetAdapterModelChoices() map[string]string {
 	return choices
 }
 
-// SetAdapterModelChoice 寫入單一 adapter 的 model 偏好。
-// model 為空字串時等同清除（fallback 走 CLI 自身預設或 commandFor 內的 hardcoded）。
 func (a *App) SetAdapterModelChoice(adapterID, model string) error {
 	if a.settingsService == nil {
 		return nil
@@ -62,35 +56,84 @@ func (a *App) SetAdapterModelChoice(adapterID, model string) error {
 	return nil
 }
 
-// ListAdapterModelOptions 回傳指定 adapter 的雙擊循環候選清單。
-// 規則：
-//   - "local-ollama-*" → 即時掃描 `ollama list`
-//   - gemini-cli → 從 Gemini CLI bundle 的 modelDefinitions 掃描；失敗才用 adapterModelPresets
-//   - 其他已知 CLI adapter（claude/codex）→ adapterModelPresets
-//   - 其他（API / 未知）→ nil（前端不渲染 badge、不開啟雙擊）
 func (a *App) ListAdapterModelOptions(adapterID string) []string {
+	return a.describeAdapterModelCatalog(adapterID).Options
+}
+
+func (a *App) describeAdapterModelCatalog(adapterID string) adapterModelCatalog {
 	id := strings.ToLower(strings.TrimSpace(adapterID))
-	if strings.HasPrefix(id, "local-ollama") {
-		out := []string{}
-		for _, m := range scanOllamaModels() {
-			if m.ID != "" {
-				out = append(out, m.ID)
+	switch {
+	case strings.HasPrefix(id, "local-ollama"):
+		options := []string{}
+		for _, model := range scanOllamaModels() {
+			if model.ID != "" {
+				options = append(options, model.ID)
 			}
 		}
-		return out
-	}
-	if id == "gemini-cli" {
-		if out := a.scanGeminiCLIModelOptions(id); len(out) > 0 {
-			return out
+		return adapterModelCatalog{
+			Options: options,
+			Source:  "runtime-scan",
+			Note:    "Scanned from local Ollama models.",
+		}
+	case id == "gemini-cli":
+		version, cliPath := a.adapterCLIExecutableVersion(id)
+		if options := a.scanGeminiCLIModelOptions(id); len(options) > 0 {
+			return adapterModelCatalog{
+				Options:    options,
+				Source:     "bundle-scan",
+				CLIVersion: version,
+				Note:       cliSourceNote(cliPath, "Read from the installed Gemini CLI bundle."),
+			}
+		}
+		return adapterModelCatalog{
+			Options:    copyStringSlice(adapterModelPresets[id]),
+			Source:     "preset-fallback",
+			CLIVersion: version,
+			Note:       cliSourceNote(cliPath, "Gemini CLI bundle could not be inspected, so this is the app fallback list."),
+		}
+	case id == "codex-cli":
+		version, cliPath := a.adapterCLIExecutableVersion(id)
+		if options, hidden, ok := scanCodexCLIModelOptionsFromExecutable(cliPath, adapterModelPresets[id]); ok && len(options) > 0 {
+			note := "Filtered against the installed Codex CLI."
+			if len(hidden) > 0 {
+				note = "Filtered against the installed Codex CLI. Hidden unsupported candidates: " + strings.Join(hidden, ", ")
+			}
+			return adapterModelCatalog{
+				Options:    options,
+				Source:     "live-probe",
+				CLIVersion: version,
+				Note:       cliSourceNote(cliPath, note),
+			}
+		}
+		return adapterModelCatalog{
+			Options:    copyStringSlice(adapterModelPresets[id]),
+			Source:     "preset-fallback",
+			CLIVersion: version,
+			Note:       cliSourceNote(cliPath, "Codex CLI could not be probed, so this is the app fallback list."),
+		}
+	default:
+		if presets, ok := adapterModelPresets[id]; ok {
+			version, cliPath := a.adapterCLIExecutableVersion(id)
+			return adapterModelCatalog{
+				Options:    copyStringSlice(presets),
+				Source:     "preset",
+				CLIVersion: version,
+				Note:       cliSourceNote(cliPath, "This adapter uses the app preset list because the CLI does not expose a model catalog."),
+			}
 		}
 	}
-	if presets, ok := adapterModelPresets[id]; ok {
-		// 回 copy，避免前端誤改 caller 共用的 slice。
-		out := make([]string, len(presets))
-		copy(out, presets)
-		return out
+	return adapterModelCatalog{}
+}
+
+func (a *App) adapterCLIExecutableVersion(adapterID string) (string, string) {
+	if a == nil || a.adapterRegistry == nil {
+		return "", ""
 	}
-	return nil
+	cliPath, err := a.adapterRegistry.ResolveExecutable(adapterID)
+	if err != nil || strings.TrimSpace(cliPath) == "" {
+		return "", ""
+	}
+	return scanCLIExecutableVersion(cliPath), cliPath
 }
 
 func (a *App) scanGeminiCLIModelOptions(adapterID string) []string {
@@ -159,6 +202,7 @@ func geminiCLIBundleRoots(cliPath string) []string {
 }
 
 var geminiModelDefinitionRE = regexp.MustCompile(`"((?:auto-)?gemini-[0-9][A-Za-z0-9._-]*)"\s*:\s*\{(?s:[^{}]|\{[^{}]*\})*?isVisible:\s*true`)
+var cliVersionRE = regexp.MustCompile(`\b(?:v)?(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9._-]+)?)\b`)
 
 func parseGeminiModelDefinitions(raw string) []string {
 	matches := geminiModelDefinitionRE.FindAllStringSubmatch(raw, -1)
@@ -206,6 +250,139 @@ func geminiModelRank(model string) string {
 		tier = "9"
 	}
 	return tier + "|" + m
+}
+
+func copyStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, len(values))
+	copy(out, values)
+	return out
+}
+
+func cliSourceNote(cliPath, note string) string {
+	note = strings.TrimSpace(note)
+	if strings.TrimSpace(cliPath) == "" {
+		return note
+	}
+	if note == "" {
+		return filepath.Base(cliPath)
+	}
+	return note + " (" + filepath.Base(cliPath) + ")"
+}
+
+func scanCLIExecutableVersion(cliPath string) string {
+	cliPath = strings.TrimSpace(cliPath)
+	if cliPath == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, cliPath, "--version")
+	cmd.Dir = codexProbeWorkdir()
+	output, err := cmd.CombinedOutput()
+	if len(output) == 0 && err != nil {
+		return ""
+	}
+	return parseCLIExecutableVersion(output)
+}
+
+func parseCLIExecutableVersion(output []byte) string {
+	match := cliVersionRE.FindSubmatch(output)
+	if len(match) >= 2 {
+		return string(match[1])
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func scanCodexCLIModelOptionsFromExecutable(cliPath string, candidates []string) ([]string, []string, bool) {
+	cliPath = strings.TrimSpace(cliPath)
+	if cliPath == "" || len(candidates) == 0 {
+		return nil, nil, false
+	}
+	supported := make([]string, 0, len(candidates))
+	hidden := []string{}
+	probed := false
+	for _, candidate := range candidates {
+		status, ok := probeCodexCLIModelSupport(cliPath, candidate)
+		if !ok {
+			continue
+		}
+		probed = true
+		if status == codexModelUnsupported {
+			hidden = append(hidden, candidate)
+			continue
+		}
+		supported = append(supported, candidate)
+	}
+	return supported, hidden, probed
+}
+
+type codexModelSupport int
+
+const (
+	codexModelUnknown codexModelSupport = iota
+	codexModelSupported
+	codexModelUnsupported
+)
+
+func probeCodexCLIModelSupport(cliPath, model string) (codexModelSupport, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 900*time.Millisecond)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, cliPath, "exec", "--skip-git-repo-check", "--model", model, "probe")
+	cmd.Dir = codexProbeWorkdir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	raw := strings.TrimSpace(stdout.String() + "\n" + stderr.String())
+	if raw == "" && err == nil {
+		return codexModelUnknown, false
+	}
+	if raw == "" {
+		return codexModelUnknown, false
+	}
+	return classifyCodexCLIModelProbeOutput(raw, model), true
+}
+
+func classifyCodexCLIModelProbeOutput(raw, model string) codexModelSupport {
+	joined := strings.ToLower(strings.TrimSpace(raw))
+	modelLower := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case joined == "":
+		return codexModelUnknown
+	case strings.Contains(joined, "unknown model "+modelLower):
+		return codexModelUnsupported
+	case strings.Contains(joined, "the '"+modelLower+"' model is not supported"):
+		return codexModelUnsupported
+	case strings.Contains(joined, "model: "+modelLower):
+		return codexModelSupported
+	case strings.Contains(joined, "missing bearer or basic authentication"):
+		return codexModelSupported
+	case strings.Contains(joined, "401 unauthorized"):
+		return codexModelSupported
+	case strings.Contains(joined, "reconnecting"):
+		return codexModelSupported
+	default:
+		return codexModelUnknown
+	}
+}
+
+func codexProbeWorkdir() string {
+	if runtime.GOOS == "windows" {
+		root := os.Getenv("SystemRoot")
+		if root == "" {
+			root = `C:\Windows`
+		}
+		dir := filepath.Join(root, "Temp", "haler-ai-codex-probe")
+		_ = os.MkdirAll(dir, 0o700)
+		return dir
+	}
+	dir := filepath.Join(os.TempDir(), "haler-ai-codex-probe")
+	_ = os.MkdirAll(dir, 0o700)
+	return dir
 }
 
 func normalizeAdapterModelChoice(adapterID, model string) string {

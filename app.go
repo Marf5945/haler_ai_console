@@ -2017,6 +2017,7 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 		})
 		return nil, err
 	}
+	resp = a.maybeRepairAdapterModelChoice(opts, resp, traceID)
 	if resp.Action == "提問" {
 		// 內建「提問」只更新回問狀態，不直接執行工具。
 		resp.Text = setQuestionFloatingCandidates(questionPayload(resp.Target, resp.Next), traceID)
@@ -2104,6 +2105,86 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 	log.Printf("SendCLIMessage: success, response_len=%d", len(resp.Text))
 
 	return &resp, nil
+}
+
+func (a *App) maybeRepairAdapterModelChoice(opts skill_step.CLIMessageOptions, resp skill_step.CLIResponse, traceID string) skill_step.CLIResponse {
+	currentModel := strings.TrimSpace(opts.Model)
+	if a == nil || a.settingsService == nil || a.cliAdapter == nil {
+		return resp
+	}
+	if currentModel == "" || resp.Error == "" {
+		return resp
+	}
+	if !shouldRepairAdapterModelChoice(opts.AdapterID, currentModel, resp.Error) {
+		return resp
+	}
+
+	a.settingsService.SaveAdapterModelChoice(opts.AdapterID, "")
+	fallbackModel := ""
+	if catalog := a.describeAdapterModelCatalog(opts.AdapterID); len(catalog.Options) > 0 {
+		fallbackModel = catalog.Options[0]
+	}
+	if a.eventBus != nil {
+		a.eventBus.Emit(eventbus.EventAdapterModelChoiceCleared, map[string]string{
+			"adapter_id":      opts.AdapterID,
+			"cleared_model":   currentModel,
+			"fallback_model":  fallbackModel,
+			"reason":          resp.Error,
+			"repaired_by":     "backend_retry",
+			"selection_state": "cleared",
+		})
+		a.eventBus.Emit(eventbus.EventAdapterListChanged, map[string]string{
+			"adapter_id": opts.AdapterID,
+			"reason":     "model_choice_cleared",
+		})
+	}
+	debugtrace.Record("go.adapter_model_choice.cleared", traceID, map[string]interface{}{
+		"adapter_id":     opts.AdapterID,
+		"cleared_model":  currentModel,
+		"fallback_model": fallbackModel,
+		"reason":         resp.Error,
+	})
+
+	retryOpts := opts
+	retryOpts.Model = ""
+	retryResp, retryErr := a.cliAdapter.SendMessage(retryOpts)
+	if retryErr != nil {
+		debugtrace.Record("go.adapter_model_choice.retry_failed", traceID, map[string]interface{}{
+			"adapter_id":    opts.AdapterID,
+			"cleared_model": currentModel,
+			"error":         retryErr.Error(),
+		})
+		return resp
+	}
+	debugtrace.Record("go.adapter_model_choice.retry_result", traceID, map[string]interface{}{
+		"adapter_id":    opts.AdapterID,
+		"cleared_model": currentModel,
+		"error":         retryResp.Error,
+		"auth_required": retryResp.AuthRequired,
+	})
+	return retryResp
+}
+
+func shouldRepairAdapterModelChoice(adapterID, currentModel, publicErr string) bool {
+	adapterID = strings.ToLower(strings.TrimSpace(adapterID))
+	currentModel = strings.ToLower(strings.TrimSpace(currentModel))
+	publicErr = strings.ToLower(strings.TrimSpace(publicErr))
+	if adapterID == "" || currentModel == "" || publicErr == "" {
+		return false
+	}
+	if !strings.Contains(publicErr, currentModel) && !strings.Contains(publicErr, "不支援模型") && !strings.Contains(publicErr, "not supported") {
+		return false
+	}
+	switch adapterID {
+	case "codex-cli", "gemini-cli", "claude-cli":
+		return strings.Contains(publicErr, "不支援模型") ||
+			strings.Contains(publicErr, "not supported") ||
+			strings.Contains(publicErr, "找不到或目前帳號不支援") ||
+			strings.Contains(publicErr, "not available") ||
+			strings.Contains(publicErr, "unsupported")
+	default:
+		return false
+	}
 }
 
 // SendAPIMessage sends a composer message through an LLM API adapter.

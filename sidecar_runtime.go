@@ -310,6 +310,9 @@ function extractAuthURL(text) {
 
 function publicCLIErrorMessage(err, stdout, stderr) {
   const combined = [err && err.message ? err.message : String(err || ""), stdout || "", stderr || ""].join("\n");
+  if (/Not logged in|401 Unauthorized|Missing bearer or basic authentication in header|failed to connect to websocket: HTTP error: 401 Unauthorized/i.test(combined)) {
+    return "Codex CLI 尚未登入，或原本的登入已失效。請先在終端機重新執行 Codex CLI 登入，再回到 app 重試。";
+  }
   const unsupported = combined.match(/The '([^']+)' model is not supported[^\n"]*/i);
   if (unsupported) {
     if (/gemini/i.test(unsupported[1]) || /gemini/i.test(combined)) {
@@ -335,8 +338,19 @@ function publicCLIErrorMessage(err, stdout, stderr) {
     .map((line) => line.trim())
     .find((line) =>
       line &&
+      !/^[-]{4,}$/.test(line) &&
       !/^Reading additional input from stdin/i.test(line) &&
       !/^OpenAI Codex /i.test(line) &&
+      !/^workdir:/i.test(line) &&
+      !/^model:/i.test(line) &&
+      !/^provider:/i.test(line) &&
+      !/^approval:/i.test(line) &&
+      !/^sandbox:/i.test(line) &&
+      !/^reasoning effort:/i.test(line) &&
+      !/^reasoning summaries:/i.test(line) &&
+      !/^session id:/i.test(line) &&
+      !/^user$/i.test(line) &&
+      !/^ERROR:\s*Reconnecting/i.test(line) &&
       !/^Warning: 256-color support/i.test(line) &&
       !/^Ripgrep is not available/i.test(line)
     );

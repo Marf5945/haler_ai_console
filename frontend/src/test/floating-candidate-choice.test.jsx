@@ -1,4 +1,5 @@
 import React from 'react';
+import {readFileSync} from 'node:fs';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react';
 import App from '../App.jsx';
@@ -126,6 +127,18 @@ function sendButton() {
   return button;
 }
 
+function shell() {
+  const node = document.querySelector('.console-shell');
+  expect(node).toBeInTheDocument();
+  return node;
+}
+
+async function submitSelectedText(expectedText, calls) {
+  fireEvent.click(sendButton());
+  await waitFor(() => expect(calls.ExecuteSkillMessage?.[0]?.[2]).toBe(expectedText));
+  expect(calls.DismissFloatingCandidates?.length || 0).toBeGreaterThan(0);
+}
+
 describe('floating candidate choice flow', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -158,6 +171,88 @@ describe('floating candidate choice flow', () => {
     fireEvent.click(send);
     await waitFor(() => expect(calls.ExecuteSkillMessage?.[0]?.[2]).toBe('local search\nweb search'));
     expect(calls.DismissFloatingCandidates?.length || 0).toBeGreaterThan(0);
+  });
+
+  it('runs the 8-round choice dialogue across default and switched themes', async () => {
+    const roundLog = [];
+
+    let view = await renderChoiceApp({candidates: searchCandidates, panelStyle: 'default'});
+    roundLog.push('1 default search choices appeared');
+    expect(screen.getByRole('button', {name: 'Local search'})).toBeInTheDocument();
+    expect(screen.getByRole('button', {name: 'Web search'})).toBeInTheDocument();
+    expect(screen.getByRole('button', {name: 'Git search'})).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', {name: 'Local search'}));
+    fireEvent.click(screen.getByRole('button', {name: 'Web search'}));
+    roundLog.push('2 default search multi-select highlighted and sent');
+    expect(screen.getByRole('button', {name: 'Local search'})).toHaveClass('is-selected');
+    expect(screen.getByRole('button', {name: 'Web search'})).toHaveClass('is-selected');
+    expect(sendButton()).toHaveClass('send-btn-ready');
+    await submitSelectedText('local search\nweb search', view.calls);
+    cleanup();
+
+    view = await renderChoiceApp({candidates: yesNoCandidates, panelStyle: 'default'});
+    fireEvent.click(screen.getByRole('button', {name: 'Yes'}));
+    fireEvent.click(screen.getByRole('button', {name: 'No'}));
+    roundLog.push('3 default yes/no stayed exclusive and sent no');
+    expect(screen.getByRole('button', {name: 'No'})).toHaveClass('is-selected');
+    expect(screen.getByRole('button', {name: 'Yes'})).not.toHaveClass('is-selected');
+    await submitSelectedText('no', view.calls);
+    cleanup();
+
+    view = await renderChoiceApp({candidates: confirmCancelCandidates, panelStyle: 'default'});
+    fireEvent.click(screen.getByRole('button', {name: 'Confirm'}));
+    fireEvent.click(screen.getByRole('button', {name: 'Cancel'}));
+    roundLog.push('4 default confirm/cancel stayed exclusive and sent cancel');
+    expect(screen.getByRole('button', {name: 'Cancel'})).toHaveClass('is-selected');
+    expect(screen.getByRole('button', {name: 'Confirm'})).not.toHaveClass('is-selected');
+    await submitSelectedText('cancel', view.calls);
+    cleanup();
+
+    view = await renderChoiceApp({candidates: searchCandidates, panelStyle: 'forgiveMeGreen'});
+    roundLog.push('5 switched theme to green and search choices appeared');
+    expect(shell()).toHaveAttribute('data-theme', 'green');
+    expect(screen.getByRole('button', {name: 'Local search'})).toBeInTheDocument();
+    expect(screen.getByRole('button', {name: 'Web search'})).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', {name: 'Local search'}));
+    fireEvent.click(screen.getByRole('button', {name: 'Web search'}));
+    roundLog.push('6 green search multi-select highlighted and sent');
+    expect(screen.getByRole('button', {name: 'Local search'})).toHaveClass('is-selected');
+    expect(screen.getByRole('button', {name: 'Web search'})).toHaveClass('is-selected');
+    expect(sendButton()).toHaveClass('send-btn-ready');
+    await submitSelectedText('local search\nweb search', view.calls);
+    cleanup();
+
+    view = await renderChoiceApp({candidates: yesNoCandidates, panelStyle: 'forgiveMeGreen'});
+    fireEvent.click(screen.getByRole('button', {name: 'No'}));
+    fireEvent.click(screen.getByRole('button', {name: 'Yes'}));
+    roundLog.push('7 green yes/no stayed exclusive and sent yes');
+    expect(shell()).toHaveAttribute('data-theme', 'green');
+    expect(screen.getByRole('button', {name: 'Yes'})).toHaveClass('is-selected');
+    expect(screen.getByRole('button', {name: 'No'})).not.toHaveClass('is-selected');
+    await submitSelectedText('yes', view.calls);
+    cleanup();
+
+    view = await renderChoiceApp({candidates: confirmCancelCandidates, panelStyle: 'forgiveMeGreen'});
+    fireEvent.click(screen.getByRole('button', {name: 'Cancel'}));
+    fireEvent.click(screen.getByRole('button', {name: 'Confirm'}));
+    roundLog.push('8 green confirm/cancel stayed exclusive and sent confirm');
+    expect(shell()).toHaveAttribute('data-theme', 'green');
+    expect(screen.getByRole('button', {name: 'Confirm'})).toHaveClass('is-selected');
+    expect(screen.getByRole('button', {name: 'Cancel'})).not.toHaveClass('is-selected');
+    await submitSelectedText('confirm', view.calls);
+
+    expect(roundLog).toEqual([
+      '1 default search choices appeared',
+      '2 default search multi-select highlighted and sent',
+      '3 default yes/no stayed exclusive and sent no',
+      '4 default confirm/cancel stayed exclusive and sent cancel',
+      '5 switched theme to green and search choices appeared',
+      '6 green search multi-select highlighted and sent',
+      '7 green yes/no stayed exclusive and sent yes',
+      '8 green confirm/cancel stayed exclusive and sent confirm',
+    ]);
   });
 
   it('keeps yes/no choices mutually exclusive', async () => {
@@ -200,5 +295,26 @@ describe('floating candidate choice flow', () => {
 
     fireEvent.click(send);
     await waitFor(() => expect(calls.ExecuteSkillMessage?.[0]?.[2]).toBe('local search\nweb search'));
+  });
+
+  it('keeps selected and send-ready visual affordances in CSS', () => {
+    const css = readFileSync('src/style.css', 'utf8');
+
+    expect(css).toContain('.console-shell[data-theme] .floating-candidate-btn.is-selected');
+    expect(css).toContain('--floating-candidate-selected-bg: #fff0a6');
+    expect(css).toContain('--floating-candidate-selected-bg: #ffd0e8');
+    expect(css).toContain('--floating-candidate-selected-bg: #eaffd2');
+    expect(css).toContain('--floating-candidate-selected-bg: #e8f3ff');
+    expect(css).toContain('animation: sendReadyRing 1.05s ease-in-out infinite');
+    expect(css).toContain('@keyframes sendReadyRing');
+  });
+
+  it('bursts readiness polling after composer submit so late candidates surface quickly', () => {
+    const app = readFileSync('src/App.jsx', 'utf8');
+
+    expect(app).toContain('function scheduleReadinessGateBurstRefresh');
+    expect(app).toContain('durationMs = 12000');
+    expect(app).toContain('intervalMs = 700');
+    expect(app).toContain('scheduleReadinessGateBurstRefresh();');
   });
 });

@@ -21,6 +21,7 @@
     --leading-snug: 1.375;
     --leading-normal: 1.5;
     --leading-relaxed: 1.625;
+    --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
     --default-transition-duration: 150ms;
     --default-transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
     --default-font-family: var(--font-sans);
@@ -266,6 +267,10 @@
     transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, content-visibility, overlay, pointer-events;
     transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
     transition-duration: var(--tw-duration, var(--default-transition-duration));
+  }
+  .ease-in-out {
+    --tw-ease: var(--ease-in-out);
+    transition-timing-function: var(--ease-in-out);
   }
 }
 @layer base {
@@ -3977,10 +3982,29 @@
     font-weight: var(--font-weight-black);
     color: var(--color-white);
     background: linear-gradient(180deg, #f00686, #c50067);
+    outline: 2px solid transparent;
+    outline-offset: 2px;
   }
   .send-btn-ready {
-    box-shadow: 0 0 0 2px rgba(255,255,255,.22), 0 0 18px rgba(240,6,134,.55);
+    animation: sendReadyRing 1.05s ease-in-out infinite;
+    box-shadow: 0 0 0 2px rgba(255,255,255,.2), 0 0 12px rgba(240,6,134,.42);
     filter: saturate(1.16) brightness(1.08);
+  }
+  @keyframes sendReadyRing {
+    0%, 100% {
+      outline-color: rgba(255,255,255,.26);
+      box-shadow: 0 0 0 2px rgba(255,255,255,.18), 0 0 10px rgba(240,6,134,.36);
+    }
+    50% {
+      outline-color: rgba(255,238,91,.92);
+      box-shadow: 0 0 0 4px rgba(255,238,91,.34), 0 0 24px rgba(240,6,134,.72);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .send-btn-ready {
+      animation: none;
+      outline-color: rgba(255,238,91,.82);
+    }
   }
   .send-btn span {
     margin-right: calc(var(--spacing) * 1);
@@ -7270,6 +7294,11 @@
   color: var(--floating-candidate-selected-fg, #15120c);
   box-shadow: 0 0 0 2px rgba(255,255,255,0.16), 0 10px 22px rgba(0,0,0,0.24);
 }
+.console-shell[data-theme] .floating-candidate-btn.is-selected {
+  background: var(--floating-candidate-selected-bg, #fff8ef);
+  border-color: var(--floating-candidate-selected-border, rgba(255,248,239,0.9));
+  color: var(--floating-candidate-selected-fg, #15120c);
+}
 .missing-slot-capsule {
   display: inline-flex;
   align-items: center;
@@ -7536,9 +7565,9 @@
   background: rgba(240,240,238,0.9);
   border-color: rgba(0,0,0,0.12);
   --floating-candidate-fg: #333;
-  --floating-candidate-selected-bg: #202020;
-  --floating-candidate-selected-border: rgba(0,0,0,0.35);
-  --floating-candidate-selected-fg: #fff8ef;
+  --floating-candidate-selected-bg: #fff0a6;
+  --floating-candidate-selected-border: rgba(150,112,0,0.72);
+  --floating-candidate-selected-fg: #231700;
 }
 .console-shell[data-theme="white"] .floating-candidate-btn:hover {
   background: rgba(225,225,222,0.95);
@@ -7568,7 +7597,7 @@
 .console-shell[data-theme="pink-black"] .floating-candidate-btn {
   border-color: rgba(242,58,154,0.25);
   --floating-candidate-fg: #ffe8f5;
-  --floating-candidate-selected-bg: #f23a9a;
+  --floating-candidate-selected-bg: #ffd0e8;
   --floating-candidate-selected-border: rgba(255,185,224,0.85);
   --floating-candidate-selected-fg: #16040d;
 }
@@ -7586,7 +7615,7 @@
   background: rgba(20,40,25,0.85);
   border-color: rgba(80,160,90,0.2);
   --floating-candidate-fg: #f2ffe8;
-  --floating-candidate-selected-bg: #d8ffba;
+  --floating-candidate-selected-bg: #eaffd2;
   --floating-candidate-selected-border: rgba(216,255,186,0.9);
   --floating-candidate-selected-fg: #14330f;
 }
@@ -7606,7 +7635,7 @@
   background: rgba(15,25,50,0.85);
   border-color: rgba(100,160,255,0.2);
   --floating-candidate-fg: #eaf2ff;
-  --floating-candidate-selected-bg: #d7e7ff;
+  --floating-candidate-selected-bg: #e8f3ff;
   --floating-candidate-selected-border: rgba(164,198,255,0.85);
   --floating-candidate-selected-fg: #101b34;
 }
@@ -10952,6 +10981,10 @@
   syntax: "*";
   inherits: false;
 }
+@property --tw-ease {
+  syntax: "*";
+  inherits: false;
+}
 @property --tw-shadow {
   syntax: "*";
   inherits: false;
@@ -11067,6 +11100,7 @@
       --tw-drop-shadow-color: initial;
       --tw-drop-shadow-alpha: 100%;
       --tw-drop-shadow-size: initial;
+      --tw-ease: initial;
       --tw-shadow: 0 0 #0000;
       --tw-shadow-color: initial;
       --tw-shadow-alpha: 100%;

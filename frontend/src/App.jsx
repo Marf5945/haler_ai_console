@@ -1655,7 +1655,15 @@ function App() {
     .join('|');
   const longPressTimerRef = useRef(null);
   const longPressStartRef = useRef(null);
+  const readinessBurstTimerRef = useRef(null);
   const manualGreetingLockedRef = useRef(false);
+
+  useEffect(() => () => {
+    if (readinessBurstTimerRef.current) {
+      window.clearInterval(readinessBurstTimerRef.current);
+      readinessBurstTimerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     const liveIDs = new Set((readinessGate.floating_candidates || []).map((candidate) => candidate?.id));
@@ -4557,6 +4565,7 @@ function App() {
     // v3.6.4: 使用者送出新訊息 → 清除 Floating Candidate Actions
     callWails(DismissFloatingCandidates).catch(() => {});
     setReadinessGate((prev) => ({...prev, floating_candidates: []}));
+    scheduleReadinessGateBurstRefresh();
     // 重置高風險確認流程狀態
     setRiskImpactExpanded(false);
     setGachaPhase(null);
@@ -4575,9 +4584,30 @@ function App() {
   // handleHighRiskYes          — 高風險：點 [是] 展開影響說明面板
 
   async function refreshReadinessGateState() {
-    callWails(GetReadinessGateState)
-      .then((state) => { if (state) setReadinessGate(state); })
-      .catch(() => {});
+    try {
+      const state = await callWails(GetReadinessGateState);
+      if (state) setReadinessGate(state);
+      return state;
+    } catch {
+      return null;
+    }
+  }
+
+  function scheduleReadinessGateBurstRefresh({durationMs = 12000, intervalMs = 700} = {}) {
+    if (readinessBurstTimerRef.current) {
+      window.clearInterval(readinessBurstTimerRef.current);
+      readinessBurstTimerRef.current = null;
+    }
+    const startedAt = Date.now();
+    const tick = async () => {
+      const state = await refreshReadinessGateState();
+      if ((state?.floating_candidates || []).length > 0 || Date.now() - startedAt >= durationMs) {
+        window.clearInterval(readinessBurstTimerRef.current);
+        readinessBurstTimerRef.current = null;
+      }
+    };
+    readinessBurstTimerRef.current = window.setInterval(tick, intervalMs);
+    tick();
   }
 
   async function handleSelectCandidate(candidateID) {

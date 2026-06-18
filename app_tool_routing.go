@@ -227,6 +227,10 @@ func buildToolRoutingDecisionPrompt(systemPrompt string, userText string, lookup
 		"操作：明確重現/回放/照做/執行已保存操作且 saved_operations 明確→操作；只有 recent_operations 不算明確。",
 		"判斷=製作獨立程式(產出 .go 等程式檔)→程式; 使用既有/已安裝 skill，或要既有 skill 處理資料/表格/CSV/XLSX/JSON並輸出→流程（流程的 target 必須是 available_skills 區塊裡的 SkillID，不可自創名稱）; 找操作候選→查詢; 找本機資料/文件/skill/記憶/對話/trace/專案→搜尋; 無法判斷本機或網路且缺必要資訊→提問; 明顯聊天→閒聊",
 	}, " ")
+	routingRules += fmt.Sprintf(" 搜尋意圖必須三選一：網路%s<query>%s%s、搜尋%s<query>%s文件、提問%s%s%s%s；不確定就提問，不要自然語言回答。",
+		actionchain.Separator, actionchain.Separator, actionchain.StandbyNext,
+		actionchain.Separator, actionchain.Separator,
+		actionchain.Separator, buildSearchIntentQuestion(), actionchain.Separator, actionchain.StandbyNext)
 	parts := []string{strings.TrimSpace(lookupContext), "rules=" + routingRules}
 	if h := formatCompactRoutingHistory(recent, userText, 3); h != "" {
 		parts = append(parts, h)
@@ -265,6 +269,15 @@ func parseToolRoutingDecision(text string) toolRoutingDecision {
 }
 
 func normalizeToolRoutingDecision(decision toolRoutingDecision, userText string, lookup toolRoutingLookupContext) toolRoutingDecision {
+	if isVagueSearchIntent(userText) && decision.Kind != toolRoutingDecisionAction {
+		return toolRoutingDecision{
+			Kind:   toolRoutingDecisionAction,
+			Action: "提問",
+			Target: buildSearchIntentQuestion(),
+			Next:   actionchain.StandbyNext,
+			Raw:    decision.Raw,
+		}
+	}
 	if isLoadedReferenceVisibilityQuestion(userText) && len(lookup.RecentReferences) > 0 {
 		decision.Kind = toolRoutingDecisionAction
 		decision.Action = "搜尋"
@@ -312,16 +325,18 @@ func normalizeToolRoutingDecision(decision toolRoutingDecision, userText string,
 }
 
 func shouldRepairToolRoutingDecision(userText string, decision toolRoutingDecision) bool {
-	if _, ok := inferGoProgramAuthoringRequest(userText); !ok {
-		return false
+	if _, ok := inferGoProgramAuthoringRequest(userText); ok {
+		if decision.Kind == toolRoutingDecisionAction && strings.TrimSpace(decision.Action) == "程式" {
+			return false
+		}
+		if decision.Kind == toolRoutingDecisionChat {
+			return true
+		}
+		if decision.Kind == toolRoutingDecisionNeedTool {
+			return true
+		}
 	}
-	if decision.Kind == toolRoutingDecisionAction && strings.TrimSpace(decision.Action) == "程式" {
-		return false
-	}
-	if decision.Kind == toolRoutingDecisionChat {
-		return true
-	}
-	if decision.Kind == toolRoutingDecisionNeedTool {
+	if shouldRepairSearchRouting(userText, decision) {
 		return true
 	}
 	return false
@@ -329,6 +344,9 @@ func shouldRepairToolRoutingDecision(userText string, decision toolRoutingDecisi
 
 func buildToolRoutingRepairPrompt(basePrompt, previousOutput, userText string) string {
 	programName, _ := inferGoProgramAuthoringRequest(userText)
+	if programName == "" && isSearchIntentForRouting(userText) {
+		return buildSearchRoutingRepairPrompt(basePrompt, previousOutput, userText)
+	}
 	if programName == "" {
 		programName = "資料處理程式"
 	}
@@ -346,7 +364,65 @@ func buildToolRoutingRepairPrompt(basePrompt, previousOutput, userText string) s
 	return b.String()
 }
 
-func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sessionID, traceID string, userTextOpt ...string) (bool, skill_step.CLIResponse) {
+func shouldRepairSearchRouting(userText string, decision toolRoutingDecision) bool {
+	if !isSearchIntentForRouting(userText) {
+		return false
+	}
+	if decision.Kind == toolRoutingDecisionAction {
+		return !isSearchRoutingAction(decision.Action)
+	}
+	return decision.Kind == toolRoutingDecisionChat || decision.Kind == toolRoutingDecisionNeedTool
+}
+
+func isSearchRoutingAction(action string) bool {
+	switch strings.TrimSpace(action) {
+	case "提問", "搜尋", "查詢", "網路", "search", "find", "query":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSearchIntentForRouting(userText string) bool {
+	text := strings.TrimSpace(userText)
+	if text == "" {
+		return false
+	}
+	if isVagueSearchIntent(text) || shouldRouteUserTextToWebSearch(text) {
+		return true
+	}
+	lower := strings.ToLower(text)
+	if containsAny(lower, []string{"search", "find", "look up", "lookup", "web", "internet"}) {
+		return true
+	}
+	return containsAny(text, []string{"查", "找", "搜尋", "查詢", "網路", "上網"})
+}
+
+func buildSearchRoutingRepairPrompt(basePrompt, previousOutput, userText string) string {
+	var b strings.Builder
+	b.WriteString(basePrompt)
+	b.WriteString("\n\n[搜尋路由修正]\n")
+	b.WriteString("只能輸出一行 action-chain：網路")
+	b.WriteString(actionchain.Separator)
+	b.WriteString("<query>")
+	b.WriteString(actionchain.Separator)
+	b.WriteString(actionchain.StandbyNext)
+	b.WriteString(" | 搜尋")
+	b.WriteString(actionchain.Separator)
+	b.WriteString("<query>")
+	b.WriteString(actionchain.Separator)
+	b.WriteString("文件 | 提問")
+	b.WriteString(actionchain.Separator)
+	b.WriteString(buildSearchIntentQuestion())
+	b.WriteString(actionchain.Separator)
+	b.WriteString(actionchain.StandbyNext)
+	b.WriteString("。搜尋意圖不可自然語言回答。上一輪：")
+	b.WriteString(previousOutput)
+	b.WriteString("\n[/搜尋路由修正]")
+	return b.String()
+}
+
+func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sessionID, traceID string, rerouteJudge searchRerouteJudge, userTextOpt ...string) (bool, skill_step.CLIResponse) {
 	userText := strings.TrimSpace(decision.Raw)
 	if len(userTextOpt) > 0 && strings.TrimSpace(userTextOpt[0]) != "" {
 		userText = strings.TrimSpace(userTextOpt[0])
@@ -415,10 +491,16 @@ func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sess
 			return true, webResp
 		}
 		if req, ok := localsearch.RequestFromAction(decision.Action, decision.Target); ok {
-			localResp := a.executeLocalSearch(req, sessionID, traceID)
-			localResp.Action = decision.Action
-			localResp.Target = decision.Target
-			localResp.Next = decision.Next
+			localResp := a.executeLocalSearchWithWebReroute(req, sessionID, traceID, userText, rerouteJudge)
+			if strings.TrimSpace(localResp.Action) == "" {
+				localResp.Action = decision.Action
+			}
+			if strings.TrimSpace(localResp.Target) == "" {
+				localResp.Target = decision.Target
+			}
+			if strings.TrimSpace(localResp.Next) == "" {
+				localResp.Next = decision.Next
+			}
 			return true, localResp
 		}
 		// 展開：撈回 deep_memory 細節（v3.1.7）。

@@ -122,6 +122,9 @@ func (a *App) maybeHandleWebSearch(userText, sessionID, traceID string) (*skill_
 	if resp, handled := a.maybeResumePendingSearchEgress(userText, sessionID, traceID); handled {
 		return resp, true
 	}
+	if resp, handled := a.maybeHandleSearchIntentClarification(userText, sessionID, traceID); handled {
+		return resp, true
+	}
 	req, ok := websearch.ParseUserQuery(userText)
 	if !ok {
 		return nil, false

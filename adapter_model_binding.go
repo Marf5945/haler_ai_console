@@ -3,14 +3,17 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
+
+	"ui_console/shared/executil"
 )
 
 var adapterModelPresets = map[string][]string{
@@ -23,7 +26,18 @@ var adapterModelPresets = map[string][]string{
 		"gemini-3.1-pro-preview",
 	},
 	"claude-cli": {"sonnet", "opus", "haiku"},
-	"codex-cli":  {"gpt-5.5", "o4", "o4-mini"},
+	"codex-cli":  {"gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2"},
+}
+
+var codexLegacyModelAliases = []string{
+	"gpt-5.3-codex-spark",
+}
+
+var codexDebugModelCache = struct {
+	sync.Mutex
+	entries map[string]codexCLIModelScanResult
+}{
+	entries: map[string]codexCLIModelScanResult{},
 }
 
 type adapterModelCatalog struct {
@@ -93,6 +107,22 @@ func (a *App) describeAdapterModelCatalog(adapterID string) adapterModelCatalog 
 		}
 	case id == "codex-cli":
 		version, cliPath := a.adapterCLIExecutableVersion(id)
+		if options, hidden, ok := scanCodexCLIModelOptionsFromDebugCommand(cliPath, version); ok && len(options) > 0 {
+			if aliases, aliasHidden, aliasOK := scanCodexCLIAdditionalModelAliases(cliPath, options); aliasOK && len(aliases) > 0 {
+				options = appendUniqueStrings(options, aliases...)
+				hidden = appendUniqueStrings(hidden, aliasHidden...)
+			}
+			note := "Read from `codex debug models` of the installed Codex CLI."
+			if len(hidden) > 0 {
+				note = "Read from `codex debug models` of the installed Codex CLI. Hidden internal models: " + strings.Join(hidden, ", ")
+			}
+			return adapterModelCatalog{
+				Options:    options,
+				Source:     "debug-models",
+				CLIVersion: version,
+				Note:       cliSourceNote(cliPath, note),
+			}
+		}
 		if options, hidden, ok := scanCodexCLIModelOptionsFromExecutable(cliPath, adapterModelPresets[id]); ok && len(options) > 0 {
 			note := "Filtered against the installed Codex CLI."
 			if len(hidden) > 0 {
@@ -261,6 +291,31 @@ func copyStringSlice(values []string) []string {
 	return out
 }
 
+func appendUniqueStrings(base []string, values ...string) []string {
+	if len(values) == 0 {
+		return base
+	}
+	seen := make(map[string]bool, len(base)+len(values))
+	out := make([]string, 0, len(base)+len(values))
+	for _, value := range base {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" || seen[trimmed] {
+			continue
+		}
+		seen[trimmed] = true
+		out = append(out, trimmed)
+	}
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" || seen[trimmed] {
+			continue
+		}
+		seen[trimmed] = true
+		out = append(out, trimmed)
+	}
+	return out
+}
+
 func cliSourceNote(cliPath, note string) string {
 	note = strings.TrimSpace(note)
 	if strings.TrimSpace(cliPath) == "" {
@@ -279,7 +334,7 @@ func scanCLIExecutableVersion(cliPath string) string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, cliPath, "--version")
+	cmd := executil.CommandContext(ctx, cliPath, "--version")
 	cmd.Dir = codexProbeWorkdir()
 	output, err := cmd.CombinedOutput()
 	if len(output) == 0 && err != nil {
@@ -294,6 +349,147 @@ func parseCLIExecutableVersion(output []byte) string {
 		return string(match[1])
 	}
 	return strings.TrimSpace(string(output))
+}
+
+type codexCLIModelScanResult struct {
+	Options []string
+	Hidden  []string
+}
+
+type codexDebugModelsResponse struct {
+	Models []codexDebugModelInfo `json:"models"`
+}
+
+type codexDebugModelInfo struct {
+	Slug       string `json:"slug"`
+	Visibility string `json:"visibility"`
+	Priority   int    `json:"priority"`
+}
+
+func scanCodexCLIModelOptionsFromDebugCommand(cliPath, cliVersion string) ([]string, []string, bool) {
+	cliPath = strings.TrimSpace(cliPath)
+	if cliPath == "" {
+		return nil, nil, false
+	}
+	cacheKey := codexDebugModelCacheKey(cliPath, cliVersion)
+	if cached, ok := loadCodexDebugModelCache(cacheKey); ok {
+		return cached.Options, cached.Hidden, true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	cmd := executil.CommandContext(ctx, cliPath, "debug", "models")
+	cmd.Dir = codexProbeWorkdir()
+	output, err := cmd.CombinedOutput()
+	if len(output) == 0 || err != nil {
+		return nil, nil, false
+	}
+	options, hidden, ok := parseCodexDebugModelsOutput(output)
+	if !ok || len(options) == 0 {
+		return nil, nil, false
+	}
+	storeCodexDebugModelCache(cacheKey, codexCLIModelScanResult{Options: options, Hidden: hidden})
+	return options, hidden, true
+}
+
+func loadCodexDebugModelCache(key string) (codexCLIModelScanResult, bool) {
+	codexDebugModelCache.Lock()
+	defer codexDebugModelCache.Unlock()
+	entry, ok := codexDebugModelCache.entries[key]
+	if !ok {
+		return codexCLIModelScanResult{}, false
+	}
+	return codexCLIModelScanResult{
+		Options: copyStringSlice(entry.Options),
+		Hidden:  copyStringSlice(entry.Hidden),
+	}, true
+}
+
+func storeCodexDebugModelCache(key string, entry codexCLIModelScanResult) {
+	codexDebugModelCache.Lock()
+	defer codexDebugModelCache.Unlock()
+	codexDebugModelCache.entries[key] = codexCLIModelScanResult{
+		Options: copyStringSlice(entry.Options),
+		Hidden:  copyStringSlice(entry.Hidden),
+	}
+}
+
+func codexDebugModelCacheKey(cliPath, cliVersion string) string {
+	if cliVersion == "" {
+		return cliPath
+	}
+	return cliPath + "|" + cliVersion
+}
+
+func parseCodexDebugModelsOutput(raw []byte) ([]string, []string, bool) {
+	payload := bytes.TrimSpace(raw)
+	start := bytes.IndexByte(payload, '{')
+	end := bytes.LastIndexByte(payload, '}')
+	if start < 0 || end <= start {
+		return nil, nil, false
+	}
+	payload = payload[start : end+1]
+	var decoded codexDebugModelsResponse
+	if err := json.Unmarshal(payload, &decoded); err != nil || len(decoded.Models) == 0 {
+		return nil, nil, false
+	}
+	models := make([]codexDebugModelInfo, len(decoded.Models))
+	copy(models, decoded.Models)
+	sort.SliceStable(models, func(i, j int) bool {
+		if models[i].Priority == models[j].Priority {
+			return strings.ToLower(models[i].Slug) < strings.ToLower(models[j].Slug)
+		}
+		return models[i].Priority < models[j].Priority
+	})
+	options := []string{}
+	hidden := []string{}
+	seenOptions := map[string]bool{}
+	seenHidden := map[string]bool{}
+	for _, model := range models {
+		slug := strings.TrimSpace(model.Slug)
+		switch strings.ToLower(strings.TrimSpace(model.Visibility)) {
+		case "list":
+			if slug == "" || seenOptions[slug] {
+				continue
+			}
+			seenOptions[slug] = true
+			options = append(options, slug)
+		case "hide":
+			if slug == "" || seenHidden[slug] {
+				continue
+			}
+			seenHidden[slug] = true
+			hidden = append(hidden, slug)
+		}
+	}
+	if len(options) == 0 {
+		return nil, nil, false
+	}
+	return options, hidden, true
+}
+
+func scanCodexCLIAdditionalModelAliases(cliPath string, listed []string) ([]string, []string, bool) {
+	if strings.TrimSpace(cliPath) == "" || len(codexLegacyModelAliases) == 0 {
+		return nil, nil, false
+	}
+	seen := map[string]bool{}
+	for _, model := range listed {
+		model = strings.TrimSpace(model)
+		if model != "" {
+			seen[model] = true
+		}
+	}
+	candidates := []string{}
+	for _, model := range codexLegacyModelAliases {
+		model = strings.TrimSpace(model)
+		if model == "" || seen[model] {
+			continue
+		}
+		candidates = append(candidates, model)
+	}
+	if len(candidates) == 0 {
+		return nil, nil, false
+	}
+	return scanCodexCLIModelOptionsFromExecutable(cliPath, candidates)
 }
 
 func scanCodexCLIModelOptionsFromExecutable(cliPath string, candidates []string) ([]string, []string, bool) {
@@ -330,7 +526,7 @@ const (
 func probeCodexCLIModelSupport(cliPath, model string) (codexModelSupport, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 900*time.Millisecond)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, cliPath, "exec", "--skip-git-repo-check", "--model", model, "probe")
+	cmd := executil.CommandContext(ctx, cliPath, "exec", "--skip-git-repo-check", "--model", model, "probe")
 	cmd.Dir = codexProbeWorkdir()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

@@ -78,7 +78,7 @@ func (a *App) routeAfterRoutingQuotaHit(adapterID, sessionID, userText, traceID 
 			"target":     fb.Target,
 			"local_hits": len(lk.LocalMatches),
 		})
-		if handled, resp := a.responseFromToolRoutingDecision(fb, sessionID, traceID, userText); handled {
+		if handled, resp := a.responseFromToolRoutingDecision(fb, sessionID, traceID, nil, userText); handled {
 			return &resp, true
 		}
 	}

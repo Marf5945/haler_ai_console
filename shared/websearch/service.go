@@ -437,11 +437,14 @@ func ParseUserQuery(text string) (SearchRequest, bool) {
 		}
 	}
 	for _, prefix := range []string{
-		"\u7db2\u8def",
 		"\u7db2\u8def\u641c\u5c0b",
+		"\u7db2\u8def\u67e5\u8a62",
 		"\u641c\u5c0b\u7db2\u8def",
+		"\u67e5\u8a62\u7db2\u8def",
 		"\u67e5\u7db2\u8def",
 		"\u4e0a\u7db2\u67e5",
+		"\u4e0a\u7db2\u67e5\u8a62",
+		"\u7db2\u8def",
 	} {
 		if target, ok := cutCommand(trimmed, prefix); ok {
 			return SearchRequest{Query: target, Limit: DefaultLimit}, true
@@ -462,9 +465,12 @@ func IsSearchAction(action string) bool {
 	case "web_search", "search_web", "web search", "search web",
 		"\u7db2\u8def",
 		"\u7db2\u8def\u641c\u5c0b",
+		"\u7db2\u8def\u67e5\u8a62",
 		"\u641c\u5c0b\u7db2\u8def",
+		"\u67e5\u8a62\u7db2\u8def",
 		"\u67e5\u7db2\u8def",
-		"\u4e0a\u7db2\u67e5":
+		"\u4e0a\u7db2\u67e5",
+		"\u4e0a\u7db2\u67e5\u8a62":
 		return true
 	default:
 		return false
@@ -520,6 +526,12 @@ func normalizedLimit(limit int) int {
 func cutCommand(text, prefix string) (string, bool) {
 	if text == prefix {
 		return "", true
+	}
+	if utf8.RuneCountInString(prefix) > 2 && strings.HasPrefix(text, prefix) {
+		target := strings.TrimSpace(strings.TrimPrefix(text, prefix))
+		if target != "" {
+			return target, true
+		}
 	}
 	for _, sep := range []string{" ", "\uff1a", ":", "\uff0c", ",", "\u310c"} {
 		if strings.HasPrefix(text, prefix+sep) {

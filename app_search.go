@@ -21,6 +21,8 @@ import (
 	"ui_console/shared/websearch"
 )
 
+type searchRerouteJudge func(prompt string) (string, error)
+
 func (a *App) maybeHandleLocalSearch(userText, sessionID, traceID string) (*skill_step.CLIResponse, bool) {
 	if isLearningOperationCatalogText(userText) {
 		return nil, false
@@ -168,6 +170,161 @@ func (a *App) executeLocalSearch(req localsearch.SearchRequest, sessionID, trace
 		return skill_step.CLIResponse{Text: fmt.Sprintf("本機資料裡找不到「%s」。要改用網路搜尋嗎？", req.Query)}
 	}
 	return skill_step.CLIResponse{Text: localsearch.FormatSearchOutcome(req, outcome)}
+}
+
+func (a *App) executeLocalSearchWithWebReroute(req localsearch.SearchRequest, sessionID, traceID, userText string, judge searchRerouteJudge) skill_step.CLIResponse {
+	if judge == nil {
+		return a.executeLocalSearch(req, sessionID, traceID)
+	}
+	a.pushActionStatus("搜尋", req.Query)
+	defer a.clearActionStatus()
+	debugtrace.Record("local_search.enter", traceID, map[string]interface{}{
+		"query": req.Query,
+		"scope": req.Scope,
+		"limit": req.Limit,
+	})
+	baseCtx := a.ctx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(baseCtx, 2*time.Second)
+	defer cancel()
+
+	service := localsearch.NewService(a.localSearchRoots(), a.localSearchItems(traceID))
+	outcome, err := service.SearchWithContext(ctx, req)
+	if err != nil {
+		if errors.Is(err, localsearch.ErrEmptyQuery) {
+			return skill_step.CLIResponse{Text: localsearch.EmptyQueryMessage()}
+		}
+		debugtrace.Record("local_search.error", traceID, map[string]interface{}{"error": err.Error()})
+		return skill_step.CLIResponse{Error: err.Error()}
+	}
+	debugtrace.Record("local_search.results", traceID, map[string]interface{}{
+		"count":         len(outcome.Results),
+		"incomplete":    outcome.Incomplete,
+		"reason":        outcome.Reason,
+		"files_scanned": outcome.FilesScanned,
+		"bytes_scanned": outcome.BytesScanned,
+	})
+	if !shouldRejudgeLocalSearchToWeb(outcome) {
+		return a.localSearchResponseFromOutcome(req, sessionID, outcome)
+	}
+	judgeText, judgeErr := judge(buildLocalSearchWebReroutePrompt(userText, req, outcome))
+	debugtrace.Record("local_search.web_reroute_judge", traceID, map[string]interface{}{
+		"text":  judgeText,
+		"error": errorString(judgeErr),
+	})
+	if judgeErr == nil {
+		lookup := toolRoutingLookupContext{Query: req.Query, LocalMatches: outcome.Results}
+		decision := normalizeToolRoutingDecision(parseToolRoutingDecision(judgeText), userText, lookup)
+		decision = a.validateRoutingDecisionWithRepick(decision, lookup)
+		if webReq, ok := websearch.RequestFromAction(decision.Action, decision.Target); ok {
+			a.clearActionStatus()
+			webResp := a.executeWebSearch(webReq, traceID)
+			webResp.Action = decision.Action
+			webResp.Target = decision.Target
+			webResp.Next = decision.Next
+			return webResp
+		}
+		if strings.TrimSpace(decision.Action) == "提問" && strings.TrimSpace(decision.Target) != "" {
+			a.clearActionStatus()
+			return a.handleJudgeClarification(sessionID, userText, decision.Target, traceID)
+		}
+	}
+	return a.localSearchResponseFromOutcome(req, sessionID, outcome)
+}
+
+func (a *App) localSearchResponseFromOutcome(req localsearch.SearchRequest, sessionID string, outcome localsearch.SearchOutcome) skill_step.CLIResponse {
+	if len(outcome.Results) == 0 {
+		rememberLocalSearchWebFallback(sessionID, req)
+		return skill_step.CLIResponse{Text: fmt.Sprintf("本機資料沒有找到「%s」。你可以回覆「好」改用網路搜尋。", req.Query)}
+	}
+	return skill_step.CLIResponse{Text: localsearch.FormatSearchOutcome(req, outcome)}
+}
+
+func shouldRejudgeLocalSearchToWeb(outcome localsearch.SearchOutcome) bool {
+	if len(outcome.Results) == 0 {
+		return true
+	}
+	top := outcome.Results[0]
+	if top.Score < 45 {
+		return true
+	}
+	for _, result := range outcome.Results {
+		if result.Score >= 45 && result.Source != "trace" && result.Source != "tool" {
+			return false
+		}
+	}
+	return true
+}
+
+func buildLocalSearchWebReroutePrompt(userText string, req localsearch.SearchRequest, outcome localsearch.SearchOutcome) string {
+	var b strings.Builder
+	b.WriteString("判斷搜尋來源，只能輸出一行：網路")
+	b.WriteString(actionchain.Separator)
+	b.WriteString("<query>")
+	b.WriteString(actionchain.Separator)
+	b.WriteString(actionchain.StandbyNext)
+	b.WriteString(" | 搜尋")
+	b.WriteString(actionchain.Separator)
+	b.WriteString("<query>")
+	b.WriteString(actionchain.Separator)
+	b.WriteString("文件 | 提問")
+	b.WriteString(actionchain.Separator)
+	b.WriteString("<問題>#本機=搜尋 ")
+	b.WriteString(req.Query)
+	b.WriteString("#網路=網路搜尋 ")
+	b.WriteString(req.Query)
+	b.WriteString(actionchain.Separator)
+	b.WriteString(actionchain.StandbyNext)
+	b.WriteString("。本機像沒答案或雜訊就改網路；仍不確定才提問。Q=")
+	b.WriteString(compactPromptField(userText))
+	b.WriteString(" local_hits=")
+	b.WriteString(fmt.Sprintf("%d", len(outcome.Results)))
+	limit := 3
+	if len(outcome.Results) < limit {
+		limit = len(outcome.Results)
+	}
+	for i := 0; i < limit; i++ {
+		result := outcome.Results[i]
+		b.WriteString(fmt.Sprintf(" #%d title=%q score=%d source=%q", i+1, truncateRunesForPrompt(result.Title, 80), result.Score, result.Source))
+	}
+	return b.String()
+}
+
+func truncateRunesForPrompt(text string, limit int) string {
+	text = strings.TrimSpace(text)
+	if limit <= 0 {
+		return text
+	}
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return strings.TrimSpace(string(runes[:limit]))
+}
+
+func (a *App) maybeHandleSearchIntentClarification(userText, sessionID, traceID string) (*skill_step.CLIResponse, bool) {
+	if !isVagueSearchIntent(userText) {
+		return nil, false
+	}
+	question := buildSearchIntentQuestion()
+	if ok, reason := a.storeClarification(sessionID, "提問", question, userText, question); !ok {
+		debugtrace.Record("tool_readiness.clarification_exhausted", traceID, map[string]interface{}{
+			"reason":   reason,
+			"question": question,
+		})
+		a.clearClarification(sessionID)
+		resp := skill_step.CLIResponse{Text: clarificationExhaustedMessage(question)}
+		return &resp, true
+	}
+	resp := skill_step.CLIResponse{
+		Text:   setQuestionFloatingCandidates(question, traceID),
+		Action: "提問",
+		Target: question,
+		Next:   actionchain.StandbyNext,
+	}
+	return &resp, true
 }
 
 func (a *App) localSearchRoots() []localsearch.Root {
@@ -385,6 +542,71 @@ func shouldRouteUserTextToWebSearch(text string) bool {
 		"網路", "上網", "線上", "即時", "最新", "今天", "今日", "現在", "新聞", "天氣",
 		"股價", "匯率", "星座運勢", "運勢", "目前", "最近",
 	})
+}
+
+func buildSearchIntentQuestion() string {
+	return "你想搜尋哪一類？#本機檔案=input:本機搜尋 #版控紀錄=input:搜尋 git 紀錄 #網路資訊=input:網路搜尋 "
+}
+
+func isVagueSearchIntent(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return false
+	}
+	if _, ok := websearch.ParseUserQuery(trimmed); ok {
+		return false
+	}
+	if _, ok := localsearch.ParseUserQuery(trimmed); ok {
+		return false
+	}
+	compact := normalizeSearchIntentText(trimmed)
+	if compact == "" {
+		return false
+	}
+	for _, prefix := range []string{
+		"我要查", "我想查", "想查", "幫我查",
+		"我要搜尋", "我想搜尋", "想搜尋", "幫我搜尋",
+		"我要找", "我想找", "想找", "幫我找",
+	} {
+		if strings.HasPrefix(compact, prefix) {
+			return isGenericSearchTail(strings.TrimPrefix(compact, prefix))
+		}
+	}
+	switch compact {
+	case "查東西", "查資料", "查詢", "搜尋", "搜尋東西", "搜尋資料", "找東西", "找資料":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeSearchIntentText(text string) string {
+	replacer := strings.NewReplacer(
+		" ", "",
+		"\t", "",
+		"\n", "",
+		"\r", "",
+		"，", "",
+		",", "",
+		"。", "",
+		"？", "",
+		"?", "",
+		"！", "",
+		"!", "",
+		"：", "",
+		":", "",
+	)
+	return replacer.Replace(strings.TrimSpace(text))
+}
+
+func isGenericSearchTail(tail string) bool {
+	switch tail {
+	case "", "一下", "一下子", "看看", "看一下", "查一下", "搜一下", "找一下",
+		"東西", "資料", "資訊", "內容", "東西看看", "資料看看":
+		return true
+	default:
+		return false
+	}
 }
 
 func isExplicitLocalSearchRequest(text string) bool {

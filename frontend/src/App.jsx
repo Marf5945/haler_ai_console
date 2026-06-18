@@ -499,6 +499,15 @@ function applyAdapterStatusUpdate(items, payload) {
   ));
 }
 
+function sanitizeDisplayedCLIError(error) {
+  const raw = String(error || '').trim();
+  if (!raw) return raw;
+  return raw
+    .replace(/^cli rpc error:\s*/i, '')
+    .replace(/^Error:\s*/i, '')
+    .trim();
+}
+
 function reorderItemsByKeys(items, orderKeys) {
   const source = Array.isArray(items) ? items : [];
   const order = Array.isArray(orderKeys) ? orderKeys : [];
@@ -2739,7 +2748,7 @@ function App() {
     }
     clearPendingTimers?.();
     postDebugTrace(apiAdapter ? 'ui.composer.SendAPIMessage.error' : 'ui.composer.SendCLIMessage.error', traceId, {error: err?.message || String(err)});
-    const rawErrorMsg = err?.message || String(err);
+    const rawErrorMsg = sanitizeDisplayedCLIError(err?.message || String(err));
     const errorMsg = apiAdapter && String(adapter?.kind || '').toLowerCase() === 'local'
       ? t('system.localModelBlocked', { name: adapter?.name || t('settings.localModelDefault'), error: rawErrorMsg })
       : rawErrorMsg;
@@ -4123,7 +4132,7 @@ function App() {
     return {
       ...resp,
       text: resp.text ?? resp.Text ?? '',
-      error: resp.error ?? resp.Error ?? '',
+      error: sanitizeDisplayedCLIError(resp.error ?? resp.Error ?? ''),
       auth_required: resp.auth_required ?? resp.AuthRequired ?? false,
       auth_url: resp.auth_url ?? resp.AuthURL ?? '',
       adapter_id: resp.adapter_id ?? resp.AdapterID ?? '',

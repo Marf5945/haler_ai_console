@@ -176,7 +176,12 @@ ensure_wails() {
     echo "[ERROR] Wails CLI ${wails_version} is required. Install it and rerun this script."
     return 1
   fi
-  go install "github.com/wailsapp/wails/v2/cmd/wails@${wails_version}"
+  if [[ "${GOSUMDB:-sum.golang.org}" == "off" ]]; then
+    echo "[ERROR] GOSUMDB=off disables Go module checksum verification."
+    echo "        Re-run with Go's default checksum database enabled."
+    return 1
+  fi
+  GOSUMDB="${GOSUMDB:-sum.golang.org}" go install "github.com/wailsapp/wails/v2/cmd/wails@${wails_version}"
   refresh_path
   if command -v wails >/dev/null 2>&1; then
     wails_bin="$(command -v wails)"

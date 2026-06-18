@@ -28,13 +28,13 @@ build.cmd --clean
 ```bash
 git clone <repository-url>
 cd haler_ai_console
-bash scripts/wails_build_darwin.sh
+bash install_macos.sh
 ```
 
 To install/check only the pinned macOS developer tools:
 
 ```bash
-bash scripts/dev_setup_macos.sh
+bash install_macos.sh --setup-only
 ```
 
 To use the double-click style macOS package helper from Terminal:
@@ -235,16 +235,16 @@ For a release-ready filename, run `scripts\package_windows_release.cmd`; it copi
 ```bash
 git clone <repository-url>
 cd haler_ai_console
-bash scripts/wails_build_darwin.sh
+bash install_macos.sh
 ```
 
 For a clean macOS rebuild:
 
 ```bash
-bash scripts/wails_build_darwin.sh --clean
+bash install_macos.sh --clean
 ```
 
-The macOS helper checks Xcode Command Line Tools, Git, pinned Go, pinned Node.js, npm, and pinned Wails CLI. If a required dependency is missing or does not match the pinned version, it prompts whether it should install it automatically before continuing.
+The macOS installer checks Xcode Command Line Tools, Git, pinned Go, pinned Node.js, npm, and pinned Wails CLI. If a required dependency is missing or does not match the pinned version, it prompts whether it should install it automatically before continuing. Go and Node.js installers are downloaded from official URLs and verified with SHA256; frontend packages are installed with `npm ci` from `package-lock.json`; Wails is pinned to `v2.12.0` and installed through Go module checksum verification.
 For a Finder-friendly package flow, double-click `scripts/package_latest_app.command` or run `open scripts/package_latest_app.command`; it logs the build and opens the generated app bundle when packaging succeeds.
 For release packaging, run `bash scripts/package_macos_release.sh`; it builds and zips both `darwin/arm64` and `darwin/amd64` apps under `build/release`.
 

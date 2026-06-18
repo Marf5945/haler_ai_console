@@ -41,6 +41,30 @@ func TestListAdapterModelOptionsIncludesGemini35Flash(t *testing.T) {
 	}
 }
 
+func TestParseCLIExecutableVersion(t *testing.T) {
+	got := parseCLIExecutableVersion([]byte("codex-cli 0.121.0\n"))
+	if got != "0.121.0" {
+		t.Fatalf("parseCLIExecutableVersion() = %q, want %q", got, "0.121.0")
+	}
+}
+
+func TestClassifyCodexCLIModelProbeOutputRejectsUnknownModel(t *testing.T) {
+	raw := `2026-06-18T01:27:07Z WARN codex_models_manager::model_info: Unknown model o4-mini is used. This will use fallback model metadata.
+model: o4-mini`
+	if got := classifyCodexCLIModelProbeOutput(raw, "o4-mini"); got != codexModelUnsupported {
+		t.Fatalf("classifyCodexCLIModelProbeOutput() = %v, want %v", got, codexModelUnsupported)
+	}
+}
+
+func TestClassifyCodexCLIModelProbeOutputKeepsKnownModelOnAuthFailure(t *testing.T) {
+	raw := `OpenAI Codex v0.121.0
+model: gpt-5.5
+ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 401 Unauthorized`
+	if got := classifyCodexCLIModelProbeOutput(raw, "gpt-5.5"); got != codexModelSupported {
+		t.Fatalf("classifyCodexCLIModelProbeOutput() = %v, want %v", got, codexModelSupported)
+	}
+}
+
 func TestParseGeminiModelDefinitionsKeepsVisibleConcreteModels(t *testing.T) {
 	raw := `
 modelDefinitions: {

@@ -457,6 +457,9 @@ function normalizeAdapterDTO(adapter) {
     path: adapterField(adapter, 'path', 'Path', ''),
     endpoint: adapterField(adapter, 'endpoint', 'Endpoint', ''),
     model: adapterField(adapter, 'model', 'Model', ''),
+    cliVersion: adapter?.cliVersion ?? adapter?.cli_version ?? '',
+    modelOptionSource: adapter?.modelOptionSource ?? adapter?.model_option_source ?? '',
+    modelOptionNote: adapter?.modelOptionNote ?? adapter?.model_option_note ?? '',
     kind: adapterField(adapter, 'kind', 'Kind', ''),
     status: adapterField(adapter, 'status', 'Status', 'offline'),
   };
@@ -485,6 +488,15 @@ function splitAvailableAdapters(adapters, tabOrder) {
     cliAdapters: items.filter((item) => !isSubagentAdapter(item)),
     subagentTabs: orderSubagentTabsByTabOrder(items.filter(isSubagentAdapter), tabOrder),
   };
+}
+
+function applyAdapterStatusUpdate(items, payload) {
+  const adapterID = String(payload?.adapter_id || payload?.adapterId || '').trim();
+  const status = String(payload?.status || '').trim().toLowerCase();
+  if (!adapterID || !status || !Array.isArray(items)) return items;
+  return items.map((item) => (
+    adapterKey(item) === adapterID ? {...item, status} : item
+  ));
 }
 
 function reorderItemsByKeys(items, orderKeys) {
@@ -1264,6 +1276,8 @@ function App() {
   // §M-1 adapter model 雙擊彈窗：choices = {adapterID: model}, options = {adapterID: [model...]}
   const [adapterModelChoices, setAdapterModelChoices] = useState({});
   const [adapterModelOptions, setAdapterModelOptions] = useState({});
+  const adapterModelChoicesRef = useRef({});
+  adapterModelChoicesRef.current = adapterModelChoices;
   const [subagentTabs, setSubagentTabs] = useState([]);
   const [subExportCapabilities, setSubExportCapabilities] = useState({
     platform: '',
@@ -1565,6 +1579,7 @@ function App() {
 
   // #I-1001: 自動封存 Toast 提示 + 系統狀態歷史
   const [autoArchiveToast, setAutoArchiveToast] = useState(null);
+  const [adapterModelRepairToast, setAdapterModelRepairToast] = useState(null);
   const [systemStatusHistory, setSystemStatusHistory] = useState([]);
 
   // §30: 關閉視窗 → 存成 sub 對話框
@@ -1672,6 +1687,50 @@ function App() {
     return {cliAdapters, subagentTabs: nextSubagentTabs};
   }
 
+  function buildAdapterModelRepairMessage({adapterID, model, fallbackModel, reason}) {
+    const adapter = adapterList.find((item) => (item.id || item.name) === adapterID);
+    const label = adapter?.displayName || adapter?.name || adapterID || 'adapter';
+    if (fallbackModel) {
+      return `${label} 的模型 ${model} 已失效，已清除固定選項。你現在可以改選目前可用的模型；建議先試 ${fallbackModel}。`;
+    }
+    if (reason && reason.includes('fallback list')) {
+      return `${label} 的模型 ${model} 已失效，已清除固定選項。這次先退回 app 的備援清單。`;
+    }
+    return `${label} 的模型 ${model} 已失效，已清除固定選項。`;
+  }
+
+  async function reconcileAdapterModelChoicesAgainstOptions(choices, optionMap) {
+    const nextChoices = {...(choices || {})};
+    const repaired = [];
+    for (const [adapterID, model] of Object.entries(choices || {})) {
+      const opts = optionMap?.[adapterID];
+      if (!model || !Array.isArray(opts) || opts.length === 0 || opts.includes(model)) continue;
+      delete nextChoices[adapterID];
+      repaired.push({adapterID, model, fallbackModel: opts[0] || '', reason: 'options_mismatch'});
+      try {
+        await callWails(() => SetAdapterModelChoice(adapterID, ''));
+      } catch (_) {}
+    }
+    setAdapterModelChoices(nextChoices);
+    if (repaired.length > 0) {
+      setAdapterModelRepairToast(buildAdapterModelRepairMessage(repaired[0]));
+    }
+    return nextChoices;
+  }
+
+  async function refreshAdapterModelOptionsForAdapters(adapters = []) {
+    const out = {};
+    for (const adapter of adapters) {
+      const id = adapter?.id || adapter?.name;
+      if (!id) continue;
+      const opts = await callWails(() => ListAdapterModelOptions(id)).catch(() => null);
+      if (Array.isArray(opts) && opts.length > 0) out[id] = opts;
+    }
+    setAdapterModelOptions(out);
+    await reconcileAdapterModelChoicesAgainstOptions(adapterModelChoicesRef.current, out);
+    return out;
+  }
+
   useEffect(() => {
     let cancelled = false;
     callWails(GetSubExportCapabilities)
@@ -1689,8 +1748,6 @@ function App() {
     (async () => {
       try {
         const choices = await callWails(GetAdapterModelChoices).catch(() => ({}));
-        if (cancelled) return;
-        setAdapterModelChoices(choices || {});
         const out = {};
         for (const a of adapterList) {
           const id = a.id || a.name;
@@ -1698,7 +1755,9 @@ function App() {
           const opts = await callWails(() => ListAdapterModelOptions(id)).catch(() => null);
           if (Array.isArray(opts) && opts.length > 0) out[id] = opts;
         }
-        if (!cancelled) setAdapterModelOptions(out);
+        if (cancelled) return;
+        setAdapterModelOptions(out);
+        await reconcileAdapterModelChoicesAgainstOptions(choices || {}, out);
       } catch (_) { /* silent — badge 只是輔助，失敗不要中斷 UI */ }
     })();
     return () => { cancelled = true; };
@@ -1715,7 +1774,10 @@ function App() {
     if (!adapterID) return [];
     const opts = await callWails(() => ListAdapterModelOptions(adapterID)).catch(() => null);
     if (Array.isArray(opts) && opts.length > 0) {
-      setAdapterModelOptions((prev) => ({...prev, [adapterID]: opts}));
+      const nextOptions = {...adapterModelOptions, [adapterID]: opts};
+      setAdapterModelOptions(nextOptions);
+      await reconcileAdapterModelChoicesAgainstOptions(adapterModelChoicesRef.current, nextOptions);
+      refreshAvailableAdapters().catch(() => {});
       return opts;
     }
     setAdapterModelOptions((prev) => {
@@ -1723,6 +1785,7 @@ function App() {
       delete next[adapterID];
       return next;
     });
+    refreshAvailableAdapters().catch(() => {});
     return [];
   };
 
@@ -1868,8 +1931,35 @@ function App() {
     const offAdapterChanged = EventsOn('adapter:list_changed', () => {
       refreshAvailableAdapters().catch(() => {});
     });
-    const offAdapterStatus = EventsOn('adapter:status_changed', () => {
+    const offAdapterStatus = EventsOn('adapter:status_changed', (payload) => {
+      setAdapterList((prev) => applyAdapterStatusUpdate(prev, payload));
       refreshAvailableAdapters().catch(() => {});
+    });
+    const offAdapterModelCleared = EventsOn('adapter:model_choice_cleared', (payload) => {
+      const adapterID = payload?.adapter_id || '';
+      const clearedModel = payload?.cleared_model || '';
+      const fallbackModel = payload?.fallback_model || '';
+      if (adapterID) {
+        setAdapterModelChoices((prev) => {
+          const next = {...prev};
+          delete next[adapterID];
+          adapterModelChoicesRef.current = next;
+          return next;
+        });
+      }
+      if (clearedModel) {
+        setAdapterModelRepairToast(buildAdapterModelRepairMessage({
+          adapterID,
+          model: clearedModel,
+          fallbackModel,
+          reason: payload?.reason || '',
+        }));
+      }
+      if (adapterID) {
+        handleAdapterModelRefresh(adapterID).catch(() => {});
+      } else {
+        refreshAvailableAdapters().catch(() => {});
+      }
     });
     // #44 修補：skill / MCP 安裝後後端會 emit，前端重新拉取工具列。
     const offToolsChanged = EventsOn('tools:list_changed', () => {
@@ -2272,6 +2362,7 @@ function App() {
     return () => {
       offAdapterChanged();
       offAdapterStatus();
+      offAdapterModelCleared();
       offToolsChanged();
       offDagStarted();
       offDagNodeDone();
@@ -3150,6 +3241,8 @@ function App() {
     const refreshIfVisible = () => {
       if (document.visibilityState !== 'hidden') {
         refreshReferenceFiles().catch(() => {});
+        refreshAdapterModelOptionsForAdapters(adapterList).catch(() => {});
+        refreshAvailableAdapters().catch(() => {});
       }
     };
     const timer = window.setInterval(refreshIfVisible, 5000);
@@ -3160,7 +3253,7 @@ function App() {
       window.removeEventListener('focus', refreshIfVisible);
       document.removeEventListener('visibilitychange', refreshIfVisible);
     };
-  }, []);
+  }, [adapterList]);
 
   useEffect(() => {
     if (!learningEnabled) return undefined;
@@ -7521,6 +7614,9 @@ function App() {
       {autoArchiveToast && (
         <DigestAutoArchiveToast message={autoArchiveToast} onDismiss={() => setAutoArchiveToast(null)} />
       )}
+      {adapterModelRepairToast && (
+        <DigestAutoArchiveToast message={adapterModelRepairToast} onDismiss={() => setAdapterModelRepairToast(null)} />
+      )}
 
       {/* #I-805: Sidecar 崩潰恢復卡片 — sidecarState 為字串（'running' | 'crashed' | 'start_failed' 等） */}
       {sidecarState === 'crashed' && (
@@ -10213,7 +10309,14 @@ function Sidebar({
                 const opts = adapterModelOptions?.[item.key];
                 if (Array.isArray(opts) && opts.length > 0) {
                   const rect = e.currentTarget.getBoundingClientRect();
-                  setModelPicker({adapterID: item.key, rect, label: item.displayName || item.name});
+                  setModelPicker({
+                    adapterID: item.key,
+                    rect,
+                    label: item.displayName || item.name,
+                    cliVersion: item.cliVersion || '',
+                    modelOptionSource: item.modelOptionSource || '',
+                    modelOptionNote: item.modelOptionNote || '',
+                  });
                   return;
                 }
                 if (item.kind === 'local') onLocalAdapterWake?.(item);
@@ -10299,6 +10402,12 @@ function Sidebar({
             <div>
               <div className="adapter-model-picker-title">{t('adapter.pickModel') || '選擇 model'}</div>
               <small>{modelPicker.label || modelPicker.adapterID}</small>
+              {(modelPicker.cliVersion || modelPicker.modelOptionSource) && (
+                <small>
+                  {[modelPicker.cliVersion ? `CLI ${modelPicker.cliVersion}` : '', modelPicker.modelOptionSource || ''].filter(Boolean).join(' · ')}
+                </small>
+              )}
+              {modelPicker.modelOptionNote && <small>{modelPicker.modelOptionNote}</small>}
             </div>
             <div className="adapter-model-picker-actions">
               <button

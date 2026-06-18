@@ -25,8 +25,9 @@ import (
 // Event name constants — centralised so both Go emitters and JS subscribers reference the same strings.
 const (
 	// Adapter events
-	EventAdapterListChanged   = "adapter:list_changed"
-	EventAdapterStatusChanged = "adapter:status_changed"
+	EventAdapterListChanged        = "adapter:list_changed"
+	EventAdapterStatusChanged      = "adapter:status_changed"
+	EventAdapterModelChoiceCleared = "adapter:model_choice_cleared"
 
 	// DAG events
 	EventDagRunStarted    = "dag:run_started"

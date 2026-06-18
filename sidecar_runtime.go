@@ -333,27 +333,48 @@ function publicCLIErrorMessage(err, stdout, stderr) {
   if (/rateLimitExceeded|RESOURCE_EXHAUSTED|Too Many Requests|status 429|exhausted your capacity|RetryableQuotaError|quota will reset|quota exceeded|insufficient_quota/i.test(combined)) {
     return "目前選用的模型配額已用盡或被限流，暫時無法回應。請切換到其他模型後重試。";
   }
-  const firstUsefulLine = (stderr || stdout || combined)
+  const lines = (stderr || stdout || combined)
     .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) =>
-      line &&
-      !/^[-]{4,}$/.test(line) &&
-      !/^Reading additional input from stdin/i.test(line) &&
-      !/^OpenAI Codex /i.test(line) &&
-      !/^workdir:/i.test(line) &&
-      !/^model:/i.test(line) &&
-      !/^provider:/i.test(line) &&
-      !/^approval:/i.test(line) &&
-      !/^sandbox:/i.test(line) &&
-      !/^reasoning effort:/i.test(line) &&
-      !/^reasoning summaries:/i.test(line) &&
-      !/^session id:/i.test(line) &&
-      !/^user$/i.test(line) &&
-      !/^ERROR:\s*Reconnecting/i.test(line) &&
-      !/^Warning: 256-color support/i.test(line) &&
-      !/^Ripgrep is not available/i.test(line)
-    );
+    .map((line) => line.trim());
+  let skipEchoedPrompt = false;
+  let firstUsefulLine = "";
+  for (const line of lines) {
+    if (!line) continue;
+    if (skipEchoedPrompt) {
+      if (/^(ERROR|WARN)\b/i.test(line) || /^\d{4}-\d{2}-\d{2}T/.test(line) || /^[-]{4,}$/.test(line)) {
+        skipEchoedPrompt = false;
+      } else {
+        continue;
+      }
+    }
+    if (/^(user|assistant)$/i.test(line)) {
+      skipEchoedPrompt = true;
+      continue;
+    }
+    if (/^(任務=|輸出=|規則=|H=|Q=|U:|A:)\b/.test(line)) {
+      continue;
+    }
+    if (
+      /^[-]{4,}$/.test(line) ||
+      /^Reading additional input from stdin/i.test(line) ||
+      /^OpenAI Codex /i.test(line) ||
+      /^workdir:/i.test(line) ||
+      /^model:/i.test(line) ||
+      /^provider:/i.test(line) ||
+      /^approval:/i.test(line) ||
+      /^sandbox:/i.test(line) ||
+      /^reasoning effort:/i.test(line) ||
+      /^reasoning summaries:/i.test(line) ||
+      /^session id:/i.test(line) ||
+      /^ERROR:\s*Reconnecting/i.test(line) ||
+      /^Warning: 256-color support/i.test(line) ||
+      /^Ripgrep is not available/i.test(line)
+    ) {
+      continue;
+    }
+    firstUsefulLine = line;
+    break;
+  }
   return firstUsefulLine || "CLI 執行失敗，請查看監控台取得詳細資訊。";
 }
 

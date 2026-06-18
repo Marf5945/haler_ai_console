@@ -111,6 +111,10 @@ func TestParseUserQuery(t *testing.T) {
 	if !ok || req.Query != "Wails" {
 		t.Fatalf("ParseUserQuery zh = %#v ok=%v", req, ok)
 	}
+	req, ok = ParseUserQuery("\u7db2\u8def\u67e5\u8a62\u5929\u6c23 \u53f0\u4e2d")
+	if !ok || req.Query != "\u5929\u6c23 \u53f0\u4e2d" {
+		t.Fatalf("ParseUserQuery zh no separator = %#v ok=%v", req, ok)
+	}
 	req, ok = ParseUserQuery("\u7db2\u8def\u310c\u4eca\u5929\u7684\u661f\u5ea7\u904b\u52e2")
 	if !ok || req.Query != "\u4eca\u5929\u7684\u661f\u5ea7\u904b\u52e2" {
 		t.Fatalf("ParseUserQuery short zh = %#v ok=%v", req, ok)

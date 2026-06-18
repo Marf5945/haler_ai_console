@@ -1898,7 +1898,7 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 					"target":      fb.Target,
 					"local_hits":  len(routingLookup.LocalMatches),
 				})
-				if handled, routedResp := a.responseFromToolRoutingDecision(fb, sessionID, traceID, userText); handled {
+				if handled, routedResp := a.responseFromToolRoutingDecision(fb, sessionID, traceID, nil, userText); handled {
 					return &routedResp, nil
 				}
 			}
@@ -1951,7 +1951,30 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 			"judge_error":    errorString(judgeErr),
 		})
 		decision.LookupQuery = strings.TrimSpace(routingLookup.Query) // 透傳 LLM 斷詞 query 給引用內容搜尋
-		if handled, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID, userText); handled {
+		rerouteJudge := func(prompt string) (string, error) {
+			resp, err := a.cliAdapter.SendMessage(skill_step.CLIMessageOptions{
+				AdapterID:      adapterID,
+				CLIPath:        cliPath,
+				SessionID:      sessionID,
+				UserText:       prompt,
+				Model:          strings.TrimSpace(modelOverride),
+				SystemPrompt:   "",
+				ContinuityKey:  conversationContinuityKey("tool-search-reroute", sessionID),
+				TraceID:        traceID + "-search-reroute",
+				SkipContinuity: true,
+			})
+			if err != nil {
+				return resp.Text, err
+			}
+			if resp.Error != "" {
+				return resp.Text, errors.New(resp.Error)
+			}
+			if resp.AuthRequired {
+				return resp.Text, errors.New("search reroute judge requires auth")
+			}
+			return resp.Text, nil
+		}
+		if handled, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID, rerouteJudge, userText); handled {
 			return &routedResp, nil
 		}
 	}
@@ -2415,7 +2438,7 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 					"local_hits":   len(routingLookup.LocalMatches),
 					"adapter_kind": "api",
 				})
-				if handled, routedResp := a.responseFromToolRoutingDecision(fb, sessionID, traceID, userText); handled {
+				if handled, routedResp := a.responseFromToolRoutingDecision(fb, sessionID, traceID, nil, userText); handled {
 					return &routedResp, nil
 				}
 			}
@@ -2458,7 +2481,10 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 			"adapter_kind":   "api",
 		})
 		decision.LookupQuery = strings.TrimSpace(routingLookup.Query) // 透傳 LLM 斷詞 query 給引用內容搜尋
-		if handled, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID, userText); handled {
+		rerouteJudge := func(prompt string) (string, error) {
+			return callAPI(prompt)
+		}
+		if handled, routedResp := a.responseFromToolRoutingDecision(decision, sessionID, traceID, rerouteJudge, userText); handled {
 			return &routedResp, nil
 		}
 	}

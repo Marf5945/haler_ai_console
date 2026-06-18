@@ -26,10 +26,27 @@ func TestListAdapterModelOptionsUsesCurrentCodexModelIDs(t *testing.T) {
 	if len(options) == 0 || options[0] != "gpt-5.5" {
 		t.Fatalf("expected gpt-5.5 first, got %#v", options)
 	}
+	foundGPT54 := false
+	foundSpark := false
 	for _, option := range options {
 		if option == "gpt-5" || option == "gpt-5-codex" {
 			t.Fatalf("unsupported codex model should not be listed: %#v", options)
 		}
+		if option == "o4" || option == "o4-mini" {
+			t.Fatalf("stale codex fallback should not be listed: %#v", options)
+		}
+		if option == "gpt-5.4" {
+			foundGPT54 = true
+		}
+		if option == "gpt-5.3-codex-spark" {
+			foundSpark = true
+		}
+	}
+	if !foundGPT54 {
+		t.Fatalf("expected gpt-5.4 in codex options, got %#v", options)
+	}
+	if !foundSpark {
+		t.Fatalf("expected gpt-5.3-codex-spark in codex options, got %#v", options)
 	}
 }
 
@@ -62,6 +79,45 @@ model: gpt-5.5
 ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 401 Unauthorized`
 	if got := classifyCodexCLIModelProbeOutput(raw, "gpt-5.5"); got != codexModelSupported {
 		t.Fatalf("classifyCodexCLIModelProbeOutput() = %v, want %v", got, codexModelSupported)
+	}
+}
+
+func TestParseCodexDebugModelsOutputKeepsVisibleModelsInPriorityOrder(t *testing.T) {
+	raw := []byte(`warning before json
+{"models":[
+  {"slug":"codex-auto-review","visibility":"hide","priority":29},
+  {"slug":"gpt-5.4-mini","visibility":"list","priority":4},
+  {"slug":"gpt-5.5","visibility":"list","priority":0},
+  {"slug":"gpt-5.4","visibility":"list","priority":2}
+]}`)
+	got, hidden, ok := parseCodexDebugModelsOutput(raw)
+	if !ok {
+		t.Fatalf("parseCodexDebugModelsOutput() reported failure")
+	}
+	want := []string{"gpt-5.5", "gpt-5.4", "gpt-5.4-mini"}
+	if len(got) != len(want) {
+		t.Fatalf("models = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("models = %#v, want %#v", got, want)
+		}
+	}
+	if len(hidden) != 1 || hidden[0] != "codex-auto-review" {
+		t.Fatalf("hidden = %#v, want %#v", hidden, []string{"codex-auto-review"})
+	}
+}
+
+func TestAppendUniqueStringsKeepsExistingOrder(t *testing.T) {
+	got := appendUniqueStrings([]string{"gpt-5.5", "gpt-5.4"}, "gpt-5.4", "gpt-5.3-codex-spark")
+	want := []string{"gpt-5.5", "gpt-5.4", "gpt-5.3-codex-spark"}
+	if len(got) != len(want) {
+		t.Fatalf("values = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("values = %#v, want %#v", got, want)
+		}
 	}
 }
 

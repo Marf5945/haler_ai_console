@@ -1272,6 +1272,40 @@ export namespace main {
 	        this.drop_target_dir = source["drop_target_dir"];
 	    }
 	}
+	export class NativeSearchSummaryDragResult {
+	    status: string;
+	    temp_path: string;
+	    landed_path: string;
+	    platform: string;
+	    fallback_required: boolean;
+	    message: string;
+	    display_name: string;
+	    filename: string;
+	    artifact_id: string;
+	    checksum: string;
+	    drop_target_kind: string;
+	    drop_target_dir: string;
+
+	    static createFrom(source: any = {}) {
+	        return new NativeSearchSummaryDragResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.status = source["status"];
+	        this.temp_path = source["temp_path"];
+	        this.landed_path = source["landed_path"];
+	        this.platform = source["platform"];
+	        this.fallback_required = source["fallback_required"];
+	        this.message = source["message"];
+	        this.display_name = source["display_name"];
+	        this.filename = source["filename"];
+	        this.artifact_id = source["artifact_id"];
+	        this.checksum = source["checksum"];
+	        this.drop_target_kind = source["drop_target_kind"];
+	        this.drop_target_dir = source["drop_target_dir"];
+	    }
+	}
 	export class NativeSkillDragExportResult {
 	    status: string;
 	    export_dir: string;

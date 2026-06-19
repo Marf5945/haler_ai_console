@@ -1830,7 +1830,7 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 		// 窄白名單 fast path：極短寒暄／確認句直接定型回覆，跳過 keyword+judge 兩次模型呼叫。
 		// 放在 consumePendingToolAnswer 之後，且僅在沒有 pending 確認時觸發，避免吃掉補答。
 		if pendingConfirmPromptContext(sessionID) == "" {
-			if reply, ok := offlineChatReply(userText); ok {
+			if reply, ok := a.offlineChatReply(userText); ok {
 				debugtrace.Record("go.toolRouting.fast_path_offline", traceID, map[string]interface{}{
 					"text": reply,
 				})
@@ -1872,7 +1872,7 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 			AdapterID:      adapterID,
 			CLIPath:        cliPath,
 			SessionID:      sessionID,
-			UserText:       buildToolRoutingDecisionPrompt("", userText, routingContextForToolPrompt, recentHistory),
+			UserText:       buildToolRoutingDecisionPrompt(a.routingReplyLanguageRule(), userText, routingContextForToolPrompt, recentHistory),
 			Model:          strings.TrimSpace(modelOverride),
 			SystemPrompt:   "",
 			ContinuityKey:  conversationContinuityKey("tool-judge", sessionID),
@@ -1910,7 +1910,7 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 				AdapterID:      adapterID,
 				CLIPath:        cliPath,
 				SessionID:      sessionID,
-				UserText:       buildToolRoutingRepairPrompt(buildToolRoutingDecisionPrompt("", userText, routingContextForToolPrompt, recentHistory), judgeResp.Text, userText),
+				UserText:       buildToolRoutingRepairPrompt(buildToolRoutingDecisionPrompt(a.routingReplyLanguageRule(), userText, routingContextForToolPrompt, recentHistory), judgeResp.Text, userText),
 				Model:          strings.TrimSpace(modelOverride),
 				SystemPrompt:   "",
 				ContinuityKey:  conversationContinuityKey("tool-judge-repair", sessionID),
@@ -2393,7 +2393,7 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 		}
 		// 窄白名單 fast path（API 路徑同 CLI）：極短寒暄／確認句直接定型回覆，跳過 keyword+judge。
 		if pendingConfirmPromptContext(sessionID) == "" {
-			if reply, ok := offlineChatReply(userText); ok {
+			if reply, ok := a.offlineChatReply(userText); ok {
 				debugtrace.Record("go.toolRouting.fast_path_offline", traceID, map[string]interface{}{
 					"text":         reply,
 					"adapter_kind": "api",
@@ -2421,7 +2421,7 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 		routingLookup := a.lookupToolRoutingContext(terms, userText, traceID)
 		// SEC-06: judge prompt 帶 pending 確認摘要（同 CLI 路徑）。
 		routingContextForToolPrompt = formatToolRoutingLookupContext(routingLookup) + pendingConfirmPromptContext(sessionID) + a.formatAvailableSkillsContext(terms) + a.formatRoutingMemoryContext(terms) // Step 4/6：注入候選 + 低敏記憶
-		judgeText, judgeErr := callAPI(buildToolRoutingDecisionPrompt("", userText, routingContextForToolPrompt, recentHistory))
+		judgeText, judgeErr := callAPI(buildToolRoutingDecisionPrompt(a.routingReplyLanguageRule(), userText, routingContextForToolPrompt, recentHistory))
 		// judge 階段命中配額／限流：用已建好的 lookup 走本機保底，不再 backoff／repair。
 		if isRoutingQuotaHit(judgeText, "", judgeErr) {
 			if resp, ok := a.routeAfterRoutingQuotaHit(adapterID, sessionID, userText, traceID, &routingLookup); ok {
@@ -2446,7 +2446,7 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 		}
 		decision := normalizeToolRoutingDecision(parseToolRoutingDecision(judgeText), userText, routingLookup)
 		if shouldRepairToolRoutingDecision(userText, decision) {
-			repairText, repairErr := callAPI(buildToolRoutingRepairPrompt(buildToolRoutingDecisionPrompt("", userText, routingContextForToolPrompt, recentHistory), judgeText, userText))
+			repairText, repairErr := callAPI(buildToolRoutingRepairPrompt(buildToolRoutingDecisionPrompt(a.routingReplyLanguageRule(), userText, routingContextForToolPrompt, recentHistory), judgeText, userText))
 			debugtrace.Record("go.toolRouting.judge_repair", traceID, map[string]interface{}{
 				"text":         repairText,
 				"error":        errorString(repairErr),
@@ -2708,12 +2708,12 @@ func isLoadedReferenceVisibilityQuestion(text string) bool {
 	}
 	lower := strings.ToLower(trimmed)
 	mentionsFile := containsAny(trimmed, []string{"檔案", "文件", "引用", "引用文件", "拉進來", "拖進來", "剛剛", "最近", "已載入", "匯入"}) ||
-		containsAny(lower, []string{"file", "files", "upload", "uploaded", "drag", "drop", "reference"})
+		containsAny(lower, []string{"file", "files", "upload", "uploaded", "drag", "drop", "reference", "ficheiro", "ficheiros", "referencia", "referência"})
 	if !mentionsFile {
 		return false
 	}
 	asksVisibility := containsAny(trimmed, []string{"有看到", "看到", "看得到", "知道", "有沒有", "是不是有", "列出", "有哪些", "什麼檔"}) ||
-		containsAny(lower, []string{"see", "seen", "loaded", "list", "what file", "which file"})
+		containsAny(lower, []string{"see", "seen", "loaded", "list", "what file", "what files", "what reference file", "what reference files", "which file", "which files", "do i have", "have loaded", "que ficheiro", "que ficheiros", "quais ficheiros", "ficheiros tenho", "tenho"})
 	if !asksVisibility {
 		return false
 	}
@@ -3724,7 +3724,46 @@ func (a *App) ImportReferenceFile(sourcePath string) (ReferenceFile, error) {
 		})
 	}
 	a.maybeEmitConfigMissing(ref.Name)
+	localsearch.InvalidateAll() // 新匯入立即可搜，不必等 root index 快取（60s）過期
 	return ref, nil
+}
+
+// cleanupRemovedReference 移除引用檔後一併清掉其向量索引並讓本機搜尋快取即時失效，
+// 避免「移除後仍搜得到」（殘留向量 / 60s root index 快取）。
+func (a *App) cleanupRemovedReference(refPath string) {
+	if base := filepath.Base(strings.TrimSpace(refPath)); base != "" && base != "." && base != string(os.PathSeparator) {
+		_ = os.Remove(filepath.Join(referenceVectorsDir(), base+".json")) // 對應向量索引
+	}
+	localsearch.InvalidateAll()
+}
+
+// RemoveReferenceFile 從引用庫刪除一個引用檔（管理副本＋向量索引）並讓搜尋快取即時失效，
+// 確保「移除後即不可搜尋」。只允許刪 data/references/files 內的單檔。
+func (a *App) RemoveReferenceFile(path string) error {
+	refDir := filepath.Join(appDataRoot(), "data", "references", "files")
+	clean := filepath.Clean(strings.TrimSpace(path))
+	if clean == "" {
+		return fmt.Errorf("reference remove: empty path")
+	}
+	if clean != refDir && !strings.HasPrefix(clean, refDir+string(os.PathSeparator)) {
+		return fmt.Errorf("reference remove: path outside reference library")
+	}
+	info, err := os.Stat(clean)
+	if err != nil {
+		if os.IsNotExist(err) {
+			a.cleanupRemovedReference(clean) // 檔已不在，仍清向量/快取
+			return nil
+		}
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("reference remove: path is a directory, refused")
+	}
+	if err := os.Remove(clean); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	a.cleanupRemovedReference(clean)
+	return nil
 }
 
 func importReferenceFileToDir(sourcePath, referenceDir string) (ReferenceFile, error) {

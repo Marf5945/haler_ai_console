@@ -19,27 +19,7 @@ func normalizeFastPathText(text string) string {
 // 時的保底回覆。刻意只放可安全定型回答的句子；需要上下文才能答的（如「第幾次」）不放進來，
 // 維持走正常路由，避免亂答。
 func offlineChatReply(userText string) (string, bool) {
-	key := normalizeFastPathText(userText)
-	if key == "" {
-		return "", false
-	}
-	// 限制長度：避免長句剛好含關鍵字而被誤判（白名單只收極短句）。
-	if len([]rune(key)) > 8 {
-		return "", false
-	}
-	switch key {
-	case "你好", "妳好", "您好", "哈囉", "嗨", "hi", "hello", "hey", "yo":
-		return "你好！有什麼我可以幫你的嗎？", true
-	case "謝謝", "感謝", "多謝", "感恩", "thanks", "thank you", "thx":
-		return "不客氣！", true
-	case "收到嗎", "在嗎", "還在嗎", "有在嗎", "你在嗎", "在不在":
-		return "在的，請說。", true
-	case "收到", "好的", "好", "ok", "okay", "了解", "知道了", "明白", "嗯", "沒問題":
-		return "好的。", true
-	case "掰掰", "再見", "bye", "goodbye", "晚安":
-		return "再見，需要時再叫我。", true
-	}
-	return "", false
+	return localizedOfflineChatReply(userText, responseLanguageZH)
 }
 
 // isRoutingQuotaHit 判斷一次 routing 階段（keyword/judge/repair）的模型呼叫是否命中
@@ -58,7 +38,7 @@ func isRoutingQuotaHit(respText, respError string, err error) bool {
 // 全程不呼叫任何模型。
 func (a *App) routeAfterRoutingQuotaHit(adapterID, sessionID, userText, traceID string, lookup *toolRoutingLookupContext) (*skill_step.CLIResponse, bool) {
 	// 1. 窄白名單定型回覆：零模型呼叫，配額耗盡也能答。
-	if reply, ok := offlineChatReply(userText); ok {
+	if reply, ok := a.offlineChatReply(userText); ok {
 		debugtrace.Record("go.toolRouting.quota_fast_fail.offline_chat", traceID, map[string]interface{}{
 			"adapter_id": adapterID,
 		})

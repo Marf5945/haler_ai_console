@@ -61,7 +61,8 @@ func (a *App) FinalizeNativeReferenceFileExport(action, sourcePath, landedPath s
 		info, err := os.Stat(sourcePath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return nil // 已不存在，視為成功
+				a.cleanupRemovedReference(sourcePath) // 檔已不在，仍清向量/快取
+				return nil                            // 已不存在，視為成功
 			}
 			return fmt.Errorf("reference remove: stat: %w", err)
 		}
@@ -71,6 +72,7 @@ func (a *App) FinalizeNativeReferenceFileExport(action, sourcePath, landedPath s
 		if err := os.Remove(sourcePath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("reference remove: remove: %w", err)
 		}
+		a.cleanupRemovedReference(sourcePath) // 連同向量索引與搜尋快取一起清，避免移除後仍搜得到
 	case "copy":
 		// Finder already received the promised file. Keep both copies.
 	case "cancel":

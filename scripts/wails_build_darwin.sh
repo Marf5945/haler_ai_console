@@ -6,6 +6,7 @@ build_args=()
 wails_bin="${WAILS_BIN:-}"
 setup_only=0
 app_name="HaLer AI Console"
+legacy_app_names=("ai-console")
 go_version="1.26.4"
 node_version="24.16.0"
 wails_version="v2.12.0"
@@ -268,6 +269,14 @@ if [[ -d "${root_dir}/frontend/node_modules" ]]; then
   echo "Removing frontend/node_modules before Wails binding generation..."
   rm -rf "${root_dir}/frontend/node_modules"
 fi
+
+for legacy_app_name in "${legacy_app_names[@]}"; do
+  legacy_app_path="${root_dir}/build/bin/${legacy_app_name}.app"
+  if [[ "${legacy_app_name}" != "${app_name}" && -d "${legacy_app_path}" ]]; then
+    echo "Removing legacy app bundle: ${legacy_app_path}"
+    rm -rf "${legacy_app_path}"
+  fi
+done
 
 echo
 echo "Running wails doctor..."

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -23,7 +22,7 @@ func isReferenceListingQuestion(text string) bool {
 	}
 	lower := strings.ToLower(trimmed)
 	mentionsFile := containsAny(trimmed, []string{"檔案", "文件", "引用", "引用文件", "拉進來", "拖進來", "已載入", "匯入", "檔"}) ||
-		containsAny(lower, []string{"file", "files", "upload", "uploaded", "reference"})
+		containsAny(lower, []string{"file", "files", "upload", "uploaded", "reference", "ficheiro", "ficheiros", "referencia", "referência"})
 	if !mentionsFile {
 		return false
 	}
@@ -34,7 +33,7 @@ func isReferenceListingQuestion(text string) bool {
 	}
 	// 清單意圖詞：問「有哪些 / 列出 / 看到哪些 / 載入了什麼」。
 	listing := containsAny(trimmed, []string{"有哪些", "列出", "哪幾個", "幾個檔", "看到哪些", "有什麼檔", "什麼檔", "清單", "列表", "有看到", "看得到", "有沒有", "看到"}) ||
-		containsAny(lower, []string{"list", "which file", "which files", "what file", "what files", "how many file"})
+		containsAny(lower, []string{"list", "which file", "which files", "what file", "what files", "what reference file", "what reference files", "do i have", "have loaded", "how many file", "que ficheiro", "que ficheiros", "quais ficheiros", "ficheiros tenho", "tenho"})
 	return listing
 }
 
@@ -130,29 +129,29 @@ func (a *App) executeReferenceContentSearch(userText, llmQuery, sessionID, trace
 			"hits":       len(outcome.Results),
 		})
 		if len(outcome.Results) == 0 {
-			return skill_step.CLIResponse{Text: fmt.Sprintf("在引用檔「%s」裡找不到「%s」相關內容。", named, req.Query)}
+			return skill_step.CLIResponse{Text: localizedReferenceNotFound(named, req.Query, a.responseLanguage())}
 		}
-		return skill_step.CLIResponse{Text: localsearch.FormatSearchOutcome(req, outcome)}
+		return skill_step.CLIResponse{Text: a.formatLocalSearchOutcome(req, outcome)}
 	}
 
 	if len(outcome.Results) == 0 {
 		// 未指定檔名又查不到內容 → 退回列檔，不誤回「找不到」。
 		return a.referenceListingResponse(refs)
 	}
-	return skill_step.CLIResponse{Text: localsearch.FormatSearchOutcome(req, outcome)}
+	return skill_step.CLIResponse{Text: a.formatLocalSearchOutcome(req, outcome)}
 }
 
 // referenceListingResponse 回覆「已載入引用檔清單」（沒有引用檔時誠實說明）。
 func (a *App) referenceListingResponse(refs []routingReferenceFile) skill_step.CLIResponse {
 	if len(refs) > 0 {
 		return skill_step.CLIResponse{
-			Text:   formatRecentReferenceFilesAnswer(refs),
+			Text:   a.formatRecentReferenceFilesAnswer(refs),
 			Action: "搜尋",
 			Target: "引用文件",
 			Next:   "文件",
 		}
 	}
-	return skill_step.CLIResponse{Text: "我這邊目前沒有看到已載入的引用檔。"}
+	return skill_step.CLIResponse{Text: localizedNoReferenceFiles(a.responseLanguage())}
 }
 
 // filterOutReferenceListingItems 濾掉 localSearchItems 注入的「最近引用文件: …」合成項，

@@ -5,6 +5,7 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 release_dir="${root_dir}/build/release"
 app_name="HaLer AI Console"
 app_path="${root_dir}/build/bin/${app_name}.app"
+legacy_app_names=("ai-console")
 wails_bin="${WAILS_BIN:-}"
 
 refresh_path() {
@@ -86,6 +87,13 @@ for arch in arm64 amd64; do
     echo "Removing frontend/node_modules before Wails binding generation..."
     rm -rf "${root_dir}/frontend/node_modules"
   fi
+  for legacy_app_name in "${legacy_app_names[@]}"; do
+    legacy_app_path="${root_dir}/build/bin/${legacy_app_name}.app"
+    if [[ "${legacy_app_name}" != "${app_name}" && -d "${legacy_app_path}" ]]; then
+      echo "Removing legacy app bundle: ${legacy_app_path}"
+      rm -rf "${legacy_app_path}"
+    fi
+  done
   rm -rf "${app_path}"
   "${wails_bin}" build -platform "${platform}" -ldflags "-extldflags=-Wl,-no_warn_duplicate_libraries"
   copy_optional_model

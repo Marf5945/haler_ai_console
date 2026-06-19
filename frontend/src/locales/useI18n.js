@@ -14,6 +14,7 @@ import ja from './ja.json';
 import ptPT from './pt-PT.json';
 import es from './es.json';
 import th from './th.json';
+import ko from './ko.json';
 
 // ----------------------------------------------------------
 // 語系對照表
@@ -25,6 +26,7 @@ const TRANSLATION_MAP = {
   'pt-PT': ptPT,
   es,
   th,
+  ko,
 };
 
 // ----------------------------------------------------------
@@ -126,6 +128,65 @@ const useI18n = create((set, get) => ({
     return RTL_LANGUAGES.includes(get().language) ? 'rtl' : 'ltr';
   },
 }));
+
+// ----------------------------------------------------------
+// 收集所有語系的女性稱呼關鍵字（聯集，去重、轉小寫）
+// 用途：掃描人格名稱/身分判斷是否切換女性語氣池
+// ----------------------------------------------------------
+export function getAllFemaleKeywords() {
+  const set = new Set();
+  for (const tr of Object.values(TRANSLATION_MAP)) {
+    const arr = tr && tr.greeting && tr.greeting.femaleKeywords;
+    if (Array.isArray(arr)) {
+      arr.forEach((w) => {
+        const s = String(w).trim().toLowerCase();
+        if (s) set.add(s);
+      });
+    }
+  }
+  return [...set];
+}
+
+// ----------------------------------------------------------
+// 收集所有語系的「獸人/野性」關鍵字（聯集）
+// 用途：掃描人格名稱/身分判斷是否切換野性（本汪）語氣池
+// ----------------------------------------------------------
+export function getAllBeastKeywords() {
+  const set = new Set();
+  for (const tr of Object.values(TRANSLATION_MAP)) {
+    const arr = tr && tr.greeting && tr.greeting.beastKeywords;
+    if (Array.isArray(arr)) {
+      arr.forEach((w) => {
+        const s = String(w).trim().toLowerCase();
+        if (s) set.add(s);
+      });
+    }
+  }
+  return [...set];
+}
+
+// ----------------------------------------------------------
+// 由所有語系的問候字串建立「文字→i18n key」反查表
+// 涵蓋 greeting.hello / greeting.pool.N / greeting.poolFem.N
+// 供切換語系時把已顯示的問候語重新在地化
+// ----------------------------------------------------------
+export function buildGreetingTextKeyMap() {
+  const map = {};
+  for (const tr of Object.values(TRANSLATION_MAP)) {
+    const g = tr && tr.greeting;
+    if (!g) continue;
+    if (typeof g.hello === 'string' && g.hello.trim()) map[g.hello] = 'greeting.hello';
+    ['pool', 'poolFem', 'poolWild'].forEach((poolKey) => {
+      const arr = g[poolKey];
+      if (Array.isArray(arr)) {
+        arr.forEach((txt, i) => {
+          if (typeof txt === 'string' && txt.trim()) map[txt] = `greeting.${poolKey}.${i}`;
+        });
+      }
+    });
+  }
+  return map;
+}
 
 // ----------------------------------------------------------
 // 獨立 t 函式：React 元件外使用

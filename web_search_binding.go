@@ -199,11 +199,9 @@ func (a *App) executeWebSearch(req websearch.SearchRequest, traceID string) skil
 		urls = append(urls, r.URL)
 	}
 	recordWebSearchResultURLs(urls, "", traceID)
-	// 搜尋＋模型摘要：先嘗試用目前對話模型整理成帶來源標號的摘要；
-	// 失敗、未設定可用模型或回應為空時，回退成原始結果清單（不讓使用者看到錯誤）。
-	if summary, ok := a.summarizeWebSearchOutcome(req, outcome, traceID); ok {
-		return skill_step.CLIResponse{Text: summary}
-	}
+	// §3.1.13 搜尋預設「不重構」（省 token）：直接回「網址＋原始擷取文字」清單。
+	// LLM 重構改成使用者按「摘要」時才在前端觸發（onSummarizeSearch）。
+	// 註：summarizeWebSearchOutcome 暫保留，供日後「按需後端摘要」使用。
 	return skill_step.CLIResponse{Text: websearch.FormatSearchOutcome(req, outcome)}
 }
 

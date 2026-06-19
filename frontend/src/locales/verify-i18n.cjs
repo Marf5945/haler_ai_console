@@ -16,7 +16,7 @@ const path = require('path');
 
 const LOCALES_DIR = __dirname;
 const SOURCE_FILE = 'zh-TW.json';
-const TARGET_FILES = ['en.json', 'ja.json'];
+const TARGET_FILES = ['en.json', 'ja.json', 'es.json', 'pt-PT.json', 'th.json', 'ko.json'];
 
 let errors = 0;
 let warnings = 0;

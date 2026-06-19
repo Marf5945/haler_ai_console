@@ -210,7 +210,6 @@ func formatToolRoutingLookupContext(ctx toolRoutingLookupContext) string {
 }
 
 func buildToolRoutingDecisionPrompt(systemPrompt string, userText string, lookupContext string, recentOpt ...[]conversation.Sentence) string {
-	_ = systemPrompt
 	var recent []conversation.Sentence
 	if len(recentOpt) > 0 {
 		recent = recentOpt[0]
@@ -231,12 +230,32 @@ func buildToolRoutingDecisionPrompt(systemPrompt string, userText string, lookup
 		actionchain.Separator, actionchain.Separator, actionchain.StandbyNext,
 		actionchain.Separator, actionchain.Separator,
 		actionchain.Separator, buildSearchIntentQuestion(), actionchain.Separator, actionchain.StandbyNext)
+	if langRule := routingChatLanguageRule(systemPrompt); langRule != "" {
+		routingRules += " 閒聊回答語言規則：" + langRule + "；只有「閒聊ㄌ<回答>」裡的回答內容套用此語言，動作標籤仍用指定格式。"
+	}
 	parts := []string{strings.TrimSpace(lookupContext), "rules=" + routingRules}
 	if h := formatCompactRoutingHistory(recent, userText, 3); h != "" {
 		parts = append(parts, h)
 	}
 	parts = append(parts, "Q="+compactPromptField(userText))
 	return strings.Join(parts, " | ")
+}
+
+func routingChatLanguageRule(systemPrompt string) string {
+	rule := strings.TrimSpace(systemPrompt)
+	if rule == "" {
+		return ""
+	}
+	if strings.Contains(rule, "角色=") && !strings.Contains(rule, "語言=") && !strings.Contains(rule, "回答內容") {
+		return ""
+	}
+	if idx := strings.Index(rule, "語言="); idx >= 0 {
+		rule = strings.TrimSpace(rule[idx:])
+		if cut := strings.IndexAny(rule, "\n|;；"); cut >= 0 {
+			rule = strings.TrimSpace(rule[:cut])
+		}
+	}
+	return rule
 }
 
 func parseToolRoutingDecision(text string) toolRoutingDecision {
@@ -430,7 +449,7 @@ func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sess
 	if isReferenceListingQuestion(userText) {
 		if refs := a.recentReferenceFilesForRouting(6); len(refs) > 0 {
 			return true, skill_step.CLIResponse{
-				Text:   formatRecentReferenceFilesAnswer(refs),
+				Text:   a.formatRecentReferenceFilesAnswer(refs),
 				Action: "搜尋",
 				Target: "引用文件",
 				Next:   "文件",

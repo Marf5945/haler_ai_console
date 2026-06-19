@@ -167,9 +167,9 @@ func (a *App) executeLocalSearch(req localsearch.SearchRequest, sessionID, trace
 	})
 	if len(outcome.Results) == 0 {
 		rememberLocalSearchWebFallback(sessionID, req)
-		return skill_step.CLIResponse{Text: fmt.Sprintf("本機資料裡找不到「%s」。要改用網路搜尋嗎？", req.Query)}
+		return skill_step.CLIResponse{Text: a.localSearchNoResultsPrompt(req.Query, true)}
 	}
-	return skill_step.CLIResponse{Text: localsearch.FormatSearchOutcome(req, outcome)}
+	return skill_step.CLIResponse{Text: a.formatLocalSearchOutcome(req, outcome)}
 }
 
 func (a *App) executeLocalSearchWithWebReroute(req localsearch.SearchRequest, sessionID, traceID, userText string, judge searchRerouteJudge) skill_step.CLIResponse {
@@ -237,9 +237,9 @@ func (a *App) executeLocalSearchWithWebReroute(req localsearch.SearchRequest, se
 func (a *App) localSearchResponseFromOutcome(req localsearch.SearchRequest, sessionID string, outcome localsearch.SearchOutcome) skill_step.CLIResponse {
 	if len(outcome.Results) == 0 {
 		rememberLocalSearchWebFallback(sessionID, req)
-		return skill_step.CLIResponse{Text: fmt.Sprintf("本機資料沒有找到「%s」。你可以回覆「好」改用網路搜尋。", req.Query)}
+		return skill_step.CLIResponse{Text: a.localSearchNoResultsPrompt(req.Query, false)}
 	}
-	return skill_step.CLIResponse{Text: localsearch.FormatSearchOutcome(req, outcome)}
+	return skill_step.CLIResponse{Text: a.formatLocalSearchOutcome(req, outcome)}
 }
 
 func shouldRejudgeLocalSearchToWeb(outcome localsearch.SearchOutcome) bool {

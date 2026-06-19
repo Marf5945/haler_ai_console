@@ -103,11 +103,12 @@
     box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 8px 20px rgba(0,0,0,.28);
   }
 
-  .adapter-btn > span:last-child,
+  .adapter-name,
   .command-btn > span:last-child,
   .tool-card > span:last-child {
-    @apply min-w-0 whitespace-nowrap;
-    font-size: clamp(13px, 1.15vw, 22px);
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap;
+    flex: 1 1 auto;
+    font-size: clamp(12px, 1vw, 18px);
     line-height: 1;
   }
 
@@ -184,8 +185,11 @@
     display: inline-block;
     width: 8px;
     height: 8px;
+    min-width: 8px;
+    max-width: 8px;
     border-radius: 50%;
     margin-left: auto;
+    flex: 0 0 8px;
     flex-shrink: 0;
     transition: background .3s, box-shadow .3s;
   }
@@ -1307,6 +1311,143 @@
     to { opacity: 1; transform: translateY(0); }
   }
 
+  .onboarding-search-demo {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr) minmax(220px, .8fr);
+    gap: 12px;
+    margin-top: 12px;
+    min-height: 138px;
+    padding: 13px;
+    border-radius: 12px;
+    border: 1px solid rgba(125,211,252,.18);
+    background: linear-gradient(180deg, rgba(8,28,36,.82), rgba(3,10,14,.88));
+    overflow: hidden;
+  }
+
+  .onboarding-search-card {
+    align-self: start;
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    min-height: 58px;
+    padding: 9px 10px;
+    border-radius: 9px;
+    border: 1px solid rgba(125,211,252,.44);
+    background: linear-gradient(180deg, rgba(25,72,86,.9), rgba(10,34,42,.94));
+    color: #ecfeff;
+    box-shadow: 0 0 0 0 rgba(125,211,252,0);
+    animation: search-demo-card-cue 5.4s ease-out .3s infinite;
+  }
+
+  .onboarding-search-icon {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
+    background: rgba(236,254,255,.14);
+    color: #bff7ff;
+  }
+
+  .onboarding-search-card strong,
+  .onboarding-search-card small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .onboarding-search-card strong {
+    font-size: 13px;
+    font-weight: 950;
+  }
+
+  .onboarding-search-card small {
+    margin-top: 2px;
+    color: rgba(236,254,255,.68);
+    font-size: 11px;
+  }
+
+  .onboarding-search-card i {
+    border-radius: 999px;
+    padding: 3px 8px;
+    background: rgba(236,254,255,.13);
+    color: #dffbff;
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 900;
+  }
+
+  .onboarding-search-preview {
+    align-self: end;
+    min-height: 86px;
+    padding: 10px 12px;
+    border-radius: 9px;
+    border: 1px solid rgba(125,211,252,.32);
+    background: rgba(5,22,28,.95);
+    color: #f6feff;
+    opacity: 0;
+    transform: translateY(8px);
+    animation: search-demo-preview 5.4s ease-out .3s infinite;
+  }
+
+  .onboarding-search-preview strong {
+    display: block;
+    margin-bottom: 8px;
+    color: rgba(236,254,255,.84);
+    font-size: 11px;
+  }
+
+  .onboarding-search-preview p {
+    margin: 0;
+    font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  }
+
+  .onboarding-search-drag {
+    position: absolute;
+    left: 36px;
+    top: 80px;
+    min-width: 168px;
+    padding: 8px 10px;
+    border-radius: 9px;
+    border: 1px solid rgba(125,211,252,.55);
+    background: rgba(5,22,28,.98);
+    color: #ecfeff;
+    box-shadow: 0 14px 30px rgba(0,0,0,.42);
+    opacity: 0;
+    animation: search-demo-drag 5.4s cubic-bezier(.2,.8,.2,1) .3s infinite;
+  }
+
+  .onboarding-search-drag span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    font-weight: 900;
+  }
+
+  @keyframes search-demo-card-cue {
+    0%, 12%, 100% { box-shadow: 0 0 0 0 rgba(125,211,252,0); transform: translateY(0); }
+    18% { box-shadow: 0 0 0 6px rgba(125,211,252,.12); transform: translateY(-1px); }
+    24%, 48% { box-shadow: 0 0 0 0 rgba(125,211,252,0); transform: translateY(0); }
+  }
+
+  @keyframes search-demo-preview {
+    0%, 22% { opacity: 0; transform: translateY(8px); }
+    32%, 52% { opacity: 1; transform: translateY(0); }
+    62%, 100% { opacity: 0; transform: translateY(8px); }
+  }
+
+  @keyframes search-demo-drag {
+    0%, 54% { opacity: 0; transform: translate(0, 0) scale(.96); }
+    62% { opacity: 1; transform: translate(0, 0) scale(1.02); }
+    82% { opacity: 1; transform: translate(calc(100% + 240px), 22px) scale(1); }
+    92%, 100% { opacity: 0; transform: translate(calc(100% + 240px), 22px) scale(.9); }
+  }
+
   @media (max-width: 760px) {
     .onboarding-card.tool-demo-card {
       width: min(520px, 94vw);
@@ -1333,6 +1474,14 @@
 
     .tool-demo-captions {
       grid-template-columns: 1fr;
+    }
+
+    .onboarding-search-demo {
+      grid-template-columns: 1fr;
+    }
+
+    .onboarding-search-drag {
+      display: none;
     }
   }
 
@@ -2285,7 +2434,7 @@
 
   .message-row-active {
     @apply border-[#ffba55]/85;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
     box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 0 0 1px rgba(255,186,85,.24);
   }
 
@@ -2388,6 +2537,159 @@
     opacity: 1;
     pointer-events: auto;
     transform: translateX(0);
+  }
+
+  .search-summary-shell {
+    position: relative;
+    min-width: min(320px, 70vw);
+    max-width: min(560px, 86vw);
+  }
+
+  .message-search-summary-row {
+    padding: 0;
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .message-search-summary-row.message-row-active {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    border-color: transparent;
+    box-shadow: none;
+  }
+
+  .message-row .search-summary-card {
+    position: relative;
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 56px;
+    min-width: 0;
+    padding: 8px 10px;
+    /* div 不繼承 .message-row button 的邊框，這裡顯式補回 width/style/radius */
+    border: 1px solid rgba(125,211,252,.42);
+    border-radius: 6px;
+    background: linear-gradient(180deg, rgba(25,72,86,.86), rgba(10,34,42,.92));
+    color: #ecfeff;
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+    cursor: grab;
+    box-shadow:
+      0 0 0 2px rgba(255,226,138,.26),
+      0 0 20px rgba(255,226,138,.12),
+      0 14px 30px rgba(0,0,0,.16);
+  }
+
+  /* 拖曳手把點點裝飾已移除（使用者反映多餘） */
+
+  .message-row .search-summary-card:hover {
+    border-color: rgba(255,226,138,.62);
+    box-shadow:
+      0 0 0 3px rgba(255,226,138,.34),
+      0 0 26px rgba(255,226,138,.16),
+      0 16px 34px rgba(0,0,0,.20);
+  }
+
+  .search-summary-card:active {
+    cursor: grabbing;
+  }
+
+  .search-summary-icon {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: rgba(236,254,255,.14);
+    color: #bff7ff;
+  }
+
+  .search-summary-copy {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+    text-align: left;
+  }
+
+  .search-summary-title,
+  .search-summary-copy small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .search-summary-title {
+    color: #ecfeff;
+    font-weight: 850;
+    line-height: 1.35;
+  }
+
+  .search-summary-query {
+    border-radius: 5px;
+    padding: 0 3px;
+    background: rgba(236,254,255,.13);
+    color: #ffffff;
+    font-weight: 1000;
+    text-shadow: 0 0 12px rgba(125,211,252,.55);
+  }
+
+  .search-summary-copy small {
+    color: rgba(236,254,255,.72);
+    font-size: 11px;
+  }
+
+  .search-summary-count {
+    border-radius: 999px;
+    padding: 2px 7px;
+    background: rgba(236,254,255,.13);
+    color: #dffbff;
+    font-size: 11px;
+  }
+
+  .search-summary-popover {
+    position: absolute;
+    z-index: 40;
+    left: 0;
+    top: calc(100% + 8px);
+    width: min(640px, 86vw);
+    max-height: min(420px, 58vh);
+    overflow: auto;
+    border-radius: 8px;
+    border: 2px solid rgba(255,226,138,.72);
+    background: rgba(29,24,8,.98);
+    color: #f6feff;
+    box-shadow:
+      0 0 0 3px rgba(255,226,138,.18),
+      0 18px 36px rgba(0,0,0,.42);
+    padding: 12px;
+  }
+
+  .search-summary-popover-title {
+    display: block;
+    margin-bottom: 8px;
+    color: rgba(255,240,166,.92);
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1.45;
+  }
+
+  .search-summary-md-preview {
+    margin: 0;
+    max-width: 100%;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #f6feff;
+    font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  }
+
+  .message-row .search-summary-popover button {
+    display: inline-flex;
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
   }
 
   /* Task review card: put high-risk confirmation directly in the chat flow. */
@@ -2737,6 +3039,11 @@
 
   .voice-status-error {
     @apply border-[#ff6b6b]/35 text-[#ffb1b1];
+  }
+
+  .composer-ai-disclaimer {
+    @apply col-span-4 -mt-1.5 rounded-[5px] border border-amber-300/20 px-2 py-0 text-[9px] font-bold leading-tight text-amber-100/70;
+    background: rgba(255, 180, 48, .045);
   }
 
   .right-panel {
@@ -8094,6 +8401,12 @@
   --i18n-letter-spacing: 0.04em;
 }
 
+[data-lang="ko"] {
+  --i18n-font: "Avenir Next", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --i18n-line-height: 1.7;
+  --i18n-letter-spacing: 0.01em;
+}
+
 /* Apply language typography to shell */
 .console-shell {
   font-family: var(--i18n-font, var(--font-console));
@@ -8198,10 +8511,18 @@
   overflow-wrap: break-word;
 }
 
-/* -- English: reduce sidebar button text by 20% to prevent crowding -- */
+/* -- Latin/long-script side rail labels need extra room in the narrow rail. -- */
 [data-lang="en"] .command-btn > span:last-child,
-[data-lang="en"] .adapter-btn > span:last-child {
-  font-size: clamp(10.4px, 0.92vw, 17.6px);
+[data-lang="en"] .adapter-name,
+[data-lang="pt-PT"] .command-btn > span:last-child,
+[data-lang="pt-PT"] .adapter-name,
+[data-lang="es"] .command-btn > span:last-child,
+[data-lang="es"] .adapter-name,
+[data-lang="th"] .command-btn > span:last-child,
+[data-lang="th"] .adapter-name,
+[data-lang="ko"] .command-btn > span:last-child,
+[data-lang="ko"] .adapter-name {
+  font-size: clamp(10.5px, 0.86vw, 16px);
 }
 
 /* ════════════════════════════════════════════

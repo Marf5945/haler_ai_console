@@ -8,6 +8,8 @@ describe('useI18n', () => {
   });
 
   it('switches language in place without requiring a page reload', () => {
+    expect(useI18n.getState().t('composer.aiDisclaimer')).toBe('AI 的內容不一定正確，請務必查證。');
+
     useI18n.getState().setLanguage('en');
 
     expect(useI18n.getState().language).toBe('en');
@@ -15,6 +17,7 @@ describe('useI18n', () => {
     expect(document.documentElement.lang).toBe('en');
     expect(document.documentElement.dir).toBe('ltr');
     expect(useI18n.getState().t('settings.panelSettings')).toBe('Panel Settings');
+    expect(useI18n.getState().t('composer.aiDisclaimer')).toBe('AI content may not always be accurate. Please verify important information.');
   });
 
   it('loads Japanese translations without falling back to zh-TW', () => {

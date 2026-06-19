@@ -382,6 +382,10 @@ export function FinalizeNativeReferenceFileExport(arg1, arg2, arg3) {
   return window['go']['main']['App']['FinalizeNativeReferenceFileExport'](arg1, arg2, arg3);
 }
 
+export function FinalizeNativeSearchSummaryExport(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['FinalizeNativeSearchSummaryExport'](arg1, arg2, arg3, arg4);
+}
+
 export function FinalizeNativeSkillExport(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['FinalizeNativeSkillExport'](arg1, arg2, arg3, arg4);
 }
@@ -918,6 +922,10 @@ export function NativeDragExportReferenceFile(arg1) {
   return window['go']['main']['App']['NativeDragExportReferenceFile'](arg1);
 }
 
+export function NativeDragExportSearchSummary(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['NativeDragExportSearchSummary'](arg1, arg2, arg3, arg4);
+}
+
 export function NativeDragExportSkill(arg1) {
   return window['go']['main']['App']['NativeDragExportSkill'](arg1);
 }
@@ -1076,6 +1084,10 @@ export function RejectPackageInstall(arg1, arg2) {
 
 export function RemoveAllowlistEntry(arg1) {
   return window['go']['main']['App']['RemoveAllowlistEntry'](arg1);
+}
+
+export function RemoveReferenceFile(arg1) {
+  return window['go']['main']['App']['RemoveReferenceFile'](arg1);
 }
 
 export function RemoveRemoteBridgeChannel(arg1) {

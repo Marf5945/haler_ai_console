@@ -49,6 +49,14 @@ var rootIndexCache = struct {
 	entries map[string]cachedRootIndex
 }{entries: make(map[string]cachedRootIndex)}
 
+// InvalidateAll 清空 root index 快取；引用檔有增刪（匯入／移除）後呼叫，
+// 讓變更立即反映，不必等 cacheTTL（預設 60s）過期。
+func InvalidateAll() {
+	rootIndexCache.Lock()
+	rootIndexCache.entries = make(map[string]cachedRootIndex)
+	rootIndexCache.Unlock()
+}
+
 type SearchRequest struct {
 	Query string   `json:"query"`
 	Scope []string `json:"scope,omitempty"`
@@ -154,11 +162,29 @@ func (s *Service) SearchWithContext(ctx context.Context, req SearchRequest) (Sea
 		}
 		return candidates[i].Score > candidates[j].Score
 	})
+	// 跨 root 去重：同一檔在多個掃描根、或同內容重覆，只保留排序後第一筆（分數最高）。
+	candidates = dedupSearchResults(candidates)
 	if len(candidates) > limit {
 		candidates = candidates[:limit]
 	}
 	fileOutcome.Results = candidates
 	return fileOutcome, nil
+}
+
+// dedupSearchResults 去掉重複命中：以 base 檔名＋標題＋snippet 當 key（同內容會一致），
+// 保留排序後第一筆。避免同一份檔存在於多個掃描根時回傳重複結果。
+func dedupSearchResults(results []SearchResult) []SearchResult {
+	seen := make(map[string]struct{}, len(results))
+	out := make([]SearchResult, 0, len(results))
+	for _, r := range results {
+		key := strings.ToLower(filepath.Base(strings.TrimSpace(r.Path))) + "\x00" + r.Title + "\x00" + r.Snippet
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, r)
+	}
+	return out
 }
 
 func (s *Service) searchRoots(ctx context.Context, query string, auxTerms []string, scope map[string]bool) (SearchOutcome, error) {
@@ -503,7 +529,7 @@ func ParseUserQuery(text string) (SearchRequest, bool) {
 	if trimmed == "" {
 		return SearchRequest{}, false
 	}
-	for _, prefix := range []string{"搜尋", "查找", "查詢"} {
+	for _, prefix := range []string{"本機搜尋", "搜尋", "查找", "查詢"} {
 		if target, ok := cutCommand(trimmed, prefix); ok {
 			return requestFromTarget(target, true), true
 		}

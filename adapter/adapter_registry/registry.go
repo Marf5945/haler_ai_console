@@ -620,13 +620,31 @@ func executableCandidates(path string) []string {
 	}
 }
 
+// cliSearchUpLevels / cliSearchDownLevels 控制：當使用者貼的是「附近」路徑
+// （而非執行檔本身）時，往上 / 往下各搜尋幾層來找出可用的 CLI。
+const (
+	cliSearchUpLevels   = 2
+	cliSearchDownLevels = 2
+)
+
+// knownCLIBinaryNames 是內建可自動辨識的 CLI 執行檔名稱。
+var knownCLIBinaryNames = []string{"claude", "codex", "gemini", "ollama", "aider", "copilot"}
+
+// resolveExecutablePath 解析使用者輸入的路徑，回傳可執行的 CLI 完整路徑。
+// 接受三種輸入：
+//  1. 直接指向執行檔；
+//  2. 指向安裝 / 專案資料夾（檢查 <dir>、<dir>/bin、<dir>/node_modules/.bin）；
+//  3. 指向上述「附近」的路徑——往上、往下各搜尋數層，讓使用者不必貼到
+//     精準路徑也能找到 CLI，且不鎖死特定檔名。
 func resolveExecutablePath(path, binaryName string) (string, error) {
 	path = expandHome(strings.TrimSpace(path))
 	if path == "" {
 		return "", fmt.Errorf("adapter_registry: path is empty")
 	}
+
 	info, err := os.Stat(path)
 	if err != nil {
+		// 路徑本身可能是執行檔（含 Windows 副檔名變體）但 Stat 失敗。
 		for _, candidate := range executableCandidates(path) {
 			if isExecutableFile(candidate) {
 				return unwrapLauncherPath(candidate, binaryName), nil
@@ -634,31 +652,220 @@ func resolveExecutablePath(path, binaryName string) (string, error) {
 		}
 		return "", fmt.Errorf("adapter_registry: path %q not found: %w", path, err)
 	}
+
+	// 直接指向可執行檔：原樣採用，不鎖死檔名。
 	if !info.IsDir() {
-		if !isExecutableFile(path) {
-			return "", fmt.Errorf("adapter_registry: path %q is not executable", path)
+		if isExecutableFile(path) {
+			return unwrapLauncherPath(path, binaryName), nil
 		}
-		return unwrapLauncherPath(path, binaryName), nil
+		// 指到非執行檔（例如 README）：改從它所在的資料夾往外找。
+		path = filepath.Dir(path)
 	}
 
-	names := []string{binaryName}
-	if binaryName == "" {
-		names = []string{"claude", "codex", "gemini", "ollama", "aider", "copilot"}
+	names := candidateBinaryNames(binaryName, path)
+	bases := searchBaseDirs(path, cliSearchUpLevels, cliSearchDownLevels)
+
+	// 1) 依已知 / 推斷出的名稱在每個基準資料夾中尋找。
+	for _, base := range bases {
+		if hit, name := probeDirForCLI(base, names); hit != "" {
+			return unwrapLauncherPath(hit, name), nil
+		}
 	}
+
+	// 2) 改名後備：執行檔被改名、但底層套件仍是已知 CLI。
+	if hit, name := probeRenamedKnownCLI(bases); hit != "" {
+		return unwrapLauncherPath(hit, name), nil
+	}
+
+	// 3) 唯一執行檔後備：搜尋範圍內的 bin / node_modules/.bin 只有單一可執行檔。
+	if hit := probeUniqueExecutable(bases); hit != "" {
+		return unwrapLauncherPath(hit, strings.ToLower(filepath.Base(hit))), nil
+	}
+
+	return "", fmt.Errorf("adapter_registry: no executable CLI found near %q", path)
+}
+
+// candidateBinaryNames 組出要尋找的執行檔名稱候選，順序為：
+// 明確指定的名稱 → 由路徑推斷的名稱（去掉 _cli / -cli 後綴）→ 內建已知名稱。
+func candidateBinaryNames(binaryName, path string) []string {
+	seen := map[string]bool{}
+	var names []string
+	add := func(n string) {
+		n = strings.TrimSpace(strings.ToLower(n))
+		if n == "" || seen[n] {
+			return
+		}
+		seen[n] = true
+		names = append(names, n)
+	}
+	add(binaryName)
+	base := strings.ToLower(strings.TrimSpace(filepath.Base(path)))
+	base = strings.TrimSuffix(base, "_cli")
+	base = strings.TrimSuffix(base, "-cli")
+	add(base)
+	for _, k := range knownCLIBinaryNames {
+		add(k)
+	}
+	return names
+}
+
+// searchBaseDirs 回傳要探查的基準資料夾清單：先是 start 自身與往下 down 層的
+// 子資料夾（廣度優先），再往上 up 層的祖先資料夾。先「往下」再「往上」可降低
+// 誤抓到別處同名 CLI 的機率。整體資料夾數設上限以保護效能。
+func searchBaseDirs(start string, up, down int) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(d string) bool {
+		d = filepath.Clean(d)
+		if seen[d] {
+			return false
+		}
+		seen[d] = true
+		out = append(out, d)
+		return true
+	}
+
+	const maxDirs = 256
+	add(start)
+
+	// 往下：廣度優先，略過 node_modules 等大型 / 雜訊資料夾。
+	type node struct {
+		dir   string
+		depth int
+	}
+	queue := []node{{start, 0}}
+	for len(queue) > 0 && len(out) < maxDirs {
+		cur := queue[0]
+		queue = queue[1:]
+		if cur.depth >= down {
+			continue
+		}
+		entries, err := os.ReadDir(cur.dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() || isNoiseDir(e.Name()) {
+				continue
+			}
+			child := filepath.Join(cur.dir, e.Name())
+			if add(child) {
+				queue = append(queue, node{child, cur.depth + 1})
+			}
+		}
+	}
+
+	// 往上：祖先資料夾。
+	cur := start
+	for i := 0; i < up; i++ {
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			break
+		}
+		add(parent)
+		cur = parent
+	}
+	return out
+}
+
+// isNoiseDir 判斷往下搜尋時應略過的資料夾（避免掃進龐大 / 無關目錄）。
+// 注意：node_modules/.bin 仍會在 probeDirForCLI 以相對路徑明確檢查，
+// 這裡略過的是「遞迴走進」node_modules 本體。
+func isNoiseDir(name string) bool {
+	switch name {
+	case "node_modules", ".git", ".gocache", ".cache", "dist", "build", "vendor", ".next":
+		return true
+	}
+	return false
+}
+
+// probeDirForCLI 在單一基準資料夾中，依名稱清單檢查 <dir>/<name>、
+// <dir>/bin/<name>、<dir>/node_modules/.bin/<name>。
+func probeDirForCLI(base string, names []string) (string, string) {
 	for _, name := range names {
+		if name == "" {
+			continue
+		}
 		for _, rel := range []string{
 			name,
 			filepath.Join("bin", name),
 			filepath.Join("node_modules", ".bin", name),
 		} {
-			for _, candidate := range executableCandidates(filepath.Join(path, rel)) {
+			for _, candidate := range executableCandidates(filepath.Join(base, rel)) {
 				if isExecutableFile(candidate) {
-					return unwrapLauncherPath(candidate, name), nil
+					return candidate, name
 				}
 			}
 		}
 	}
-	return "", fmt.Errorf("adapter_registry: no executable CLI found under %q", path)
+	return "", ""
+}
+
+// probeRenamedKnownCLI 處理「執行檔被改名、但底層套件仍是已知 CLI」的情況：
+// 掃描 node_modules/.bin 內的連結，解析其指向，若指向的套件路徑含已知 CLI
+// 名稱（如 .../node_modules/@google/gemini-cli/...）則採用。
+func probeRenamedKnownCLI(bases []string) (string, string) {
+	for _, base := range bases {
+		binDir := filepath.Join(base, "node_modules", ".bin")
+		entries, err := os.ReadDir(binDir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			link := filepath.Join(binDir, e.Name())
+			if !isExecutableFile(link) {
+				continue
+			}
+			target, err := filepath.EvalSymlinks(link)
+			if err != nil {
+				continue
+			}
+			lower := strings.ToLower(target)
+			for _, known := range knownCLIBinaryNames {
+				if strings.Contains(lower, known) {
+					return link, known
+				}
+			}
+		}
+	}
+	return "", ""
+}
+
+// probeUniqueExecutable 掃描搜尋範圍內所有 bin / node_modules/.bin 資料夾，
+// 若整體只找到「唯一一個」可執行檔，回傳該路徑；找到多個則回傳空字串
+// （視為無法判定，交由使用者明確指定）。
+func probeUniqueExecutable(bases []string) string {
+	seenFile := map[string]bool{}
+	var found []string
+	for _, base := range bases {
+		for _, sub := range []string{filepath.Join(base, "bin"), filepath.Join(base, "node_modules", ".bin")} {
+			entries, err := os.ReadDir(sub)
+			if err != nil {
+				continue
+			}
+			for _, e := range entries {
+				if e.IsDir() {
+					continue
+				}
+				full := filepath.Join(sub, e.Name())
+				if !isExecutableFile(full) || seenFile[full] {
+					continue
+				}
+				seenFile[full] = true
+				found = append(found, full)
+				if len(found) > 1 {
+					return ""
+				}
+			}
+		}
+	}
+	if len(found) == 1 {
+		return found[0]
+	}
+	return ""
 }
 
 func inferCLIName(name, path string) string {

@@ -13,6 +13,8 @@ func TestIsReferenceListingQuestion(t *testing.T) {
 		"你看到哪些檔案",
 		"拉進來的有幾個檔",
 		"what files are loaded",
+		"What reference files do I have?",
+		"Que ficheiros de referencia tenho?",
 	}
 	for _, in := range listing {
 		if !isReferenceListingQuestion(in) {
@@ -30,6 +32,17 @@ func TestIsReferenceListingQuestion(t *testing.T) {
 	for _, in := range notListing {
 		if isReferenceListingQuestion(in) {
 			t.Fatalf("isReferenceListingQuestion(%q) 不應判為列檔意圖", in)
+		}
+	}
+}
+
+func TestIsLoadedReferenceVisibilityQuestionMultilingual(t *testing.T) {
+	for _, in := range []string{
+		"What reference files do I have?",
+		"Que ficheiros de referencia tenho?",
+	} {
+		if !isLoadedReferenceVisibilityQuestion(in) {
+			t.Fatalf("isLoadedReferenceVisibilityQuestion(%q) 應為引用檔可見性問題", in)
 		}
 	}
 }

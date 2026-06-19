@@ -42,6 +42,28 @@ func TestOfflineChatReply(t *testing.T) {
 	}
 }
 
+func TestLocalizedOfflineChatReply(t *testing.T) {
+	cases := []struct {
+		text string
+		lang string
+		want string
+	}{
+		{"Hello", responseLanguageEN, "Hello! How can I help?"},
+		{"Thanks", responseLanguageEN, "You're welcome!"},
+		{"Ola", responseLanguagePT, "Olá! Em que posso ajudar?"},
+		{"Obrigado", responseLanguagePT, "De nada!"},
+	}
+	for _, c := range cases {
+		got, ok := localizedOfflineChatReply(c.text, c.lang)
+		if !ok || got != c.want {
+			t.Fatalf("localizedOfflineChatReply(%q,%q) = %q,%v; want %q,true", c.text, c.lang, got, ok, c.want)
+		}
+	}
+	if got, ok := localizedOfflineChatReply("Ola", responseLanguageEN); ok {
+		t.Fatalf("English mode should not treat ambiguous Ola as fast-path greeting, got %q", got)
+	}
+}
+
 func TestIsRoutingQuotaHit(t *testing.T) {
 	cases := []struct {
 		name    string

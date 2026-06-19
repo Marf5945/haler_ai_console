@@ -224,12 +224,14 @@ import {
   SaveRemoteBridgeInboundSecret,
   ListRemoteBridgeInboundAdapters,
   // ── v3.6 雜項接線 ──
+  FinalizeNativeSearchSummaryExport,
   FinalizeNativeReferenceFileExport,
   ImportReferenceFile,
   ListReferenceFiles,
   ImportVideoFile,
   ListVideoFiles,
   ListReferenceImages,
+  NativeDragExportSearchSummary,
   NativeDragExportReferenceFile,
   StopSidecar,
   // ── v3.6.4 Readiness Gate UI Interaction Layer 接線 ──
@@ -293,7 +295,7 @@ const openExternal = (url) => {
 import DocumentReviewCard from './components/DocumentReviewCard';
 import VisualLearningPanel from './components/VisualLearningPanel';
 import EmbeddingPickerModal from './components/EmbeddingPickerModal';
-import useI18n, { t as _t } from './locales/useI18n';
+import useI18n, { t as _t, getAllFemaleKeywords, getAllBeastKeywords, buildGreetingTextKeyMap } from './locales/useI18n';
 
 const taskProgressDebugEnabled = typeof window !== 'undefined'
   && (new URLSearchParams(window.location.search).has('taskDebug')
@@ -309,22 +311,59 @@ const fallbackState = {
   messages: [],
 };
 
-/* i18n: greeting pool */
-const getGreetingRotationOptions = () => [
-  {text: _t('greeting.pool.0'), expression: 'idle'},
-  {text: _t('greeting.pool.1'), expression: 'idle'},
-  {text: _t('greeting.pool.2'), expression: 'idle'},
-  {text: _t('greeting.pool.3'), expression: 'speechless'},
-  {text: _t('greeting.pool.4'), expression: 'idle', rare: true},
-  {text: _t('greeting.pool.5'), expression: 'speechless'},
-  {text: _t('greeting.pool.6'), expression: 'happy'},
-  {text: _t('greeting.pool.7'), expression: 'sleepy'},
-  {text: _t('greeting.pool.8'), expression: 'idle'},
-  {text: _t('greeting.pool.9'), expression: 'idle'},
+/* i18n: greeting pool — expression metadata shared by default & feminine pools */
+const GREETING_POOL_EXPRESSIONS = [
+  {expression: 'idle'},
+  {expression: 'idle'},
+  {expression: 'idle'},
+  {expression: 'speechless'},
+  {expression: 'idle', rare: true},
+  {expression: 'speechless'},
+  {expression: 'happy'},
+  {expression: 'sleepy'},
+  {expression: 'idle'},
+  {expression: 'idle'},
 ];
 
-function pickRotatingGreeting(currentText) {
-  const options = getGreetingRotationOptions();
+// variant: 'male' (default) | 'fem' (feminine secretary) | 'wild' (獸人/野性, 本汪)
+const GREETING_VARIANT_POOL = {fem: 'greeting.poolFem', wild: 'greeting.poolWild', male: 'greeting.pool'};
+const getGreetingRotationOptions = (variant = 'male') => {
+  const poolKey = GREETING_VARIANT_POOL[variant] || GREETING_VARIANT_POOL.male;
+  return GREETING_POOL_EXPRESSIONS.map((meta, i) => ({...meta, text: _t(`${poolKey}.${i}`)}));
+};
+
+// 關鍵字庫（所有語系聯集）：女性稱呼 / 獸人野性
+const GREETING_FEMALE_KEYWORDS = getAllFemaleKeywords();
+const GREETING_BEAST_KEYWORDS = getAllBeastKeywords();
+
+function matchesAnyKeyword(haystack, keywords) {
+  return keywords.some((kw) => {
+    if (!kw) return false;
+    // ASCII 關鍵字用詞界比對，避免 "sis"/"fox" 命中無關長字之類誤判
+    if (/^[a-z0-9 ]+$/.test(kw)) {
+      const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`).test(haystack);
+    }
+    return haystack.includes(kw);
+  });
+}
+
+// 回傳問候語氣：'fem' | 'wild' | 'male'
+// 優先序：女性稱呼 → 獸人野性 → 男性(預設)，以保護女性偵測不被野性蓋過
+function personaGreetingVariant(persona) {
+  if (!persona) return 'male';
+  const haystack = [persona.name, persona.identity, persona.personality, persona.scenario]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  if (!haystack) return 'male';
+  if (matchesAnyKeyword(haystack, GREETING_FEMALE_KEYWORDS)) return 'fem';
+  if (matchesAnyKeyword(haystack, GREETING_BEAST_KEYWORDS)) return 'wild';
+  return 'male';
+}
+
+function pickRotatingGreeting(currentText, variant = 'male') {
+  const options = getGreetingRotationOptions(variant);
   const regular = options.filter((item) => !item.rare);
   const rare = options.filter((item) => item.rare);
   const basePool = rare.length > 0 && Math.random() < 0.05 ? rare : regular;
@@ -333,9 +372,31 @@ function pickRotatingGreeting(currentText) {
     pool = regular.filter((item) => item.text !== currentText);
   }
   if (pool.length === 0) {
-    pool = getGreetingRotationOptions();
+    pool = getGreetingRotationOptions(variant);
   }
   return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// 由所有語系問候字串自動產生（含 poolFem），避免手動維護；外加少數歷史別名
+const LEGACY_GREETING_ALIASES = {
+  'Hi 主人，今天天氣不錯！': 'greeting.pool.0',
+  '你好，主人。': 'greeting.pool.0',
+  '先喘口氣也可以。': 'greeting.pool.7',
+  '需要時叫我一聲。': 'greeting.pool.1',
+};
+const statusRailTextI18nKeys = {...buildGreetingTextKeyMap(), ...LEGACY_GREETING_ALIASES};
+
+function localizeStatusRailText(text) {
+  const normalized = String(text || '').trim();
+  if (!normalized) return text;
+  const key = statusRailTextI18nKeys[normalized];
+  return key ? _t(key) : text;
+}
+
+function localizeStatusRailView(view) {
+  if (!view) return view;
+  const rawText = view.rawText || view.text;
+  return {...view, rawText, text: localizeStatusRailText(rawText)};
 }
 
 // Panel-style identity is a STABLE key (language-independent). Labels are
@@ -1188,6 +1249,8 @@ function App() {
   const [skillExportDialog, setSkillExportDialog] = useState(null);
   const [referenceFiles, setReferenceFiles] = useState([]);
   const [referenceExportDialog, setReferenceExportDialog] = useState(null);
+  const [searchSummaryExportDialog, setSearchSummaryExportDialog] = useState(null);
+  const [summaryWarning, setSummaryWarning] = useState(null); // 待確認的「摘要」原文；非 null 即顯示警告視窗
   const [referenceLinkOpen, setReferenceLinkOpen] = useState(false);
   const [referenceLinkValue, setReferenceLinkValue] = useState('');
   const referenceInternalDragRef = useRef(false);
@@ -1838,7 +1901,12 @@ function App() {
           haoras: Array.isArray(next?.haoras) ? next.haoras : fallbackState.haoras,
           messages: Array.isArray(next?.messages) ? next.messages : [],
         };
-        setState(hydrated);
+        const localizedStatusRail = localizeStatusRailView(hydrated.statusRail) || fallbackState.statusRail;
+        setState({
+          ...hydrated,
+          greeting: localizeStatusRailText(hydrated.greeting || localizedStatusRail?.text || fallbackState.greeting),
+          statusRail: localizedStatusRail,
+        });
         loadedConversationIdsRef.current.add('main');
         setConversationMessages('main', hydrated.messages);
       })
@@ -1847,6 +1915,10 @@ function App() {
       .then((next) => {
         const normalized = normalizeSettingsState(next);
         setSettingsState(normalized);
+        const startupLocale = panelLangToLocale(normalized.panel?.panelLanguage);
+        if (startupLocale && startupLocale !== useI18n.getState().language) {
+          useI18n.getState().setLanguage(startupLocale);
+        }
         const activePersona = findActivePersona(normalized);
         if (activePersona?.name) setPersonaName(activePersona.name);
         if (activePersona?.identity) setPersonaJob(activePersona.identity);
@@ -2146,10 +2218,11 @@ function App() {
     const offStatusRail = EventsOn('statusrail:updated', (payload) => {
       if (!payload) return;
       unlockManualGreeting();
+      const localizedPayload = localizeStatusRailView(payload);
       setState((prev) => ({
         ...prev,
-        greeting: payload.text || prev.greeting,
-        statusRail: payload,
+        greeting: localizedPayload.text || prev.greeting,
+        statusRail: localizedPayload,
       }));
     });
 
@@ -3251,11 +3324,12 @@ function App() {
       callWails(PollStatusRail)
         .then((statusRail) => {
           if (!statusRail) return;
+          const localizedStatusRail = localizeStatusRailView(statusRail);
           // 上方互動輸出快照：輪詢只刷新 greeting/statusRail。
           setState((prev) => ({
             ...prev,
-            greeting: manualGreetingLockedRef.current ? prev.greeting : (statusRail.text || prev.greeting),
-            statusRail: manualGreetingLockedRef.current ? {...statusRail, text: prev.greeting} : statusRail,
+            greeting: manualGreetingLockedRef.current ? prev.greeting : (localizedStatusRail.text || prev.greeting),
+            statusRail: manualGreetingLockedRef.current ? {...localizedStatusRail, text: prev.greeting} : localizedStatusRail,
           }));
         })
         .catch(() => {});
@@ -3685,7 +3759,8 @@ function App() {
   }
 
   async function rotateGreeting() {
-    const next = pickRotatingGreeting(state.greeting);
+    const greetingVariant = personaGreetingVariant(findActivePersona(settingsState));
+    const next = pickRotatingGreeting(state.greeting, greetingVariant);
     manualGreetingLockedRef.current = true;
     if (next?.expression) {
       setManualAvatarState(next.expression);
@@ -4696,14 +4771,15 @@ function App() {
       [_t('settings.langPt')]: 'pt-PT',
       [_t('settings.langEs')]: 'es',
       [_t('settings.langTh')]: 'th',
+      [_t('settings.langKo')]: 'ko',
       // fallback hardcoded labels
       '繁中': 'zh-TW', '中文': 'zh-TW', '英文': 'en', '日文': 'ja',
       'Traditional Chinese': 'zh-TW', 'Chinese': 'zh-TW', 'English': 'en', 'Japanese': 'ja',
       '中': 'zh-TW', 'en': 'en', 'ja': 'ja',
-      'pt': 'pt-PT', 'pt-PT': 'pt-PT', 'es': 'es', 'th': 'th',
-      'Português': 'pt-PT', '葡萄牙文': 'pt-PT', 'Español': 'es', '西班牙文': 'es', 'ไทย': 'th', '泰文': 'th',
+      'pt': 'pt-PT', 'pt-PT': 'pt-PT', 'es': 'es', 'th': 'th', 'ko': 'ko',
+      'Português': 'pt-PT', '葡萄牙文': 'pt-PT', 'Español': 'es', '西班牙文': 'es', 'ไทย': 'th', '泰文': 'th', '한국어': 'ko', '韓文': 'ko', '韓語': 'ko', 'Korean': 'ko',
       // self-heal: raw i18n keys leaked by an older build
-      'settings.langPt': 'pt-PT', 'settings.langEs': 'es', 'settings.langTh': 'th',
+      'settings.langPt': 'pt-PT', 'settings.langEs': 'es', 'settings.langTh': 'th', 'settings.langKo': 'ko',
     };
     return map[displayLabel] || null;
   }
@@ -6142,6 +6218,12 @@ function App() {
     return `${landed}\n${result.drop_target_kind}: ${result.drop_target_dir}`;
   }
 
+  function formatNativeSearchSummaryDropDetail(result) {
+    const landed = result?.landed_path || result?.message || '搜尋摘要已拖出';
+    if (!result?.drop_target_kind || !result?.drop_target_dir) return landed;
+    return `${landed}\n${result.drop_target_kind}: ${result.drop_target_dir}`;
+  }
+
   function showNativeReferenceExportDialog(result, fallbackFile = null) {
     if (result?.status !== 'success' || !result?.landed_path) return;
     setReferenceExportDialog({
@@ -6152,6 +6234,17 @@ function App() {
     });
   }
 
+  function showNativeSearchSummaryExportDialog(result) {
+    if (result?.status !== 'success' || !result?.landed_path) return;
+    setSearchSummaryExportDialog({
+      name: result.display_name || result.filename || '搜尋摘要.md',
+      tempPath: result.temp_path || '',
+      landedPath: result.landed_path || '',
+      checksum: result.checksum || '',
+      landedDetail: formatNativeSearchSummaryDropDetail(result),
+    });
+  }
+
   useEffect(() => {
     const offNativeReferenceExport = EventsOn('reference:native_completed', (result) => {
       handleReferenceInternalDrag(false);
@@ -6159,6 +6252,38 @@ function App() {
     });
     return () => offNativeReferenceExport();
   }, []);
+
+  useEffect(() => {
+    const offNativeSearchSummaryExport = EventsOn('searchsummary:native_completed', (result) => {
+      showNativeSearchSummaryExportDialog(result);
+    });
+    return () => offNativeSearchSummaryExport();
+  }, []);
+
+  async function startNativeSearchSummaryExport(card) {
+    // card 由 MessageRow 算好（與 Popover 預覽同一份），匯出即所見，避免漂移。
+    const markdown = String(card?.markdown || '');
+    if (!markdown.trim()) {
+      setToolResult({toolId: 'doc-entrance', ok: false, message: '搜尋摘要內容是空的'});
+      return null;
+    }
+    try {
+      const result = await callWails(() => NativeDragExportSearchSummary(
+        card?.title || '搜尋摘要',
+        card?.filename || '',
+        markdown,
+        `search-summary-${Date.now()}`,
+      ));
+      // 彈窗統一由 searchsummary:native_completed 事件開（與 reference 一致），這裡只回報失敗。
+      if (result && result.status !== 'success' && result.status !== 'cancelled') {
+        setToolResult({toolId: 'doc-entrance', ok: false, message: result?.message || '搜尋摘要拖曳失敗'});
+      }
+      return result;
+    } catch (error) {
+      setToolResult({toolId: 'doc-entrance', ok: false, message: error?.message || String(error)});
+      return null;
+    }
+  }
 
   async function startNativeReferenceExport(file) {
     if (!file?.path || file.source !== 'library') {
@@ -6205,6 +6330,27 @@ function App() {
         setToolResult({toolId: 'doc-entrance', ok: true, message: '引用檔已複製'});
       }
       await refreshReferenceFiles();
+    } catch (error) {
+      setToolResult({toolId: 'doc-entrance', ok: false, message: error?.message || String(error)});
+    }
+  }
+
+  async function handleSearchSummaryExportAction(action) {
+    if (!searchSummaryExportDialog) return;
+    const target = searchSummaryExportDialog;
+    setSearchSummaryExportDialog(null);
+    try {
+      await callWails(() => FinalizeNativeSearchSummaryExport(
+        action,
+        target.tempPath || '',
+        target.landedPath || '',
+        target.checksum || '',
+      ));
+      if (action === 'cancel') {
+        setToolResult({toolId: 'doc-entrance', ok: true, message: '已刪除剛剛拖出的搜尋摘要'});
+      } else {
+        setToolResult({toolId: 'doc-entrance', ok: true, message: '搜尋摘要已複製'});
+      }
     } catch (error) {
       setToolResult({toolId: 'doc-entrance', ok: false, message: error?.message || String(error)});
     }
@@ -6950,6 +7096,18 @@ function App() {
   const _i18nLang = useI18n(s => s.language);
   const _i18nDir  = useI18n(s => s.getDirection)();
 
+  useEffect(() => {
+    setState((prev) => {
+      if (manualGreetingLockedRef.current) return prev;
+      const localizedStatusRail = localizeStatusRailView(prev.statusRail);
+      return {
+        ...prev,
+        greeting: localizedStatusRail?.text || localizeStatusRailText(prev.greeting),
+        statusRail: localizedStatusRail || prev.statusRail,
+      };
+    });
+  }, [_i18nLang]);
+
   function handleGlobalFileDragOver(event) {
     const types = Array.from(event.dataTransfer?.types || []);
     if (!types.includes('Files')) return;
@@ -7475,7 +7633,8 @@ function App() {
                   callWails(() => DeleteTalkMessageForAgent(convId, target)).catch(() => {});
                 }
               }}
-              onSummarizeSearch={(text) => submitComposerText(t('system.summarizeSearch', { text }))}
+              onSummarizeSearch={(text) => setSummaryWarning(text)}
+              onExportSearchSummary={startNativeSearchSummaryExport}
               // SEC-06: 讀取網址按鈕注入文字，複用後端確認流程
               onInjectText={(text) => submitComposerText(text)}
               activeConversationId={activeConversationIdRef.current || 'main'}
@@ -7555,8 +7714,8 @@ function App() {
           data-vl-target="visual-learning-monitor-launcher"
           onClick={() => setVlMonitorOpen((v) => !v)}
           type="button"
-          aria-label={vlMonitorOpen ? '隱藏 Visual Learning 監視' : '開啟 Visual Learning 監視'}
-          title={vlMonitorOpen ? '隱藏監視面板' : 'Visual Learning 監視'}
+          aria-label={vlMonitorOpen ? t('vl.hideMonitor') : t('vl.openMonitor')}
+          title={vlMonitorOpen ? t('vl.hidePanel') : t('vl.panelTitle')}
         >
           <span>VL</span>
           {vlPendingCount > 0 && <span className="vl-monitor-launcher-badge">{vlPendingCount}</span>}
@@ -7922,6 +8081,36 @@ function App() {
             {label: t('adapter.remove'), onClick: () => handleReferenceExportAction('remove')},
             {label: t('adapter.copyAction'), onClick: () => handleReferenceExportAction('copy')},
             {label: t('common.cancel'), onClick: () => handleReferenceExportAction('cancel')},
+          ]}
+        />
+      )}
+      {searchSummaryExportDialog && (
+        <DragActionModal
+          ariaLabel="搜尋摘要拖曳操作"
+          icon="☰"
+          title={searchSummaryExportDialog.name}
+          detail={searchSummaryExportDialog.landedDetail || searchSummaryExportDialog.landedPath}
+          actions={[
+            // 對話來源不可「移除」原文，故鎖住此鍵；保留三鍵外觀與共用視窗一致。
+            {label: t('adapter.remove'), disabled: true, onClick: () => {}},
+            {label: t('adapter.copyAction'), onClick: () => handleSearchSummaryExportAction('copy')},
+            {label: t('common.cancel'), onClick: () => handleSearchSummaryExportAction('cancel')},
+          ]}
+        />
+      )}
+      {summaryWarning != null && (
+        <DragActionModal
+          ariaLabel={t('system.summaryWarningTitle')}
+          icon="⚠"
+          title={t('system.summaryWarningTitle')}
+          detail={t('system.summaryWarningBody')}
+          actions={[
+            {label: t('system.summaryConfirm'), onClick: () => {
+              const pending = summaryWarning;
+              setSummaryWarning(null);
+              submitComposerText(t('system.summarizeSearch', { text: pending }));
+            }},
+            {label: t('common.cancel'), onClick: () => setSummaryWarning(null)},
           ]}
         />
       )}
@@ -9003,13 +9192,13 @@ function updateReferenceFileStatus(current, path, patch) {
   });
 }
 
-function referenceFileStatusLabel(status) {
+function referenceFileStatusLabel(status, translate = _t) {
   return {
-    importing: '處理中',
-    checking: '檢查中',
-    ready: '已載入',
-    error: '失敗',
-  }[status] || '已加入';
+    importing: translate('rightRail.refStatusImporting'),
+    checking: translate('rightRail.refStatusChecking'),
+    ready: translate('rightRail.refStatusReady'),
+    error: translate('rightRail.refStatusError'),
+  }[status] || translate('rightRail.refStatusAdded');
 }
 
 function shouldShowReferenceFileDetail(file) {
@@ -9071,11 +9260,11 @@ function resolveMonitorTraceURL() {
       .then(() => GetMonitorLinks?.())
       .then((link) => {
         monitorLinkCache = link || {};
-        return monitorLinkCache.url;
+        return monitorLinkCache.url || '';
       })
       .catch(() => {
         monitorLinkCache = {};
-        return monitorLinkCache.url;
+        return '';
       })
       .finally(() => {
         monitorLinkPending = null;
@@ -9129,10 +9318,16 @@ const _panelLangLabelMap = {
   '西班牙文': 'settings.langEs',
   'ไทย': 'settings.langTh',
   '泰文': 'settings.langTh',
+  '한국어': 'settings.langKo',
+  '韓文': 'settings.langKo',
+  '韓語': 'settings.langKo',
+  'Korean': 'settings.langKo',
+  'ko': 'settings.langKo',
   // self-heal: raw i18n keys leaked by an older build
   'settings.langPt': 'settings.langPt',
   'settings.langEs': 'settings.langEs',
   'settings.langTh': 'settings.langTh',
+  'settings.langKo': 'settings.langKo',
 };
 const _roleLangLabelMap = {
   '自動': 'settings.roleLangAuto',
@@ -9157,6 +9352,11 @@ const _roleLangLabelMap = {
   '西班牙文': 'settings.langEs',
   'ไทย': 'settings.langTh',
   '泰文': 'settings.langTh',
+  '한국어': 'settings.langKo',
+  '韓文': 'settings.langKo',
+  '韓語': 'settings.langKo',
+  'Korean': 'settings.langKo',
+  'ko': 'settings.langKo',
 };
 const _fontPresetLabelMap = {
   // 預設（沿用系統/語言字型，不覆寫）
@@ -9843,6 +10043,24 @@ function OnboardingToolDemo() {
         <li><span>2</span>{t('onboarding.toolStep2')}</li>
         <li><span>3</span>{t('onboarding.toolStep3')}</li>
       </ol>
+
+      <div className="onboarding-search-demo" aria-hidden="true">
+        <div className="onboarding-search-card">
+          <span className="onboarding-search-icon">⌕</span>
+          <span>
+            <strong>{t('onboarding.searchDemoTitle')}</strong>
+            <small>{t('onboarding.searchDemoKeyword')}</small>
+          </span>
+          <i>{t('onboarding.searchDemoBadge')}</i>
+        </div>
+        <div className="onboarding-search-preview">
+          <strong>{t('onboarding.searchDemoFile')}</strong>
+          <p># {t('onboarding.searchDemoTitle')}</p>
+        </div>
+        <div className="onboarding-search-drag">
+          <span>{t('onboarding.searchDemoFile')}</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -11622,14 +11840,14 @@ function SettingsMenu({
           icon="◎"
           label={t('settings.panelLanguage')}
           value={panelLanguageValue}
-          options={[t('settings.langZhTW'), t('settings.langEn'), t('settings.langJa'), t('settings.langPt'), t('settings.langEs'), t('settings.langTh')]}
+          options={[t('settings.langZhTW'), t('settings.langEn'), t('settings.langJa'), t('settings.langPt'), t('settings.langEs'), t('settings.langTh'), t('settings.langKo')]}
           onSelect={(lang) => onPanelChange({panelLanguage: lang})}
         />
         <SettingPopupSelect
           icon="♙"
           label={t('settings.roleLanguage')}
           value={roleLanguageValue}
-          options={[t('settings.roleLangAuto'), t('settings.langZhTW'), t('settings.langEn'), t('settings.langJa'), t('settings.langPt'), t('settings.langEs'), t('settings.langTh')]}
+          options={[t('settings.roleLangAuto'), t('settings.langZhTW'), t('settings.langEn'), t('settings.langJa'), t('settings.langPt'), t('settings.langEs'), t('settings.langTh'), t('settings.langKo')]}
           onSelect={(lang) => onPanelChange({roleLanguage: lang})}
         />
         <SettingPopupSelect
@@ -14051,7 +14269,7 @@ function ComposerConfirmBubble({action, onConfirm, onCancel}) {
 }
 
 function ConversationPanel({
-  messages, personaName, draft, onDraftChange, onSend, onDelete, onSummarizeSearch,
+  messages, personaName, draft, onDraftChange, onSend, onDelete, onSummarizeSearch, onExportSearchSummary,
   onInjectText, activeConversationId,
   // v3.6.4 Readiness Gate props
   readinessGate = fallbackReadinessGate,
@@ -14176,8 +14394,10 @@ function ConversationPanel({
               setActiveMessage(null);
             }}
             onSummarizeSearch={onSummarizeSearch}
+            onExportSearchSummary={onExportSearchSummary}
             onInjectText={onInjectText}
             sessionId={activeConversationId}
+            previousMessage={messages[index - 1] || ''}
           />
         ))}
         {pendingTaskReview && (
@@ -14290,8 +14510,8 @@ function ConversationPanel({
         <button
           className={`attach-btn task-stop-btn ${taskActive ? 'task-stop-active' : ''}`}
           type="button"
-          title={taskActive ? '停止目前任務' : '目前沒有執行中的任務'}
-          aria-label={taskActive ? '停止目前任務' : '目前沒有執行中的任務'}
+          title={taskActive ? t('composer.stopTask') : t('composer.noActiveTask')}
+          aria-label={taskActive ? t('composer.stopTask') : t('composer.noActiveTask')}
           disabled={!taskActive}
           onClick={() => onCancelTask?.()}
         >
@@ -14366,13 +14586,16 @@ function ConversationPanel({
               }
             }}
           />
-          <button className={`send-btn ${composerReady ? 'send-btn-ready' : ''}`} type="submit"><span>◢</span>{t('composer.send')}</button>
+          <button className={`send-btn ${composerReady ? 'send-btn-enabled' : ''} ${hasSelectedFloatingCandidates ? 'send-btn-ready' : ''}`} type="submit"><span>◢</span>{t('composer.send')}</button>
         </div>
         {(voiceStatus || voiceError || voiceState?.status !== 'ready') && (
           <div className={`voice-status ${voiceError ? 'voice-status-error' : ''}`}>
             {voiceError || voiceStatus || voiceStatusLabel(voiceState?.status)}
           </div>
         )}
+        <div className="composer-ai-disclaimer">
+          {t('composer.aiDisclaimer')}
+        </div>
         {/* §12A.5B Dispatch 狀態提示 */}
         {Object.values(dispatchStatus).length > 0 && (
           <div className="dispatch-status-area">
@@ -14488,7 +14711,7 @@ function ReviewPanel({
           type="button"
           onClick={() => onPopupChange(activePopup === 'dag' ? null : 'dag')}
         >
-          <span>任務進度</span>
+          <span>{t('dag.taskProgress')}</span>
           <strong>{dagRun ? dagStatusLabel(dagRun.status) : t('dag.standby')}</strong>
         </button>
         <button
@@ -14505,7 +14728,7 @@ function ReviewPanel({
           onClick={() => onPopupChange(activePopup === 'skills' ? null : 'skills')}
         >
           <span>{t('dag.switchableOptions')}</span>
-          <strong>{ambiguityHidden ? t('dag.dismissLabel', { time: lowRiskAmbiguity.dismissedUntil }) : 'low risk'}</strong>
+          <strong>{ambiguityHidden ? t('dag.dismissLabel', { time: lowRiskAmbiguity.dismissedUntil }) : t('dag.lowRisk')}</strong>
         </button>
         {pendingTotalCount > 0 && (
           <button
@@ -14528,7 +14751,7 @@ function ReviewPanel({
         >
           <header>
             <span>{dagRun?.title || t('dag.noDagRun')}</span>
-            <strong>{dagRun ? dagStatusLabel(dagRun.status) : 'idle'}</strong>
+            <strong>{dagRun ? dagStatusLabel(dagRun.status) : t('dag.idle')}</strong>
           </header>
           {dagRun ? (
             <>
@@ -15592,53 +15815,54 @@ function SchedulerPanel({
   onBootstrapSkill,
   onClose,
 }) {
+  const t = useI18n(s => s.t);
   const cronPresets = [
-    {label: '每小時', value: '@hourly'},
-    {label: '每日 09:00', value: '0 9 * * *'},
-    {label: '每週一 09:00', value: '0 9 * * 1'},
+    {label: t('scheduler.presetHourly'), value: '@hourly'},
+    {label: t('scheduler.presetDaily0900'), value: '0 9 * * *'},
+    {label: t('scheduler.presetWeeklyMon0900'), value: '0 9 * * 1'},
   ];
   const hasDraft = Boolean(draft.name || draft.actionPayload);
   const [summaryJob, setSummaryJob] = useState(null);
-  const summaryText = summaryJob ? formatSchedulerPayloadSummary(summaryJob.action_payload, summaryJob.name || '尚無摘要') : '';
+  const summaryText = summaryJob ? formatSchedulerPayloadSummary(summaryJob.action_payload, summaryJob.name || t('scheduler.noSummary')) : '';
   const updateDraft = (patch) => onDraftChange((current) => ({...current, ...patch}));
 
   return createPortal(
-    <div className="scheduler-overlay" role="dialog" aria-modal="true" aria-label="排程時間">
+    <div className="scheduler-overlay" role="dialog" aria-modal="true" aria-label={t('scheduler.dialogLabel')}>
       <section className="scheduler-panel">
         <header className="scheduler-header">
           <div>
             <span className="scheduler-kicker">Scheduler</span>
-            <h3>排程時間</h3>
+            <h3>{t('scheduler.title')}</h3>
           </div>
-          <button className="scheduler-close" type="button" onClick={onClose} aria-label="關閉">×</button>
+          <button className="scheduler-close" type="button" onClick={onClose} aria-label={t('common.close')}>×</button>
         </header>
 
         <div className="scheduler-clock-band">
           <div>
-            <span>系統時間</span>
-            <strong>{clock?.local_time || '同步中'}</strong>
+            <span>{t('scheduler.systemTime')}</span>
+            <strong>{clock?.local_time || t('scheduler.syncing')}</strong>
           </div>
           <div>
-            <span>時區</span>
-            <strong>{[clock?.timezone, clock?.utc_offset].filter(Boolean).join(' ') || '本機'}</strong>
+            <span>{t('scheduler.timezone')}</span>
+            <strong>{[clock?.timezone, clock?.utc_offset].filter(Boolean).join(' ') || t('scheduler.local')}</strong>
           </div>
-          <button type="button" onClick={onRefresh} disabled={busy}>同步</button>
+          <button type="button" onClick={onRefresh} disabled={busy}>{t('scheduler.sync')}</button>
         </div>
 
         {hasDraft && (
           <div className="scheduler-draft-strip">
             <div className="scheduler-draft-fields">
               <label>
-                <span>草稿名稱</span>
+                <span>{t('scheduler.draftName')}</span>
                 <input
                   type="text"
                   value={draft.name}
                   onChange={(event) => updateDraft({name: event.target.value})}
-                  placeholder="例：每日資料備份"
+                  placeholder={t('scheduler.draftNamePlaceholder')}
                 />
               </label>
               <label>
-                <span>規則</span>
+                <span>{t('scheduler.rule')}</span>
                 <input
                   type="text"
                   value={draft.cronExpr}
@@ -15647,11 +15871,11 @@ function SchedulerPanel({
                 />
               </label>
               <label>
-                <span>摘要</span>
+                <span>{t('scheduler.summary')}</span>
                 <textarea
                   value={formatSchedulerPayloadSummary(draft.actionPayload, '')}
-                  onChange={(event) => updateDraft({actionPayload: schedulerDefaultPayload(draft.name || '提醒', draft.name || '提醒', event.target.value)})}
-                  placeholder="這個排程會做什麼"
+                  onChange={(event) => updateDraft({actionPayload: schedulerDefaultPayload(draft.name || t('scheduler.defaultReminder'), draft.name || t('scheduler.defaultReminder'), event.target.value)})}
+                  placeholder={t('scheduler.summaryPlaceholder')}
                   rows={2}
                 />
               </label>
@@ -15663,7 +15887,7 @@ function SchedulerPanel({
                 </button>
               ))}
               <button className="scheduler-create-btn" type="button" onClick={onCreate} disabled={busy}>
-                {busy ? '處理中' : '建立排程'}
+                {busy ? t('scheduler.busy') : t('scheduler.create')}
               </button>
             </div>
           </div>
@@ -15675,13 +15899,13 @@ function SchedulerPanel({
           <div className="scheduler-table-scroll">
             <div className="scheduler-table-head">
               <span>#</span>
-              <span>標題</span>
-              <span>時間</span>
-              <span>狀態</span>
+              <span>{t('scheduler.tableTitle')}</span>
+              <span>{t('scheduler.tableTime')}</span>
+              <span>{t('scheduler.tableStatus')}</span>
               <span></span>
             </div>
             {jobs.length === 0 ? (
-              <div className="scheduler-empty">尚無排程</div>
+              <div className="scheduler-empty">{t('scheduler.empty')}</div>
             ) : jobs.map((job, index) => (
               <article className="scheduler-job" key={job.id}>
                 <span className="scheduler-job-index">{schedulerJobNo(job, index)}</span>
@@ -15689,15 +15913,15 @@ function SchedulerPanel({
                   <strong>{job.name}</strong>
                 </div>
                 <span>{schedulerActiveNextLabel(job)}</span>
-                <small>{job.enabled ? '啟用中' : '已暫停'}</small>
+                <small>{job.enabled ? t('scheduler.enabled') : t('scheduler.paused')}</small>
                 <div className="scheduler-job-actions">
-                  <button type="button" disabled={busy} onClick={() => setSummaryJob(job)}>摘要</button>
+                  <button type="button" disabled={busy} onClick={() => setSummaryJob(job)}>{t('scheduler.summary')}</button>
                   {job.enabled ? (
-                    <button type="button" disabled={busy} onClick={() => onJobAction(job.id, 'pause')}>暫停</button>
+                    <button type="button" disabled={busy} onClick={() => onJobAction(job.id, 'pause')}>{t('scheduler.pause')}</button>
                   ) : (
-                    <button type="button" disabled={busy} onClick={() => onJobAction(job.id, 'resume')}>恢復</button>
+                    <button type="button" disabled={busy} onClick={() => onJobAction(job.id, 'resume')}>{t('scheduler.resume')}</button>
                   )}
-                  <button type="button" disabled={busy} onClick={() => onJobAction(job.id, 'delete')}>刪除</button>
+                  <button type="button" disabled={busy} onClick={() => onJobAction(job.id, 'delete')}>{t('scheduler.delete')}</button>
                 </div>
               </article>
             ))}
@@ -15705,28 +15929,28 @@ function SchedulerPanel({
         </div>
 
         {summaryJob && (
-          <div className="scheduler-summary-modal" role="dialog" aria-label="排程摘要">
+          <div className="scheduler-summary-modal" role="dialog" aria-label={t('scheduler.summary')}>
             <section className="scheduler-summary-card">
               <header>
                 <div>
-                  <span>摘要</span>
-                  <h4>{summaryJob.name || '未命名排程'}</h4>
+                  <span>{t('scheduler.summary')}</span>
+                  <h4>{summaryJob.name || t('scheduler.unnamed')}</h4>
                 </div>
-                <button type="button" onClick={() => setSummaryJob(null)} aria-label="關閉摘要">×</button>
+                <button type="button" onClick={() => setSummaryJob(null)} aria-label={t('scheduler.closeSummary')}>×</button>
 	              </header>
 	              <p>{summaryText}</p>
 	              <dl>
 	                <div>
-	                  <dt>時間</dt>
+	                  <dt>{t('scheduler.tableTime')}</dt>
 	                  <dd>{schedulerActiveNextLabel(summaryJob)}</dd>
 	                </div>
 	                <div>
-	                  <dt>狀態</dt>
-	                  <dd>{summaryJob.enabled ? '啟用中' : '已暫停'}</dd>
+	                  <dt>{t('scheduler.tableStatus')}</dt>
+	                  <dd>{summaryJob.enabled ? t('scheduler.enabled') : t('scheduler.paused')}</dd>
 	                </div>
 	                <div>
 	                  <dt>Skill</dt>
-	                  <dd>{summaryJob.skill_id || '尚未建立'}</dd>
+	                  <dd>{summaryJob.skill_id || t('scheduler.notCreated')}</dd>
 	                </div>
 	                <div>
 	                  <dt>Sub</dt>
@@ -15743,7 +15967,7 @@ function SchedulerPanel({
 	                    setSummaryJob(null);
 	                  }}
 	                >
-	                  {busy ? '處理中' : '建立自動 skill'}
+	                  {busy ? t('scheduler.busy') : t('scheduler.createAutoSkill')}
 	                </button>
 	              )}
 	            </section>
@@ -15921,7 +16145,7 @@ function RightRail({
       </button>
       <button className="tool-card tool-amber tool-schedule-card" type="button" onClick={onScheduleOpen}>
         <span>◴</span>
-        <span>排程</span>
+        <span>{t('rightRail.schedule')}</span>
       </button>
       {sourceTrustHint && (
         <div
@@ -16014,7 +16238,7 @@ function RightRail({
               <span className="reference-file-title">
                 {twoLineFileName(file.name, t('rightRail.unnamedFile')).map((line, lineIndex) => <span key={lineIndex}>{line}</span>)}
               </span>
-              <small className="reference-file-status">{referenceFileStatusLabel(file.status)}</small>
+              <small className="reference-file-status">{referenceFileStatusLabel(file.status, t)}</small>
             </div>
             {shouldShowReferenceFileDetail(file) && <small className="reference-file-detail">{file.detail}</small>}
             {fileExtLabel(file.name) && <span className="reference-file-ext-badge">{fileExtLabel(file.name)}</span>}

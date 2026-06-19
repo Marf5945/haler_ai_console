@@ -215,6 +215,8 @@ export function FinalizeNativePersonaExport(arg1:string,arg2:string,arg3:string,
 
 export function FinalizeNativeReferenceFileExport(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function FinalizeNativeSearchSummaryExport(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
 export function FinalizeNativeSkillExport(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function FinalizeNativeSubExport(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
@@ -483,6 +485,8 @@ export function NativeDragExportPersonaHandler(arg1:string,arg2:string):Promise<
 
 export function NativeDragExportReferenceFile(arg1:string):Promise<main.NativeReferenceFileDragResult>;
 
+export function NativeDragExportSearchSummary(arg1:string,arg2:string,arg3:string,arg4:string):Promise<main.NativeSearchSummaryDragResult>;
+
 export function NativeDragExportSkill(arg1:string):Promise<main.NativeSkillDragExportResult>;
 
 export function NativeDragExportSubHandler(arg1:string,arg2:string,arg3:string,arg4:string):Promise<main.NativeSubDragExportResult>;
@@ -562,6 +566,8 @@ export function RegisterURLOccurrence(arg1:string,arg2:string,arg3:string,arg4:s
 export function RejectPackageInstall(arg1:string,arg2:string):Promise<void>;
 
 export function RemoveAllowlistEntry(arg1:string):Promise<void>;
+
+export function RemoveReferenceFile(arg1:string):Promise<void>;
 
 export function RemoveRemoteBridgeChannel(arg1:string):Promise<void>;
 

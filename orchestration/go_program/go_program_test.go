@@ -47,7 +47,7 @@ func main() {
 		t.Fatalf("unexpected validation issues: %+v", vr.Issues)
 	}
 	buildDir := filepath.Join(t.TempDir(), "build")
-	br, err := Build(context.Background(), manifest, toolchain, buildDir, Limits{BuildTimeout: DefaultBuildTimeout})
+	br, err := Build(context.Background(), manifest, toolchain, buildDir, Limits{BuildTimeout: 30 * time.Second})
 	if err != nil {
 		t.Fatalf("Build: %v stderr=%s", err, br.Stderr)
 	}

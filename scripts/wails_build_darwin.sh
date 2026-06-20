@@ -265,11 +265,6 @@ if [[ -d "${root_dir}/build/cache" ]]; then
   rm -rf "${root_dir}/build/cache"
 fi
 
-if [[ -d "${root_dir}/frontend/node_modules" ]]; then
-  echo "Removing frontend/node_modules before Wails binding generation..."
-  rm -rf "${root_dir}/frontend/node_modules"
-fi
-
 for legacy_app_name in "${legacy_app_names[@]}"; do
   legacy_app_path="${root_dir}/build/bin/${legacy_app_name}.app"
   if [[ "${legacy_app_name}" != "${app_name}" && -d "${legacy_app_path}" ]]; then

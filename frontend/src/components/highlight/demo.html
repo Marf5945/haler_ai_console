@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>路線 B 高亮 — 自動歸類 + 移除 獨立預覽</title>
+<link rel="stylesheet" href="./highlight.css"/>
+<style>
+  body { font: 16px/1.8 system-ui, -apple-system, "PingFang TC", sans-serif; max-width: 780px; margin: 28px auto; padding: 0 20px; color:#1a1a1a; background:#fafafa; }
+  h1 { font-size: 20px; }
+  .hint { color:#555; font-size:14px; background:#fff; border:1px solid #eee; border-radius:10px; padding:12px 14px; }
+  .message-row { background:#fff; border:1px solid #ececec; border-radius:12px; padding:14px 16px; margin:14px 0; }
+  .message-row.ai .message-text { background:#EDF3FB; border-radius:8px; padding:10px 12px; }
+  .message-text { white-space: pre-wrap; }
+  pre#log { background:#1c1c1e; color:#d6e2ff; padding:12px; border-radius:10px; font-size:12px; max-height:220px; overflow:auto; }
+  #groups { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
+  .group-pill { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; font-size:13px; cursor:grab; box-shadow:0 0 0 1px rgba(0,0,0,.18); }
+</style>
+</head>
+<body>
+<h1>路線 B 高亮 — 自動歸類 + 移除（零依賴）</h1>
+<div class="hint">
+反白一段字 → 浮動工具列出現,<b>白色光環</b>那格＝系統建議的群組色。<br>
+點該格＝採用;連點別格＝換色覆寫;游標移開＝commit 落地。<br>
+這個 demo 用簡易 lexical 比對「模擬」本地模型評分:當某組已有相近字詞,反白新字時會自動把那組的色點亮。<br>
+滑到已標記的字上再反白它,工具列右邊 ✕ ＝移除標記(同時從列表刪掉)。
+</div>
+
+<div class="message-text" data-message-id="msg_1">
+這段在講「攜帶型助手」的硬體:電池續航、散熱、重量都是重點。你可以先把「電池續航」標成一組(例如綠色),再把「散熱」「重量」反白——系統會偵測它們和前面同主題,自動建議同一組的顏色。
+</div>
+
+<div class="message-row ai">
+<div class="message-text" data-message-id="msg_2">
+Ai:至於軟體面,離線語音辨識、本地模型推論速度、記憶體佔用是另一類重點。把「離線語音辨識」標成第二組後,再反白「記憶體佔用」,系統應該會建議第二組的色,而不是硬體那組。顏色你仍可手動覆寫。
+</div>
+</div>
+
+<div id="groups"></div>
+
+<h3>要丟給 Go 的 annotation（commit 時）</h3>
+<pre id="log">（反白並標記後顯示）</pre>
+
+<script type="module">
+import { createHighlightLayer, COLOR_SLOTS } from './highlightCore.js';
+
+const log = document.getElementById('log');
+const groupsEl = document.getElementById('groups');
+const annotations = [];
+const lastSlotRef = { current: null };
+
+function tokenSet(s){const set=new Set();s=s.toLowerCase();let w='';let cjk=[];
+  const fw=()=>{if(w){set.add(w);w='';}};
+  const fc=()=>{for(let i=0;i+1<cjk.length;i++)set.add(cjk[i]+cjk[i+1]);if(cjk.length===1)set.add(cjk[0]);cjk=[];};
+  for(const ch of s){const c=ch.codePointAt(0);
+    if((ch>='a'&&ch<='z')||(ch>='0'&&ch<='9')){fc();w+=ch;}
+    else if(c>0x2E7F){fw();cjk.push(ch);} else {fw();fc();}}
+  fw();fc();return set;}
+
+// 模擬後端 ScoreHighlightGroups：lexical 重疊,回排序後的候選
+function fakeScore(quote){
+  const byGroup = {};
+  annotations.forEach(a=>{(byGroup[a.groupId]??=[]).push(a);});
+  const gids = Object.keys(byGroup);
+  if(gids.length < 2) return [];
+  const cand = tokenSet(quote);
+  const scored = gids.map(gid=>{
+    const text = byGroup[gid].map(a=>a.quote).join(' ');
+    const gset = tokenSet(text); let inter=0;
+    cand.forEach(t=>{ if(gset.has(t)) inter++; });
+    return { groupId:gid, colorSlot:byGroup[gid][0].colorSlot, score: cand.size? inter/cand.size:0 };
+  });
+  scored.sort((a,b)=>b.score-a.score);
+  return scored;
+}
+
+function renderGroups(){
+  const seen = new Map();
+  annotations.forEach(a=>seen.set(a.groupId, a.colorSlot));
+  groupsEl.innerHTML='';
+  for(const [gid,slot] of seen){
+    const c = COLOR_SLOTS[slot];
+    const pill=document.createElement('span');
+    pill.className='group-pill'; pill.draggable=true;
+    pill.style.background=c.bg; pill.style.color=c.fg;
+    if(c.border) pill.style.boxShadow=`0 0 0 1px ${c.border}`;
+    pill.textContent='群組 '+(slot+1)+'（'+annotations.filter(a=>a.groupId===gid).length+'）';
+    groupsEl.appendChild(pill);
+  }
+}
+
+const layer = createHighlightLayer({
+  rootSelector:'.message-text',
+  messageIdOf:(el)=>el.getAttribute('data-message-id'),
+  lastSlotRef,
+  allocateGroupForSlot:(slot)=>'grp_slot_'+slot,
+  scoreFor: async (quote)=> fakeScore(quote),
+  onCommit:(a)=>{ annotations.push(a); log.textContent=JSON.stringify(a,null,2)+'\n\n— 累計 '+annotations.length+' 筆 —'; renderGroups(); },
+  onRemove:(hlId)=>{ const i=annotations.findIndex(a=>a.id===hlId); if(i>=0){annotations.splice(i,1);} log.textContent='移除 '+hlId+'\n\n— 累計 '+annotations.length+' 筆 —'; renderGroups(); },
+});
+layer.attach();
+renderGroups();
+</script>
+</body>
+</html>

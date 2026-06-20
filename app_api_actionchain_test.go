@@ -114,7 +114,26 @@ func TestBuildLocalModelPromptDiscouragesFieldLabelsAndGreetingQuestions(t *test
 	for _, want := range []string{
 		"\u4e0d\u8981\u5beb \u52d5\u4f5c:",
 		"\u4e0d\u8981\u52a0 \u5167\u5bb9:",
+		"\u4e0d\u53ef\u7ffb\u8b6f\u52d5\u4f5c\u8a5e",
+		"\u4e0d\u53ef\u6539\u6210\u7c21\u9ad4\u5b57",
+		"\u4e0d\u8981\u5beb \u8f93\u51fa",
+		"\u4e0d\u53ef\u7ffb\u8b6f",
+		"\u4e0d\u8981\u7ffb\u6210\u4e2d\u6587",
+		"English role: the second line must be English",
+		"Korean role: the second line must be Korean Hangul",
+		"\u4e0d\u8981\u6a21\u4eff\u7bc4\u4f8b\u6539\u6210\u4e2d\u6587",
 		"\u4e00\u822c\u804a\u5929",
+		"\u641c\u5c0b\u512a\u5148",
+		"\u591c\u884c\u6027\u52d5\u7269\u7269\u7a2e",
+		"nocturnal animal species examples",
+		"\u591c\u884c\u6027\u306e\u52d5\u7269",
+		"\u7528\u4f7f\u7528\u8005\u8a9e\u8a00\u548c\u4f7f\u7528\u8005\u63d0\u4f9b\u7684\u503c\u5217\u51fa\u9078\u9805",
+		"\u4e0d\u8981\u7ffb\u8b6f\u9078\u9805",
+		"6\u670821\u65e5\u30016\u670822\u65e5\u30016\u670823\u65e5",
+		"6\uc6d4 21\uc77c\u30016\uc6d4 22\uc77c\u30016\uc6d4 23\uc77c",
+		"June 21\u3001June 22\u3001June 23",
+		"Make a program that charts animal counts from CSV",
+		"\u4e0d\u8981\u4f7f\u7528 \u3124 \u6216 \u310c",
 		"\u64cd\u4f5c=\u53ea\u4ee3\u8868\u57f7\u884c\u6216\u91cd\u73fe\u5df2\u4fdd\u5b58\u7684\u87a2\u5e55 replay \u64cd\u4f5c",
 		"\u4e0d\u8981\u9078 \u64cd\u4f5c",
 	} {
@@ -134,6 +153,45 @@ func TestAssembleLocalResponseStripsFieldLabels(t *testing.T) {
 	}
 	if chain.Next != "\u5f85\u547d" {
 		t.Fatalf("Next = %q", chain.Next)
+	}
+}
+
+func TestAssembleLocalResponseNormalizesOptionSeparators(t *testing.T) {
+	chain := assembleLocalResponse("\u9078\u9805\n\u3124\u7d05\u8272\u310c\u7da0\u8272\u310c\u85cd\u8272\n\u9078\u9805")
+	if chain.Action != "\u9078\u9805" {
+		t.Fatalf("Action = %q", chain.Action)
+	}
+	if chain.Target != "\u3124\u7d05\u8272\u3124\u7da0\u8272\u3124\u85cd\u8272" {
+		t.Fatalf("Target = %q", chain.Target)
+	}
+	if chain.Next != "\u9078\u9805" {
+		t.Fatalf("Next = %q", chain.Next)
+	}
+}
+
+func TestAssembleLocalResponseConvertsNaturalOptionList(t *testing.T) {
+	chain := assembleLocalResponse("\u9078\u9805\n6\u670821\u65e5\u30016\u670822\u65e5\u30016\u670823\u65e5\n\u9078\u9805")
+	if chain.Action != "\u9078\u9805" {
+		t.Fatalf("Action = %q", chain.Action)
+	}
+	if chain.Target != "\u31246\u670821\u65e5\u31246\u670822\u65e5\u31246\u670823\u65e5" {
+		t.Fatalf("Target = %q", chain.Target)
+	}
+	if chain.Next != "\u9078\u9805" {
+		t.Fatalf("Next = %q", chain.Next)
+	}
+}
+
+func TestAssembleLocalResponseNormalizesTranslatedOutputAction(t *testing.T) {
+	for _, raw := range []string{
+		"출력\n안녕하세요\n待命",
+		"输出\n你好\n待命",
+		"output\nHello\n待命",
+	} {
+		chain := assembleLocalResponse(raw)
+		if chain.Action != "\u8f38\u51fa" {
+			t.Fatalf("Action = %q for raw %q", chain.Action, raw)
+		}
 	}
 }
 

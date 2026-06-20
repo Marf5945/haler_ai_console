@@ -2,6 +2,10 @@ import React, {useEffect, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 import './tailwind.css';
 import MessageRow from './components/chat/MessageRow';
+import useHighlight from './components/highlight/useHighlight';
+import './components/highlight/highlight.css';
+import useSystemMarks from './components/highlight/useSystemMarks';
+import {messageDomId} from './components/highlight/messageId';
 import {
   AcknowledgePendingItem,
   AcknowledgePendingItemWithConfirmation,
@@ -295,7 +299,7 @@ const openExternal = (url) => {
 import DocumentReviewCard from './components/DocumentReviewCard';
 import VisualLearningPanel from './components/VisualLearningPanel';
 import EmbeddingPickerModal from './components/EmbeddingPickerModal';
-import useI18n, { t as _t, getAllFemaleKeywords, getAllBeastKeywords, buildGreetingTextKeyMap } from './locales/useI18n';
+import useI18n, { t as _t, tForLanguage, getAllFemaleKeywords, getAllBeastKeywords, buildGreetingTextKeyMap } from './locales/useI18n';
 
 const taskProgressDebugEnabled = typeof window !== 'undefined'
   && (new URLSearchParams(window.location.search).has('taskDebug')
@@ -1399,9 +1403,11 @@ function App() {
     activeHaoraId && (tab.id === activeHaoraId || tab.name === activeHaoraId)
   ));
   const activeConversationId = activeSubagentForConversation?.id || 'main';
+  useHighlight({enabled: true, conversationId: activeConversationId});
   const activeConversationIdRef = useRef('main');
   const loadedConversationIdsRef = useRef(new Set(['main']));
   const messages = messagesByAgent[activeConversationId] || [];
+  useSystemMarks({messages, conversationId: activeConversationId});
   const [cliInspectorLog, setCliInspectorLog] = useState(null);
   const [, setChatCliLog] = useState(null);
   const [cliInspectorBusy, setCliInspectorBusy] = useState(false);
@@ -4647,6 +4653,73 @@ function App() {
     setLongPressProgress(0);
   }
 
+  // ── DEV-ONLY 語系驗收矩陣鉤子（import.meta.env.DEV 閘控，不進 production）──
+  // 為什麼：Computer Use 模擬鍵盤對 CJK 會掉字，原生日文/韓文題目打不進 UI。
+  // 此鉤子把 CJK 題目寫死在 JS，逐題切角色語言並送入「真 UI」，讓操作者目視
+  // 選項卡等渲染（選項卡人工檢核）。自動語系判定在 Go 端
+  // （cjklang.go + lang_matrix_integration_test.go）；此處只負責驅動真 UI。
+  // 用法：DevTools console 執行  await window.__runLangMatrix()
+  useEffect(() => {
+    if (!import.meta.env.DEV) return undefined;
+    const LANG_MATRIX = [
+      { label: '日本語', category: '一般對答', text: 'こんにちは、今日も手伝ってくれますか？' },
+      { label: '日本語', category: '網路搜尋', text: 'ネットで夜行性の動物を調べて' },
+      { label: '日本語', category: '非顏色選項', text: '6月21日、6月22日、6月23日から一つ選んで' },
+      { label: '日本語', category: '本機搜尋', text: 'ローカルで動物のレポートを探して' },
+      { label: '日本語', category: '程式流程', text: 'CSVをグラフに変換するプログラムを作って' },
+      { label: '한국어', category: '一般對答', text: '안녕하세요, 오늘도 도와줄 수 있나요?' },
+      { label: '한국어', category: '網路搜尋', text: '인터넷에서 야행성 동물을 검색해줘' },
+      { label: '한국어', category: '非顏色選項', text: '6월 21일, 6월 22일, 6월 23일 중에서 하나 골라줘' },
+      { label: '한국어', category: '本機搜尋', text: '로컬에서 동물 보고서를 찾아줘' },
+      { label: '한국어', category: '程式流程', text: 'CSV를 그래프로 변환하는 프로그램을 만들어줘' },
+      { label: 'English', category: '一般對答', text: 'Hello, can you help me today?' },
+      { label: 'English', category: '網路搜尋', text: 'Search the web for nocturnal animal species' },
+      { label: 'English', category: '非顏色選項', text: 'Choose one date: June 21, June 22, June 23' },
+      { label: 'English', category: '本機搜尋', text: 'Find local animal reports' },
+      { label: 'English', category: '程式流程', text: 'Make a program that charts animal counts from CSV' },
+      { label: '中文', category: '一般對答', text: '你好，今天可以幫我嗎？' },
+    ];
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    window.__runLangMatrix = async (opts = {}) => {
+      const waitMs = opts.waitMs ?? 9000;
+      const rounds = opts.rounds ?? 2;
+      console.log('%c[langMatrix] 開始；請先在模型選單選好本地 Ollama 模型', 'color:#3b82f6');
+      console.log('[langMatrix] 預設跑兩輪；選項題用日期，搜尋題用動物。');
+      console.log('[langMatrix] 人工目視：選項卡 label 語系正確、可點選；韓文不得吐日文片假名，也不得用英文句子混過。');
+      for (let round = 0; round < rounds; round += 1) {
+        console.group(`[langMatrix] Round ${round + 1}/${rounds}`);
+        for (let i = 0; i < LANG_MATRIX.length; i += 1) {
+          const c = LANG_MATRIX[i];
+          try {
+            await callWails(() => ApplyUIStyleDiff(JSON.stringify({ panel_language: '繁中', role_language: c.label })));
+          } catch (e) {
+            console.warn('[langMatrix] 切語言失敗', c.label, e);
+          }
+          await sleep(400);
+          console.group(`[langMatrix] ${i + 1}/${LANG_MATRIX.length} ${c.label} / ${c.category}`);
+          console.log('送出：', c.text);
+          try {
+            await submitComposerText(c.text);
+          } catch (e) {
+            console.error('[langMatrix] 送出失敗', e);
+          }
+          console.log(`等待 ${waitMs}ms 讓模型回覆與 UI 渲染…`);
+          console.groupEnd();
+          await sleep(waitMs);
+        }
+        console.groupEnd();
+      }
+      try {
+        await callWails(() => ApplyUIStyleDiff(JSON.stringify({ panel_language: '繁中', role_language: '中文' })));
+      } catch (e) { /* ignore */ }
+      console.log('%c[langMatrix] 完成；角色語言已切回中文。請人工覆核選項卡與 debug trace。', 'color:#16a34a');
+    };
+    return () => {
+      try { delete window.__runLangMatrix; } catch (e) { /* ignore */ }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── v3.6.4 Readiness Gate UI Interaction Layer helper 函式 ──
   //
   // refreshReadinessGateState  — 從後端拉取最新 Gate 狀態快照
@@ -6574,7 +6647,7 @@ function App() {
     try {
       const detected = await callWails(AutoDetectCLI);
       const detectedSuggestions = (detected || [])
-        .filter((item) => item?.found && item?.path)
+        .filter((item) => item?.found && item?.path && item?.supported !== false)
         .map((item) => ({
           name: item.name || item.adapter_id || 'CLI',
           path: item.path,
@@ -6595,12 +6668,13 @@ function App() {
       xai: 'grok-4',
       openrouter: 'openai/gpt-4.1-mini',
       mistral: 'mistral-small-latest',
-      groq: 'llama-3.3-70b-versatile',
+      groq: 'openai/gpt-oss-20b',
       together: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
       perplexity: 'sonar',
       cohere: 'command-a-03-2025',
       fireworks: 'accounts/fireworks/models/llama-v3p1-70b-instruct',
       cerebras: 'llama3.1-8b',
+      huggingface: 'openai/gpt-oss-120b:cerebras',
     };
     return defaults[providerID] || '';
   }
@@ -7631,6 +7705,8 @@ function App() {
                   const convId = activeConversationIdRef.current || 'main';
                   // 內容比對刪除：後端走 pipeline 記 delete_sentences 維持 hash 鏈；找不到則 no-op。
                   callWails(() => DeleteTalkMessageForAgent(convId, target)).catch(() => {});
+                  // 級聯清除該訊息的使用者標註與系統暗標（動態載入，避免綁定尚未產生時 build 失敗）
+                  import('../wailsjs/go/main/App').then((m) => m.PurgeMessageMarks?.(convId, messageDomId(target, index, messages))).catch(() => {});
                 }
               }}
               onSummarizeSearch={(text) => setSummaryWarning(text)}
@@ -7638,6 +7714,7 @@ function App() {
               // SEC-06: 讀取網址按鈕注入文字，複用後端確認流程
               onInjectText={(text) => submitComposerText(text)}
               activeConversationId={activeConversationIdRef.current || 'main'}
+              chatLocale={panelLangToLocale(settingsState.panel?.roleLanguage) || panelLangToLocale(settingsState.panel?.panelLanguage) || _i18nLang || 'zh-TW'}
               // v3.6.4 Readiness Gate UI Interaction Layer props
               readinessGate={readinessGate}
               selectedFloatingCandidateIDs={selectedFloatingCandidateIDs}
@@ -10172,7 +10249,9 @@ function OnboardingOverlay({state, onCompleteStep, onFinish, onGoBack, onDetectC
     onFinish();
   }
 
-  const foundCount = detectResults ? detectResults.filter((r) => r.found).length : 0;
+  const supportedDetectResults = detectResults ? detectResults.filter((r) => r.found && r.supported !== false) : [];
+  const unsupportedDetectResults = detectResults ? detectResults.filter((r) => r.found && r.supported === false) : [];
+  const foundCount = supportedDetectResults.length;
 
   // 人格步驟 → spotlight 模式（半透明背景，讓底層 UI 可見）
   const isSpotlightMode = isPersonaStep;
@@ -10213,7 +10292,7 @@ function OnboardingOverlay({state, onCompleteStep, onFinish, onGoBack, onDetectC
 
             {detectResults && foundCount > 0 && (
               <ul className="onboarding-detect-list">
-                {detectResults.filter((r) => r.found).map((r) => {
+                {supportedDetectResults.map((r) => {
                   const isEnabled = enabledIds.has(r.adapter_id);
                   return (
                     <li key={r.adapter_id} className={isEnabled ? 'found enabled' : 'found'}>
@@ -10227,6 +10306,18 @@ function OnboardingOverlay({state, onCompleteStep, onFinish, onGoBack, onDetectC
                     </li>
                   );
                 })}
+              </ul>
+            )}
+
+            {unsupportedDetectResults.length > 0 && (
+              <ul className="onboarding-detect-list">
+                {unsupportedDetectResults.map((r) => (
+                  <li key={r.adapter_id} className="found disabled">
+                    <span className="detect-name">{r.name}</span>
+                    <span className="detect-path">{r.path}</span>
+                    <span className="detect-path">{r.reason || t('onboarding.registerFail')}</span>
+                  </li>
+                ))}
               </ul>
             )}
 
@@ -14268,9 +14359,18 @@ function ComposerConfirmBubble({action, onConfirm, onCancel}) {
   );
 }
 
+function localizeChatSystemMessage(message, chatLocale = 'zh-TW') {
+  const raw = String(message || '');
+  const body = raw.replace(/^Ai:/, '').trim();
+  if (raw.startsWith('Ai:') && body === '請選擇：') {
+    return `Ai:${tForLanguage(chatLocale, 'chatSystem.choose')}`;
+  }
+  return raw;
+}
+
 function ConversationPanel({
   messages, personaName, draft, onDraftChange, onSend, onDelete, onSummarizeSearch, onExportSearchSummary,
-  onInjectText, activeConversationId,
+  onInjectText, activeConversationId, chatLocale = 'zh-TW',
   // v3.6.4 Readiness Gate props
   readinessGate = fallbackReadinessGate,
   selectedFloatingCandidateIDs = [],
@@ -14300,7 +14400,7 @@ function ConversationPanel({
   const voiceTitle = voiceReady ? t('composer.voiceHold') : voiceStatusLabel(voiceState?.status);
   const hasSelectedFloatingCandidates = selectedFloatingCandidateIDs.length > 0;
   const composerReady = !!draft.trim() || hasSelectedFloatingCandidates;
-  const displayMessage = (message) => stripComposerPendingMarker(message)
+  const displayMessage = (message) => localizeChatSystemMessage(stripComposerPendingMarker(message), chatLocale)
     .replace(/^Ai:/, personaName + ':')
     .replace(/^輸入:/, '');
 
@@ -14386,6 +14486,7 @@ function ConversationPanel({
             kind={messageKind(message)}
             isActive={activeMessage === index}
             index={index}
+            domMessageId={messageDomId(message, index, messages)}
             summaryLabel={t('composer.summary')}
             deleteLabel={t('composer.delete')}
             onActivate={() => setActiveMessage(index)}
@@ -14398,6 +14499,7 @@ function ConversationPanel({
             onInjectText={onInjectText}
             sessionId={activeConversationId}
             previousMessage={messages[index - 1] || ''}
+            chatLocale={chatLocale}
           />
         ))}
         {pendingTaskReview && (

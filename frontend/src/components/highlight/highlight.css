@@ -1,0 +1,105 @@
+/* highlight.css — 路線 B 高亮樣式（8 色細框定案版）
+ * 八色：米黃/淺藍/深藍/深黑/淺紅/白底紅字/嫩綠/橄欖綠。
+ * 顏色僅作視覺記號，不帶語意；同群同色。
+ * 全部加 1px 細框，讓白色與淡色在白底訊息與 AI 淺藍底上都讀得出邊界。 */
+
+.hl {
+  border-radius: 3px;
+  padding: 0 2px;
+  cursor: pointer;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .18);
+  transition: filter .12s ease;
+}
+.hl:hover { filter: brightness(0.96); }
+
+.hl-slot-0 { background:#F5E6C5; color:#1A1A1A; }                                   /* 米黃 / 黑 */
+.hl-slot-1 { background:#BBD9F2; color:#1A1A1A; }                                   /* 淺藍 / 黑 */
+.hl-slot-2 { background:#214A7C; color:#FFFFFF; }                                   /* 深藍 / 白 */
+.hl-slot-3 { background:#1C1C1E; color:#FFFFFF; }                                   /* 深黑 / 白 */
+.hl-slot-4 { background:#F2C2C2; color:#1A1A1A; }                                   /* 淺紅 / 黑 */
+.hl-slot-5 { background:#FFFFFF; color:#C0392B; box-shadow:0 0 0 1.5px #C0392B; }   /* 白底 / 紅字（紅框） */
+.hl-slot-6 { background:#B6F36B; color:#1A1A1A; }                                   /* 嫩綠 / 黑 */
+.hl-slot-7 { background:#33402E; color:#C7E86B; }                                   /* 橄欖綠 / 黃綠字 */
+
+/* 深底配色內的連結維持可讀 */
+.hl-slot-2 a, .hl-slot-3 a, .hl-slot-7 a { color:#9CC6F2; }
+
+/* ---- 浮動工具列 ---- */
+.hl-toolbar {
+  position: absolute;
+  z-index: 2147483000;
+  display: none;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(28,28,30,.96);
+  box-shadow: 0 6px 24px rgba(0,0,0,.35);
+  backdrop-filter: blur(6px);
+}
+.hl-swatch {
+  width: 26px; height: 26px;
+  border: none;
+  border-radius: 7px;
+  font: 600 13px/1 system-ui, sans-serif;
+  cursor: pointer;
+  display: grid; place-items: center;
+  transition: transform .1s ease, outline-color .1s ease;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+.hl-swatch:hover { transform: translateY(-1px) scale(1.06); }
+.hl-swatch:active { transform: scale(.94); }
+
+/* 模型預選（建議）的那一格：外圈白色光環提示 */
+.hl-swatch-suggested {
+  outline-color: #FFFFFF;
+  transform: translateY(-1px) scale(1.06);
+}
+
+/* 移除鈕 */
+.hl-remove {
+  width: 26px; height: 26px;
+  margin-left: 2px;
+  border: 1px solid rgba(255,255,255,.25);
+  border-radius: 7px;
+  background: transparent;
+  color: #FF6B6B;
+  font: 600 13px/1 system-ui, sans-serif;
+  cursor: pointer;
+  display: grid; place-items: center;
+}
+.hl-remove:hover { background: rgba(255,107,107,.18); }
+
+/* ---- 重點群組列（拖出成文檔） ---- */
+.hl-groups-bar {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  z-index: 2147482000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  max-width: 60vw;
+  padding: 6px 8px;
+  border-radius: 12px;
+  background: rgba(28,28,30,.92);
+  box-shadow: 0 4px 18px rgba(0,0,0,.3);
+  backdrop-filter: blur(6px);
+}
+.hl-groups-label {
+  font: 500 12px/1 system-ui, sans-serif;
+  color: rgba(255,255,255,.7);
+  padding: 0 2px;
+}
+.hl-group-pill {
+  font: 500 13px/1 system-ui, sans-serif;
+  padding: 5px 10px;
+  border-radius: 999px;
+  cursor: grab;
+  user-select: none;
+  white-space: nowrap;
+}
+.hl-group-pill:active { cursor: grabbing; transform: scale(.97); }

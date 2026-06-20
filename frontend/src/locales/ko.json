@@ -351,6 +351,17 @@
     "imageTooLarge": "이미지가 너무 커요(최대 {max})",
     "aiDisclaimer": "AI 내용이 항상 정확하지 않을 수 있어요. 중요한 정보는 반드시 확인하세요."
   },
+  "chatSystem": {
+    "choose": "선택해 주세요:",
+    "searchResults": "검색 결과",
+    "webSearchCompleted": "「{query}」 웹 검색을 완료했습니다.",
+    "searchPurpose": "검색 목적: {query}",
+    "sourceCount": "출처 {count}개",
+    "summary": "요약",
+    "searchDetails": "검색 세부 정보",
+    "webSearchSummaryFile": "웹검색요약_{query}",
+    "localSearchSummary": "로컬 검색 요약"
+  },
   "system": {
     "sidecarFail": "[시스템] Sidecar 시작에 실패했어요 — 로컬에 Node.js가 설치되어 있는지 확인하거나 로그를 확인해 주세요.",
     "sidecarCrash": "[시스템] Sidecar가 예기치 않게 종료됐어요 — CLI 채널이 끊겼어요. 앱을 다시 시작해 주세요.",

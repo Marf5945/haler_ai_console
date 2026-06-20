@@ -253,7 +253,7 @@ describe('floating candidate choice flow', () => {
       '7 green yes/no stayed exclusive and sent yes',
       '8 green confirm/cancel stayed exclusive and sent confirm',
     ]);
-  }, 20000);
+  });
 
   it('keeps yes/no choices mutually exclusive', async () => {
     await renderChoiceApp({candidates: yesNoCandidates, panelStyle: 'default'});

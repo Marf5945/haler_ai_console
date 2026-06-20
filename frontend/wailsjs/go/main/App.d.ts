@@ -141,6 +141,8 @@ export function DeactivateRemoteBridgeChannel(arg1:string):Promise<void>;
 
 export function DeleteAvatarCredential(arg1:string):Promise<void>;
 
+export function DeleteHighlight(arg1:string,arg2:string):Promise<void>;
+
 export function DeleteLearningRun(arg1:string):Promise<void>;
 
 export function DeleteScheduledJob(arg1:string):Promise<void>;
@@ -181,6 +183,8 @@ export function EnableTrustedSessionScope(arg1:string,arg2:string,arg3:string,ar
 
 export function EnableWorkflowTrustForHours(arg1:string,arg2:string,arg3:number):Promise<string>;
 
+export function EnqueueSystemMark(arg1:string,arg2:string):Promise<void>;
+
 export function EnterDegradedMode(arg1:string):Promise<any>;
 
 export function EscapeExternalTokens(arg1:string):Promise<string>;
@@ -194,6 +198,8 @@ export function ExecuteSkillMessage(arg1:string,arg2:string,arg3:string,arg4:str
 export function ExitDegradedMode():Promise<any>;
 
 export function ExportDocumentToPath(arg1:string):Promise<string>;
+
+export function ExportGroup(arg1:string,arg2:string):Promise<string>;
 
 export function ExportMediaWithSidecar(arg1:string,arg2:string):Promise<void>;
 
@@ -260,6 +266,8 @@ export function GetEmbeddingConfig():Promise<settings.EmbeddingConfig>;
 export function GetGoProgramAuthoringDetail(arg1:string):Promise<main.GoProgramAuthoringDetail>;
 
 export function GetHighImpactDomains():Promise<Array<string>>;
+
+export function GetHighlightStats(arg1:string):Promise<string>;
 
 export function GetHookGeneReviewSummary(arg1:string):Promise<main.HookGeneReviewSummary>;
 
@@ -421,6 +429,8 @@ export function ListFormalActions():Promise<any>;
 
 export function ListGoProgramAuthoringCatalog(arg1:number):Promise<Array<main.GoProgramAuthoringCatalogItem>>;
 
+export function ListHighlights(arg1:string):Promise<string>;
+
 export function ListInstalledEmbedModels():Promise<Array<main.EmbedModelInfo>>;
 
 export function ListLLMProviderWhitelist():Promise<any>;
@@ -460,6 +470,8 @@ export function ListRemoteBridgePresets():Promise<any>;
 export function ListReviewArchive():Promise<Array<review.ArchivedCard>>;
 
 export function ListScheduledJobs():Promise<Array<scheduler.Job>>;
+
+export function ListSystemMarks(arg1:string):Promise<string>;
 
 export function ListThreatRecords():Promise<any>;
 
@@ -501,6 +513,8 @@ export function OpenExternalURL(arg1:string):Promise<void>;
 
 export function OpenVisualLearningPermissionSettings(arg1:string):Promise<void>;
 
+export function OrganizeSystemMarks(arg1:string):Promise<number>;
+
 export function PauseScheduledJob(arg1:string):Promise<void>;
 
 export function PollStatusRail():Promise<statusrail.View>;
@@ -533,9 +547,15 @@ export function PullEmbedModel(arg1:string):Promise<main.EmbedPullJob>;
 
 export function PurgeBoundaryDir(arg1:string):Promise<void>;
 
+export function PurgeMessageMarks(arg1:string,arg2:string):Promise<void>;
+
 export function PurgeProject(arg1:string,arg2:string):Promise<any>;
 
+export function PurgeSystemMarks(arg1:string):Promise<void>;
+
 export function ReadDocumentContent(arg1:string):Promise<string>;
+
+export function RebuildGroupSummary(arg1:string,arg2:string):Promise<string>;
 
 export function RecognizeNativeOCR(arg1:Array<number>):Promise<Array<visual_learning.OCRResult>>;
 
@@ -546,6 +566,8 @@ export function RecordLearningMouseEvent(arg1:string):Promise<void>;
 export function RecordMainInteraction(arg1:string,arg2:string):Promise<statusrail.View>;
 
 export function RecordStepTrace(arg1:string,arg2:string):Promise<void>;
+
+export function RecordSuggestionOutcome(arg1:string,arg2:number,arg3:number):Promise<void>;
 
 export function RefreshPendingCandidateAges():Promise<void>;
 
@@ -627,6 +649,8 @@ export function ResumeScheduledJob(arg1:string):Promise<void>;
 
 export function RetryRemoteBridgeSegment(arg1:string,arg2:number,arg3:string):Promise<void>;
 
+export function RevalidateImportedSystemMarks(arg1:string,arg2:string):Promise<number>;
+
 export function RotateTalkFull():Promise<string>;
 
 export function RouteVoiceCommand(arg1:string):Promise<voice.CommandRoute>;
@@ -638,6 +662,8 @@ export function RunPackageSecurityCheck(arg1:string):Promise<any>;
 export function RunSummarizationNow(arg1:string):Promise<string>;
 
 export function SaveDocumentFromAgent(arg1:string,arg2:string,arg3:string):Promise<main.DocumentPreview>;
+
+export function SaveHighlight(arg1:string):Promise<void>;
 
 export function SaveMainAsSub(arg1:string):Promise<string>;
 
@@ -664,6 +690,8 @@ export function ScanOrphanQuarantine():Promise<any>;
 export function ScanSkillFolder(arg1:string):Promise<any>;
 
 export function SchedulerHasActiveJobs():Promise<boolean>;
+
+export function ScoreHighlightGroups(arg1:string,arg2:string):Promise<string>;
 
 export function SearchLearningOperations(arg1:string,arg2:number):Promise<any>;
 
@@ -702,6 +730,8 @@ export function SetAvatarProvider(arg1:string,arg2:string):Promise<void>;
 export function SetBrowserPreference(arg1:string,arg2:string):Promise<browser_pref.RuntimeNoticeResult>;
 
 export function SetEmbeddingConfig(arg1:string,arg2:string):Promise<void>;
+
+export function SetHighlightWeight(arg1:string,arg2:string,arg3:number):Promise<void>;
 
 export function SetPersonaPixelAvatarPack(arg1:string,arg2:string):Promise<void>;
 

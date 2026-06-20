@@ -234,6 +234,10 @@ export function DeleteAvatarCredential(arg1) {
   return window['go']['main']['App']['DeleteAvatarCredential'](arg1);
 }
 
+export function DeleteHighlight(arg1, arg2) {
+  return window['go']['main']['App']['DeleteHighlight'](arg1, arg2);
+}
+
 export function DeleteLearningRun(arg1) {
   return window['go']['main']['App']['DeleteLearningRun'](arg1);
 }
@@ -314,6 +318,10 @@ export function EnableWorkflowTrustForHours(arg1, arg2, arg3) {
   return window['go']['main']['App']['EnableWorkflowTrustForHours'](arg1, arg2, arg3);
 }
 
+export function EnqueueSystemMark(arg1, arg2) {
+  return window['go']['main']['App']['EnqueueSystemMark'](arg1, arg2);
+}
+
 export function EnterDegradedMode(arg1) {
   return window['go']['main']['App']['EnterDegradedMode'](arg1);
 }
@@ -340,6 +348,10 @@ export function ExitDegradedMode() {
 
 export function ExportDocumentToPath(arg1) {
   return window['go']['main']['App']['ExportDocumentToPath'](arg1);
+}
+
+export function ExportGroup(arg1, arg2) {
+  return window['go']['main']['App']['ExportGroup'](arg1, arg2);
 }
 
 export function ExportMediaWithSidecar(arg1, arg2) {
@@ -472,6 +484,10 @@ export function GetGoProgramAuthoringDetail(arg1) {
 
 export function GetHighImpactDomains() {
   return window['go']['main']['App']['GetHighImpactDomains']();
+}
+
+export function GetHighlightStats(arg1) {
+  return window['go']['main']['App']['GetHighlightStats'](arg1);
 }
 
 export function GetHookGeneReviewSummary(arg1) {
@@ -794,6 +810,10 @@ export function ListGoProgramAuthoringCatalog(arg1) {
   return window['go']['main']['App']['ListGoProgramAuthoringCatalog'](arg1);
 }
 
+export function ListHighlights(arg1) {
+  return window['go']['main']['App']['ListHighlights'](arg1);
+}
+
 export function ListInstalledEmbedModels() {
   return window['go']['main']['App']['ListInstalledEmbedModels']();
 }
@@ -872,6 +892,10 @@ export function ListReviewArchive() {
 
 export function ListScheduledJobs() {
   return window['go']['main']['App']['ListScheduledJobs']();
+}
+
+export function ListSystemMarks(arg1) {
+  return window['go']['main']['App']['ListSystemMarks'](arg1);
 }
 
 export function ListThreatRecords() {
@@ -954,6 +978,10 @@ export function OpenVisualLearningPermissionSettings(arg1) {
   return window['go']['main']['App']['OpenVisualLearningPermissionSettings'](arg1);
 }
 
+export function OrganizeSystemMarks(arg1) {
+  return window['go']['main']['App']['OrganizeSystemMarks'](arg1);
+}
+
 export function PauseScheduledJob(arg1) {
   return window['go']['main']['App']['PauseScheduledJob'](arg1);
 }
@@ -1018,12 +1046,24 @@ export function PurgeBoundaryDir(arg1) {
   return window['go']['main']['App']['PurgeBoundaryDir'](arg1);
 }
 
+export function PurgeMessageMarks(arg1, arg2) {
+  return window['go']['main']['App']['PurgeMessageMarks'](arg1, arg2);
+}
+
 export function PurgeProject(arg1, arg2) {
   return window['go']['main']['App']['PurgeProject'](arg1, arg2);
 }
 
+export function PurgeSystemMarks(arg1) {
+  return window['go']['main']['App']['PurgeSystemMarks'](arg1);
+}
+
 export function ReadDocumentContent(arg1) {
   return window['go']['main']['App']['ReadDocumentContent'](arg1);
+}
+
+export function RebuildGroupSummary(arg1, arg2) {
+  return window['go']['main']['App']['RebuildGroupSummary'](arg1, arg2);
 }
 
 export function RecognizeNativeOCR(arg1) {
@@ -1044,6 +1084,10 @@ export function RecordMainInteraction(arg1, arg2) {
 
 export function RecordStepTrace(arg1, arg2) {
   return window['go']['main']['App']['RecordStepTrace'](arg1, arg2);
+}
+
+export function RecordSuggestionOutcome(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RecordSuggestionOutcome'](arg1, arg2, arg3);
 }
 
 export function RefreshPendingCandidateAges() {
@@ -1206,6 +1250,10 @@ export function RetryRemoteBridgeSegment(arg1, arg2, arg3) {
   return window['go']['main']['App']['RetryRemoteBridgeSegment'](arg1, arg2, arg3);
 }
 
+export function RevalidateImportedSystemMarks(arg1, arg2) {
+  return window['go']['main']['App']['RevalidateImportedSystemMarks'](arg1, arg2);
+}
+
 export function RotateTalkFull() {
   return window['go']['main']['App']['RotateTalkFull']();
 }
@@ -1228,6 +1276,10 @@ export function RunSummarizationNow(arg1) {
 
 export function SaveDocumentFromAgent(arg1, arg2, arg3) {
   return window['go']['main']['App']['SaveDocumentFromAgent'](arg1, arg2, arg3);
+}
+
+export function SaveHighlight(arg1) {
+  return window['go']['main']['App']['SaveHighlight'](arg1);
 }
 
 export function SaveMainAsSub(arg1) {
@@ -1280,6 +1332,10 @@ export function ScanSkillFolder(arg1) {
 
 export function SchedulerHasActiveJobs() {
   return window['go']['main']['App']['SchedulerHasActiveJobs']();
+}
+
+export function ScoreHighlightGroups(arg1, arg2) {
+  return window['go']['main']['App']['ScoreHighlightGroups'](arg1, arg2);
 }
 
 export function SearchLearningOperations(arg1, arg2) {
@@ -1356,6 +1412,10 @@ export function SetBrowserPreference(arg1, arg2) {
 
 export function SetEmbeddingConfig(arg1, arg2) {
   return window['go']['main']['App']['SetEmbeddingConfig'](arg1, arg2);
+}
+
+export function SetHighlightWeight(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SetHighlightWeight'](arg1, arg2, arg3);
 }
 
 export function SetPersonaPixelAvatarPack(arg1, arg2) {

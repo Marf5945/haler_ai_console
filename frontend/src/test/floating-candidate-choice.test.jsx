@@ -310,7 +310,7 @@ describe('floating candidate choice flow', () => {
   });
 
   it('bursts readiness polling after composer submit so late candidates surface quickly', () => {
-    const app = readFileSync('src/App.jsx', 'utf8');
+    const app = readFileSync('src/app/App.jsx', 'utf8');
 
     expect(app).toContain('function scheduleReadinessGateBurstRefresh');
     expect(app).toContain('durationMs = 12000');

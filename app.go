@@ -1711,6 +1711,9 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 	actionTags := a.syncActionTagsToCLIAdapter(traceID)
 	isTaskProgressInternal := isTaskProgressTraceID(traceID)
 	if !isTaskProgressInternal {
+		if isSearchSummaryPrompt(userText) {
+			return a.executeSearchSummaryPrompt(adapterID, sessionID, userText, traceID)
+		}
 		if resp, handled := a.maybeHandleResourceGate(userText, sessionID, traceID); handled {
 			debugtrace.Record("go.SendCLIMessage.resource_gate.direct", traceID, map[string]interface{}{
 				"text":   resp.Text,
@@ -2237,6 +2240,9 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 	actionTags := a.syncActionTagsToCLIAdapter(traceID)
 	isTaskProgressInternal := isTaskProgressTraceID(traceID)
 	if !isTaskProgressInternal {
+		if isSearchSummaryPrompt(userText) {
+			return a.executeSearchSummaryPrompt(adapterID, sessionID, userText, traceID)
+		}
 		if resp, handled := a.maybeHandleResourceGate(userText, sessionID, traceID); handled {
 			debugtrace.Record("go.SendAPIMessage.resource_gate.direct", traceID, map[string]interface{}{
 				"text":   resp.Text,

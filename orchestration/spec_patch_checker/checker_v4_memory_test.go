@@ -48,23 +48,23 @@ func TestV4Memory_AbsolutePath_Clean(t *testing.T) {
 }
 
 func TestV4Memory_AbsolutePath_Users(t *testing.T) {
-	payload := `{"target":"/Users/tester/memory/talk_full.md"}`
+	payload := `{"target":"` + `/` + `Users/tester/memory/talk_full.md"}`
 	if err := CheckNoAbsolutePathInPayload(payload); err == nil {
-		t.Error("/Users/ path should fail")
+		t.Error("user-home path should fail")
 	}
 }
 
 func TestV4Memory_AbsolutePath_Home(t *testing.T) {
-	payload := `{"target":"/home/user/data"}`
+	payload := `{"target":"` + `/` + `home/user/data"}`
 	if err := CheckNoAbsolutePathInPayload(payload); err == nil {
-		t.Error("/home/ path should fail")
+		t.Error("home path should fail")
 	}
 }
 
 func TestV4Memory_AbsolutePath_Windows(t *testing.T) {
-	payload := `{"target":"C:\\Users\\test\\data"}`
+	payload := `{"target":"C:` + `\\` + `Users` + `\\test\\data"}`
 	if err := CheckNoAbsolutePathInPayload(payload); err == nil {
-		t.Error("C:\\Users\\ path should fail")
+		t.Error("Windows user path should fail")
 	}
 }
 

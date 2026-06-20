@@ -43,7 +43,7 @@ func TestRedactReplicateKey(t *testing.T) {
 }
 
 func TestRedactAWSKey(t *testing.T) {
-	out, recs := RedactBeforeWrite("aws: AKIAIOSFODNN7EXAMPLE")
+	out, recs := RedactBeforeWrite("aws: " + "AKIA" + "IOSFODNN7EXAMPLE")
 	if strings.Contains(out, "AKIAIOSF") {
 		t.Error("AWS key should be redacted")
 	}

@@ -56,6 +56,13 @@ export function useHighlight({
     }
   }, [conversationId]);
 
+  const deleteHighlight = useCallback(async (hlId) => {
+    const api = await bindings();
+    await api.DeleteHighlight?.(conversationId, hlId);
+    COLOR_SLOTS.forEach((c) => scheduleSummary(`grp_${conversationId}_slot_${c.slot}`));
+    refreshBar();
+  }, [conversationId, scheduleSummary, refreshBar]);
+
   // 把建議色 vs 使用者實選回報後端（acceptance 指標）
   const recordOutcome = useCallback(async (suggestedSlot, chosenSlot) => {
     const api = await bindings();
@@ -69,12 +76,7 @@ export function useHighlight({
     let lastSuggested = null;
 
     const bar = createGroupsBar({
-      conversationId,
-      getBindings: bindings,
-      exportGroup: async (groupId) => {
-        const api = await bindings();
-        return api.ExportGroup?.(conversationId, groupId);
-      },
+      onRemove: deleteHighlight,
     });
     barRef.current = bar;
 
@@ -109,12 +111,7 @@ export function useHighlight({
       },
 
       onRemove: async (hlId) => {
-        const api = await bindings();
-        try {
-          await api.DeleteHighlight?.(conversationId, hlId);
-          COLOR_SLOTS.forEach((c) => scheduleSummary(`grp_${conversationId}_slot_${c.slot}`));
-          refreshBar();
-        } catch (_) {}
+        deleteHighlight(hlId).catch(() => {});
       },
     });
     layerRef.current = layer;
@@ -142,7 +139,7 @@ export function useHighlight({
       timers.forEach((t) => clearTimeout(t));
       timers.clear();
     };
-  }, [enabled, rootSelector, conversationId, scheduleSummary, refreshBar, recordOutcome]);
+  }, [enabled, rootSelector, conversationId, scheduleSummary, refreshBar, deleteHighlight, recordOutcome]);
 
   const exportGroup = useCallback(async (groupId) => {
     const api = await bindings();

@@ -2,14 +2,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
-PROJECT="${SCRIPT_DIR:h}"
+PROJECT="${AI_CONSOLE_PROJECT:-${SCRIPT_DIR:h}}"
 export PATH="$PATH:/usr/local/go/bin:/opt/homebrew/bin:$HOME/go/bin"
 APP_NAME="HaLer AI Console"
 APP="$PROJECT/build/bin/${APP_NAME}.app"
 APP_EXEC="$APP/Contents/MacOS/$APP_NAME"
 LOG_DIR="$PROJECT/build/logs"
 LOG_FILE="$LOG_DIR/package-latest-$(date '+%Y%m%d-%H%M%S').log"
-BUILD_HELPER="$SCRIPT_DIR/wails_build_darwin.sh"
+BUILD_HELPER="$PROJECT/scripts/wails_build_darwin.sh"
 
 mkdir -p "$LOG_DIR"
 exec > >(tee "$LOG_FILE") 2>&1

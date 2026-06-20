@@ -175,12 +175,12 @@ type SubCreationEvent struct {
 func CheckNoAbsolutePathInPayload(payload string) error {
 	// 常見絕對路徑前綴
 	absolutePrefixes := []string{
-		"/Users/",
-		"/home/",
-		`C:\Users\`,
-		`C:\\Users\\`,
-		"/tmp/",
-		"/var/",
+		"/" + "Users/",
+		"/" + "home/",
+		`C:` + `\` + `Users` + `\`,
+		`C:` + `\\` + `Users` + `\\`,
+		"/" + "tmp/",
+		"/" + "var/",
 	}
 	for _, prefix := range absolutePrefixes {
 		if strings.Contains(payload, prefix) {

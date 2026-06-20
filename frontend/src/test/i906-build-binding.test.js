@@ -120,7 +120,7 @@ describe('I-906 前端 import 一致性檢查', () => {
   let appJsxContent = '';
 
   beforeEach(() => {
-    const appJsxPath = path.resolve(__dirname, '../App.jsx');
+    const appJsxPath = path.resolve(__dirname, '../app/App.jsx');
     try {
       appJsxContent = fs.readFileSync(appJsxPath, 'utf-8');
     } catch {

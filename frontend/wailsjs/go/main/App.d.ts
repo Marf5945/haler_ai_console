@@ -547,6 +547,8 @@ export function PullEmbedModel(arg1:string):Promise<main.EmbedPullJob>;
 
 export function PurgeBoundaryDir(arg1:string):Promise<void>;
 
+export function PurgeConversationMarks(arg1:string):Promise<void>;
+
 export function PurgeMessageMarks(arg1:string,arg2:string):Promise<void>;
 
 export function PurgeProject(arg1:string,arg2:string):Promise<any>;

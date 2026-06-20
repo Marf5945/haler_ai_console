@@ -113,6 +113,7 @@ export default function MessageRow({
             kind={kind}
             onInjectText={onInjectText}
             sessionId={sessionId}
+            chatLocale={chatLocale}
           />
         </div>
       )}

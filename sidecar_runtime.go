@@ -124,11 +124,11 @@ function traceParams(traceID, params) {
 
 function traceEndpoint() {
   try {
-    const raw = process.env.AI_CONSOLE_TRACE_URL;
+    const raw = process.env.AI_CONSOLE_TRACE_URL || "";
     if (!raw) return null;
     const parsed = new URL(raw);
     return {
-      hostname: parsed.hostname || "127.0.0.1",
+      hostname: parsed.hostname,
       port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
       pathname: parsed.pathname || "",
     };

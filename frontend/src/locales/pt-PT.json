@@ -353,6 +353,17 @@
     "imageTooLarge": "Imagem demasiado grande (máx {max})",
     "aiDisclaimer": "O conteúdo de IA pode nem sempre estar correto. Verifique as informações importantes."
   },
+  "chatSystem": {
+    "choose": "Escolha:",
+    "searchResults": "Resultados da pesquisa",
+    "webSearchCompleted": "Pesquisa na web concluída para «{query}».",
+    "searchPurpose": "Objetivo da pesquisa: {query}",
+    "sourceCount": "{count} fontes",
+    "summary": "Resumo",
+    "searchDetails": "Detalhes da pesquisa",
+    "webSearchSummaryFile": "resumo_pesquisa_web_{query}",
+    "localSearchSummary": "Resumo da pesquisa local"
+  },
   "system": {
     "sidecarFail": "[Sistema] O Sidecar não arrancou — verifique se o Node.js está instalado localmente ou consulte o registo para mais detalhes.",
     "sidecarCrash": "[Sistema] O Sidecar terminou inesperadamente — o canal CLI foi desligado. Reinicie a aplicação.",

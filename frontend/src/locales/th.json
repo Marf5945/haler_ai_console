@@ -348,6 +348,17 @@
     "imageTooLarge": "รูปภาพใหญ่เกินไป (สูงสุด {max})",
     "aiDisclaimer": "เนื้อหาจาก AI อาจไม่ถูกต้องเสมอไป โปรดตรวจสอบข้อมูลสำคัญ"
   },
+  "chatSystem": {
+    "choose": "โปรดเลือก:",
+    "searchResults": "ผลการค้นหา",
+    "webSearchCompleted": "ค้นหาเว็บ \"{query}\" เสร็จแล้ว",
+    "searchPurpose": "วัตถุประสงค์การค้นหา: {query}",
+    "sourceCount": "{count} แหล่งที่มา",
+    "summary": "สรุป",
+    "searchDetails": "รายละเอียดการค้นหา",
+    "webSearchSummaryFile": "สรุปการค้นหาเว็บ_{query}",
+    "localSearchSummary": "สรุปการค้นหาในเครื่อง"
+  },
   "system": {
     "sidecarFail": "[ระบบ] เริ่ม Sidecar ไม่สำเร็จ — โปรดตรวจสอบว่าติดตั้ง Node.js ในเครื่องแล้ว หรือดูบันทึกเพื่อรายละเอียด",
     "sidecarCrash": "[ระบบ] Sidecar หยุดทำงานกะทันหัน — ช่อง CLI หลุดการเชื่อมต่อ โปรดรีสตาร์ตแอป",

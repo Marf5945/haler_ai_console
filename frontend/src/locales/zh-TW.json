@@ -359,6 +359,17 @@
     "imageTooLarge": "圖片過大（上限 {max}）",
     "aiDisclaimer": "AI 的內容不一定正確，請務必查證。"
   },
+  "chatSystem": {
+    "choose": "請選擇：",
+    "searchResults": "搜尋結果",
+    "webSearchCompleted": "已完成網路搜尋「{query}」。",
+    "searchPurpose": "搜尋目的：{query}",
+    "sourceCount": "{count} 個來源",
+    "summary": "摘要",
+    "searchDetails": "搜尋詳情",
+    "webSearchSummaryFile": "網路搜尋摘要_{query}",
+    "localSearchSummary": "本機搜尋摘要"
+  },
   "system": {
     "sidecarFail": "[系統] Sidecar 啟動失敗 — 請確認本機已安裝 Node.js，或查看 log 取得詳細錯誤。",
     "sidecarCrash": "[系統] Sidecar 意外中止 — CLI 通道已斷開，請重新啟動應用程式。",

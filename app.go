@@ -2820,6 +2820,15 @@ func errorString(err error) string {
 	return err.Error()
 }
 
+func normalizeLocalAction(action string) string {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "输出", "출력", "output":
+		return "輸出"
+	default:
+		return strings.TrimSpace(action)
+	}
+}
+
 // assembleLocalResponse parses a local model's 3-line output into an ActionChain.
 // Falls back to treating the whole output as chat if parsing fails.
 func assembleLocalResponse(raw string) actionchain.ActionChain {
@@ -2833,16 +2842,21 @@ func assembleLocalResponse(raw string) actionchain.ActionChain {
 		}
 	}
 	if len(nonEmpty) >= 3 {
+		action := normalizeLocalAction(nonEmpty[0])
+		target := strings.TrimSpace(nonEmpty[1])
+		if action == "選項" {
+			target = normalizeLocalOptionTarget(target)
+		}
 		return actionchain.ActionChain{
-			Action: strings.TrimSpace(nonEmpty[0]),
-			Target: strings.TrimSpace(nonEmpty[1]),
+			Action: action,
+			Target: target,
 			Next:   actionchain.NormalizeNext(strings.TrimSpace(nonEmpty[2])),
 			Raw:    raw,
 		}
 	}
 	if len(nonEmpty) == 2 {
 		return actionchain.ActionChain{
-			Action: strings.TrimSpace(nonEmpty[0]),
+			Action: normalizeLocalAction(nonEmpty[0]),
 			Target: strings.TrimSpace(nonEmpty[1]),
 			Next:   actionchain.StandbyNext,
 			Raw:    raw,
@@ -2855,6 +2869,42 @@ func assembleLocalResponse(raw string) actionchain.ActionChain {
 		Next:   actionchain.StandbyNext,
 		Raw:    raw,
 	}
+}
+
+func normalizeLocalOptionTarget(target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return target
+	}
+	if strings.HasPrefix(target, "ㄤ") {
+		if strings.Contains(target, "ㄌ") {
+			return strings.ReplaceAll(target, "ㄌ", "ㄤ")
+		}
+		return target
+	}
+	natural := strings.NewReplacer(
+		"，", "、",
+		",", "、",
+		"／", "、",
+		"/", "、",
+		"・", "、",
+	).Replace(target)
+	parts := strings.Split(natural, "、")
+	if len(parts) < 2 {
+		return target
+	}
+	options := make([]string, 0, len(parts))
+	for _, part := range parts {
+		option := strings.TrimSpace(part)
+		if option == "" {
+			continue
+		}
+		options = append(options, option)
+	}
+	if len(options) < 2 {
+		return target
+	}
+	return "ㄤ" + strings.Join(options, "ㄤ")
 }
 
 // executeGitStatusShort 在專案目錄執行 git status --short，回傳結果。
@@ -3006,8 +3056,24 @@ func fillLLMAPIConfigDefaults(adapterID string, cfg llmAPIAdapterConfig) llmAPIA
 			cfg.BaseURL = "https://openrouter.ai/api/v1"
 		}
 	case "groq":
+		if cfg.Name == "" {
+			cfg.Name = "Groq"
+		}
 		if cfg.BaseURL == "" {
 			cfg.BaseURL = "https://api.groq.com/openai/v1"
+		}
+		if cfg.Model == "" {
+			cfg.Model = "openai/gpt-oss-20b"
+		}
+	case "huggingface":
+		if cfg.Name == "" {
+			cfg.Name = "Hugging Face"
+		}
+		if cfg.BaseURL == "" {
+			cfg.BaseURL = "https://router.huggingface.co/v1"
+		}
+		if cfg.Model == "" {
+			cfg.Model = "openai/gpt-oss-120b:cerebras"
 		}
 	case "ollama":
 		if cfg.Name == "" {
@@ -3376,6 +3442,8 @@ func (a *App) replyLanguageField() string {
 		return "語言=English（always reply in English）"
 	case "ja", "日文", "日本語", "Japanese":
 		return "語言=日本語（必ず日本語で返信してください）"
+	case "ko", "韓文", "韓語", "한국어", "Korean":
+		return "語言=한국어（항상 한국어로 답변하세요）"
 	case "pt", "pt-PT", "Português", "葡萄牙文":
 		return "語言=Português de Portugal（responda sempre em português）"
 	case "es", "Español", "西班牙文":

@@ -90,19 +90,14 @@ func TestResolveExecutablePath_RenamedKnownCLI(t *testing.T) {
 	}
 }
 
-// bin 內只有單一可執行檔（完全自訂名稱）時，採用唯一執行檔後備。
-func TestResolveExecutablePath_UniqueExecutableFallback(t *testing.T) {
+// bin 內只有單一可執行檔（完全自訂名稱）時，也不靠資料夾亂猜。
+func TestResolveExecutablePath_UniqueExecutableFallbackRejected(t *testing.T) {
 	skipOnWindows(t)
 	root := t.TempDir()
-	want := filepath.Join(root, "proj", "bin", "totally-custom-name")
-	mkexec(t, want)
+	mkexec(t, filepath.Join(root, "proj", "bin", "totally-custom-name"))
 
-	got, err := resolveExecutablePath(filepath.Join(root, "proj"), "")
-	if err != nil {
-		t.Fatalf("resolveExecutablePath error: %v", err)
-	}
-	if got != want {
-		t.Fatalf("got %q, want %q", got, want)
+	if _, err := resolveExecutablePath(filepath.Join(root, "proj"), ""); err == nil {
+		t.Fatalf("expected error for unknown executable in folder, got nil")
 	}
 }
 
@@ -131,5 +126,34 @@ func TestResolveExecutablePath_DirectExecutable(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestResolveExecutablePath_RejectsHomeDirectory(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skip("home directory unavailable")
+	}
+	if _, err := resolveExecutablePath(home, ""); err == nil {
+		t.Fatalf("expected broad home directory to be rejected")
+	}
+}
+
+func TestResolveCustomCLIRejectsKnownUnsupportedChatCLIs(t *testing.T) {
+	skipOnWindows(t)
+	root := t.TempDir()
+	for _, name := range []string{"ollama", "yc", "hf", "huggingface-cli", "groq"} {
+		path := filepath.Join(root, name)
+		mkexec(t, path)
+		got, err := ResolveCustomCLI("", path)
+		if err == nil {
+			t.Fatalf("ResolveCustomCLI(%q) expected unsupported error", name)
+		}
+		if got.Supported {
+			t.Fatalf("ResolveCustomCLI(%q) Supported = true, want false", name)
+		}
+		if got.Reason == "" {
+			t.Fatalf("ResolveCustomCLI(%q) reason is empty", name)
+		}
 	}
 }

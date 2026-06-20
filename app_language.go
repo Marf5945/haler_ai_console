@@ -11,6 +11,8 @@ const (
 	responseLanguageZH = "zh"
 	responseLanguageEN = "en"
 	responseLanguagePT = "pt"
+	responseLanguageJA = "ja"
+	responseLanguageKO = "ko"
 )
 
 func normalizeResponseLanguage(value string) string {
@@ -20,6 +22,10 @@ func normalizeResponseLanguage(value string) string {
 		return responseLanguageEN
 	case "pt", "pt-pt", "português", "portugues", "葡萄牙文":
 		return responseLanguagePT
+	case "ja", "jp", "日本語", "日文", "japanese":
+		return responseLanguageJA
+	case "ko", "kr", "한국어", "韓文", "韓語", "korean":
+		return responseLanguageKO
 	case "zh", "zh-tw", "中文", "繁中", "繁體中文", "traditional chinese", "chinese", "中":
 		return responseLanguageZH
 	default:
@@ -53,6 +59,10 @@ func (a *App) routingReplyLanguageRule() string {
 		return "回答內容請使用 English"
 	case responseLanguagePT:
 		return "回答內容請使用 Português"
+	case responseLanguageJA:
+		return "回答內容請使用日本語"
+	case responseLanguageKO:
+		return "回答內容請使用한국어"
 	default:
 		return "回答內容請使用繁體中文"
 	}
@@ -64,6 +74,10 @@ func languageInstruction(lang string) string {
 		return "English"
 	case responseLanguagePT:
 		return "Portuguese"
+	case responseLanguageJA:
+		return "Japanese"
+	case responseLanguageKO:
+		return "Korean"
 	default:
 		return "Traditional Chinese"
 	}

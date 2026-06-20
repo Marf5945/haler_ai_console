@@ -355,6 +355,17 @@
     "imageTooLarge": "Image too large (max {max})",
     "aiDisclaimer": "AI content may not always be accurate. Please verify important information."
   },
+  "chatSystem": {
+    "choose": "Please choose:",
+    "searchResults": "Search results",
+    "webSearchCompleted": "Completed web search for \"{query}\".",
+    "searchPurpose": "Search purpose: {query}",
+    "sourceCount": "{count} source(s)",
+    "summary": "Summary",
+    "searchDetails": "Search details",
+    "webSearchSummaryFile": "web_search_summary_{query}",
+    "localSearchSummary": "Local search summary"
+  },
   "system": {
     "sidecarFail": "[System] Sidecar failed to start — please verify Node.js is installed locally, or check the log for details.",
     "sidecarCrash": "[System] Sidecar terminated unexpectedly — CLI channel disconnected. Please restart the application.",

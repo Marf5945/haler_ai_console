@@ -62,6 +62,9 @@ func TestIsOllamaGenerativeModelID(t *testing.T) {
 	generative := []string{
 		"qwen3:4b",
 		"llama3.2:3b",
+		"llama3:8b",
+		"falcon2:11b",
+		"hf.co/tiiuae/falcon-2-11b:Q4_K_M",
 		"hf.co/second-state/Breeze-7B-Instruct-v1_0-GGUF:Q4_K_M",
 		"mistral:7b-instruct",
 	}

@@ -356,8 +356,52 @@ var knownCLIs = []knownCLI{
 			"$HOME/gemini_cli/node_modules/.bin/gemini",
 		},
 	},
+	{
+		BinaryName: "vibe",
+		AdapterID:  "mistral-vibe-cli",
+		Label:      "Mistral Vibe",
+		Icon:       "M",
+		CandidatePaths: []string{
+			"$HOME/.local/bin/vibe",
+			"$HOME/.cargo/bin/vibe",
+		},
+	},
 	{BinaryName: "aider", AdapterID: "aider-cli", Label: "Aider", Icon: "A"},
 	{BinaryName: "copilot", AdapterID: "copilot-cli", Label: "Copilot", Icon: "⬡"},
+}
+
+type unsupportedCLI struct {
+	BinaryNames []string
+	AdapterID   string
+	Label       string
+	Reason      string
+}
+
+var unsupportedCLIs = []unsupportedCLI{
+	{
+		BinaryNames: []string{"ollama"},
+		AdapterID:   "ollama-cli",
+		Label:       "Ollama CLI",
+		Reason:      "Ollama CLI 是本機模型 runtime；請用「本地模型掃描」接上 Ollama API，不要當一般聊天 CLI。",
+	},
+	{
+		BinaryNames: []string{"groq"},
+		AdapterID:   "groq-cli",
+		Label:       "Groq CLI",
+		Reason:      "Groq 官方文件提供 API/SDK 與 OpenAI-compatible endpoint，未確認有官方穩定 stdout 聊天 CLI；請建立 Groq API Adapter。",
+	},
+	{
+		BinaryNames: []string{"yc"},
+		AdapterID:   "yandex-cloud-cli",
+		Label:       "Yandex Cloud CLI",
+		Reason:      "Yandex Cloud CLI 用於管理雲端資源；AI Studio 文字生成走 API/SDK，未確認有官方穩定 stdout 聊天 CLI。",
+	},
+	{
+		BinaryNames: []string{"hf", "huggingface-cli"},
+		AdapterID:   "huggingface-cli",
+		Label:       "Hugging Face CLI",
+		Reason:      "Hugging Face CLI 用於登入、下載、上傳與 Hub 管理；聊天請用 Hugging Face Inference Providers API Adapter。",
+	},
 }
 
 // DetectResult 描述一個偵測結果。
@@ -366,6 +410,8 @@ type DetectResult struct {
 	Name      string `json:"name"`
 	Path      string `json:"path"` // 偵測到的完整路徑，空字串表示未安裝
 	Found     bool   `json:"found"`
+	Supported bool   `json:"supported"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 // extraSearchPaths 回傳 macOS GUI app 中 PATH 不包含的常見 CLI 安裝路徑。
@@ -628,14 +674,15 @@ const (
 )
 
 // knownCLIBinaryNames 是內建可自動辨識的 CLI 執行檔名稱。
-var knownCLIBinaryNames = []string{"claude", "codex", "gemini", "ollama", "aider", "copilot"}
+var knownCLIBinaryNames = []string{"claude", "codex", "gemini", "vibe", "ollama", "aider", "copilot"}
 
 // resolveExecutablePath 解析使用者輸入的路徑，回傳可執行的 CLI 完整路徑。
-// 接受三種輸入：
+// 接受兩種輸入：
 //  1. 直接指向執行檔；
 //  2. 指向安裝 / 專案資料夾（檢查 <dir>、<dir>/bin、<dir>/node_modules/.bin）；
-//  3. 指向上述「附近」的路徑——往上、往下各搜尋數層，讓使用者不必貼到
-//     精準路徑也能找到 CLI，且不鎖死特定檔名。
+//
+// 資料夾只依已知 CLI 名稱或可驗證的 package symlink 判斷，避免把家目錄
+// 或一般專案資料夾誤判成 CLI adapter。
 func resolveExecutablePath(path, binaryName string) (string, error) {
 	path = expandHome(strings.TrimSpace(path))
 	if path == "" {
@@ -660,6 +707,8 @@ func resolveExecutablePath(path, binaryName string) (string, error) {
 		}
 		// 指到非執行檔（例如 README）：改從它所在的資料夾往外找。
 		path = filepath.Dir(path)
+	} else if isBroadCLISearchRoot(path) {
+		return "", fmt.Errorf("adapter_registry: path %q is too broad; choose a CLI executable or its install folder", path)
 	}
 
 	names := candidateBinaryNames(binaryName, path)
@@ -677,12 +726,31 @@ func resolveExecutablePath(path, binaryName string) (string, error) {
 		return unwrapLauncherPath(hit, name), nil
 	}
 
-	// 3) 唯一執行檔後備：搜尋範圍內的 bin / node_modules/.bin 只有單一可執行檔。
-	if hit := probeUniqueExecutable(bases); hit != "" {
-		return unwrapLauncherPath(hit, strings.ToLower(filepath.Base(hit))), nil
-	}
-
 	return "", fmt.Errorf("adapter_registry: no executable CLI found near %q", path)
+}
+
+func isBroadCLISearchRoot(path string) bool {
+	clean := filepath.Clean(expandHome(strings.TrimSpace(path)))
+	if clean == "" || clean == "." {
+		return true
+	}
+	roots := []string{filepath.Clean(string(filepath.Separator))}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		home = filepath.Clean(home)
+		roots = append(roots,
+			home,
+			filepath.Dir(home),
+			filepath.Join(home, "Desktop"),
+			filepath.Join(home, "Documents"),
+			filepath.Join(home, "Downloads"),
+		)
+	}
+	for _, root := range roots {
+		if clean == root {
+			return true
+		}
+	}
+	return false
 }
 
 // candidateBinaryNames 組出要尋找的執行檔名稱候選，順序為：
@@ -824,7 +892,7 @@ func probeRenamedKnownCLI(bases []string) (string, string) {
 				continue
 			}
 			lower := strings.ToLower(target)
-			for _, known := range knownCLIBinaryNames {
+			for _, known := range knownCLIPackageMarkers() {
 				if strings.Contains(lower, known) {
 					return link, known
 				}
@@ -834,38 +902,14 @@ func probeRenamedKnownCLI(bases []string) (string, string) {
 	return "", ""
 }
 
-// probeUniqueExecutable 掃描搜尋範圍內所有 bin / node_modules/.bin 資料夾，
-// 若整體只找到「唯一一個」可執行檔，回傳該路徑；找到多個則回傳空字串
-// （視為無法判定，交由使用者明確指定）。
-func probeUniqueExecutable(bases []string) string {
-	seenFile := map[string]bool{}
-	var found []string
-	for _, base := range bases {
-		for _, sub := range []string{filepath.Join(base, "bin"), filepath.Join(base, "node_modules", ".bin")} {
-			entries, err := os.ReadDir(sub)
-			if err != nil {
-				continue
-			}
-			for _, e := range entries {
-				if e.IsDir() {
-					continue
-				}
-				full := filepath.Join(sub, e.Name())
-				if !isExecutableFile(full) || seenFile[full] {
-					continue
-				}
-				seenFile[full] = true
-				found = append(found, full)
-				if len(found) > 1 {
-					return ""
-				}
-			}
-		}
-	}
-	if len(found) == 1 {
-		return found[0]
-	}
-	return ""
+func knownCLIPackageMarkers() []string {
+	markers := append([]string{}, knownCLIBinaryNames...)
+	markers = append(markers,
+		"mistral-vibe",
+		"gemini-cli",
+		"claude-code",
+	)
+	return markers
 }
 
 func inferCLIName(name, path string) string {
@@ -874,9 +918,12 @@ func inferCLIName(name, path string) string {
 		return cleanName
 	}
 	lowerPath := strings.ToLower(path)
-	for _, known := range []string{"claude", "codex", "gemini", "ollama", "aider", "copilot"} {
-		if strings.Contains(lowerPath, known) {
-			return strings.ToUpper(known[:1]) + known[1:]
+	for _, cli := range knownCLIs {
+		if strings.Contains(lowerPath, strings.ToLower(cli.BinaryName)) ||
+			strings.Contains(lowerPath, strings.ToLower(cli.AdapterID)) ||
+			strings.Contains(lowerPath, strings.ToLower(strings.ReplaceAll(cli.Label, " ", "-"))) ||
+			strings.Contains(lowerPath, strings.ToLower(strings.ReplaceAll(cli.Label, " ", ""))) {
+			return cli.Label
 		}
 	}
 	base := strings.TrimSpace(filepath.Base(path))
@@ -901,6 +948,16 @@ func inferCLIName(name, path string) string {
 // It accepts either an executable file or a project/install directory containing
 // common CLI entrypoints such as node_modules/.bin/gemini.
 func ResolveCustomCLI(name, path string) (DetectResult, error) {
+	if unsupported, ok := matchUnsupportedCLIPath(path); ok {
+		return DetectResult{
+			AdapterID: unsupported.AdapterID,
+			Name:      unsupported.Label,
+			Path:      expandHome(strings.TrimSpace(path)),
+			Found:     true,
+			Supported: false,
+			Reason:    unsupported.Reason,
+		}, fmt.Errorf("adapter_registry: %s cannot be registered as a CLI adapter: %s", unsupported.Label, unsupported.Reason)
+	}
 	cleanName := inferCLIName(name, path)
 	r := DetectResult{Name: cleanName}
 	binaryName := strings.ToLower(strings.Fields(cleanName)[0])
@@ -914,6 +971,7 @@ func ResolveCustomCLI(name, path string) (DetectResult, error) {
 	r.AdapterID = strings.ToLower(strings.ReplaceAll(cleanName, " ", "-")) + "-cli"
 	r.Path = resolvedPath
 	r.Found = true
+	r.Supported = true
 	return r, nil
 }
 
@@ -935,10 +993,45 @@ func (s *Service) AutoDetect() []DetectResult {
 				Name:      cli.Label,
 				Path:      path,
 				Found:     true,
+				Supported: true,
+			})
+		}
+	}
+	for _, cli := range unsupportedCLIs {
+		if path := findUnsupportedCLI(cli); path != "" {
+			results = append(results, DetectResult{
+				AdapterID: cli.AdapterID,
+				Name:      cli.Label,
+				Path:      path,
+				Found:     true,
+				Supported: false,
+				Reason:    cli.Reason,
 			})
 		}
 	}
 	return results
+}
+
+func findUnsupportedCLI(cli unsupportedCLI) string {
+	for _, name := range cli.BinaryNames {
+		if path := findBinary(name); path != "" {
+			return path
+		}
+	}
+	return ""
+}
+
+func matchUnsupportedCLIPath(path string) (unsupportedCLI, bool) {
+	base := strings.ToLower(filepath.Base(expandHome(strings.TrimSpace(path))))
+	base = strings.TrimSuffix(base, ".exe")
+	for _, cli := range unsupportedCLIs {
+		for _, name := range cli.BinaryNames {
+			if base == strings.ToLower(name) {
+				return cli, true
+			}
+		}
+	}
+	return unsupportedCLI{}, false
 }
 
 // EnableDetectedCLI 由使用者在 UI 上選擇後呼叫，將偵測到的 CLI 註冊到 registry。

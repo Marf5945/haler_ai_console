@@ -196,4 +196,9 @@ export function t(key, params) {
   return resolveTranslation(translations, fallback, language, key, params);
 }
 
+export function tForLanguage(language, key, params) {
+  const locale = TRANSLATION_MAP[language] ? language : 'zh-TW';
+  return resolveTranslation(TRANSLATION_MAP[locale] ?? {}, zhTW, locale, key, params);
+}
+
 export default useI18n;

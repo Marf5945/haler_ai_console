@@ -27,6 +27,7 @@ import (
 	"time"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"ui_console/data/memory"
 	"ui_console/data/storage"
 	"ui_console/data/subexport"
 	"ui_console/orchestration/skill_step"
@@ -387,6 +388,14 @@ func (a *App) ImportSubHandler(exportDir string) (*ImportSubResult, error) {
 	result, err := subexport.ImportSub(exportDir, projectRoot)
 	if err != nil {
 		return nil, err
+	}
+
+	if talk, readErr := memory.ReadTalkFull(result.SubDir); readErr == nil {
+		if _, verifyErr := a.RevalidateImportedSystemMarks(result.NewSystemCode, talk); verifyErr != nil {
+			log.Printf("[IMPORT] system marks revalidation failed: %v", verifyErr)
+		}
+	} else {
+		log.Printf("[IMPORT] read imported talk_full for system mark revalidation failed: %v", readErr)
 	}
 
 	// 新增到 tab order

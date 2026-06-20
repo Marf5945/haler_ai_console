@@ -286,6 +286,15 @@ function commandFor(adapterID, cliPath, prompt, model) {
     const model2 = m || process.env.GEMINI_MODEL || "gemini-2.5-flash";
     return {cmd: cliPath, args: ["--model", model2, "-p", prompt]};
   }
+  if (id.includes("mistral-vibe") || id.includes("vibe") || base === "vibe") {
+    const args = [];
+    if (m) args.push("--model", m);
+    args.push("--prompt", prompt);
+    return {cmd: cliPath, args};
+  }
+  if (id.includes("copilot") || base === "copilot") {
+    return {cmd: cliPath, args: ["-p", prompt]};
+  }
   return {cmd: cliPath, args: [prompt]};
 }
 

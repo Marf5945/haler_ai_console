@@ -1,8 +1,10 @@
 import React from 'react';
 import MessageText from './MessageText';
+import { tForLanguage } from '../../locales/useI18n';
 
 export default function MessageRow({
   message,
+  domMessageId,
   displayText,
   kind,
   isActive,
@@ -16,13 +18,17 @@ export default function MessageRow({
   onInjectText,
   sessionId,
   previousMessage,
+  chatLocale,
 }) {
   const isLocalSearch = isLocalSearchMessage(message);
   const isWebSearch = isWebSearchMessage(message, previousMessage);
   const isSearchSummary = isLocalSearch || isWebSearch;
+  const tChat = React.useCallback((key, params) => (
+    tForLanguage(chatLocale || 'zh-TW', key, params)
+  ), [chatLocale]);
   const searchSummary = React.useMemo(
-    () => buildSearchSummaryCard(message, previousMessage),
-    [message, previousMessage],
+    () => buildSearchSummaryCard(message, previousMessage, tChat),
+    [message, previousMessage, tChat],
   );
 
   // 詳情 popover：點卡片浮出「網址＋擷取內容」，Esc 或點外關閉。
@@ -94,14 +100,14 @@ export default function MessageRow({
             <span className="search-summary-count">{searchSummary.countLabel}</span>
           </div>
           {searchSummaryOpen && (
-            <div className="search-summary-popover" role="dialog" aria-label="搜尋詳情">
+            <div className="search-summary-popover" role="dialog" aria-label={tChat('chatSystem.searchDetails')}>
               <strong className="search-summary-popover-title">{searchSummary.filename}</strong>
               <pre className="search-summary-md-preview">{searchSummary.markdown}</pre>
             </div>
           )}
         </div>
       ) : (
-        <div className="message-text">
+        <div className="message-text" data-message-id={domMessageId || `m_${index}`}>
           <MessageText
             text={displayText}
             kind={kind}
@@ -148,18 +154,18 @@ export default function MessageRow({
   );
 }
 
-function buildSearchSummaryCard(text, previousMessage = '') {
+function buildSearchSummaryCard(text, previousMessage = '', tChat = tForLanguage.bind(null, 'zh-TW')) {
   const raw = String(text || '').replace(/^Ai:/, '').trim();
   if (isWebSearchMessage(text, previousMessage)) {
-    const purpose = extractSearchPurpose(previousMessage) || extractWebSearchQuery(raw) || '搜尋結果';
-    const title = `已完成網路搜尋「${purpose}」。`;
+    const purpose = extractSearchPurpose(previousMessage) || extractWebSearchQuery(raw) || tChat('chatSystem.searchResults');
+    const title = tChat('chatSystem.webSearchCompleted', { query: purpose });
     const sourceCount = countWebSearchSources(raw);
     return {
       title,
       query: purpose,
-      keywordText: `搜尋目的：${purpose}`,
-      countLabel: sourceCount > 0 ? `${sourceCount} 個來源` : '摘要',
-      filename: `${sanitizeSearchSummaryFilename(`網路搜尋摘要_${purpose}`)}.md`,
+      keywordText: tChat('chatSystem.searchPurpose', { query: purpose }),
+      countLabel: sourceCount > 0 ? tChat('chatSystem.sourceCount', { count: sourceCount }) : tChat('chatSystem.summary'),
+      filename: `${sanitizeSearchSummaryFilename(tChat('chatSystem.webSearchSummaryFile', { query: purpose }))}.md`,
       markdown: raw.startsWith('#') ? `${raw}\n` : `# ${title}\n\n${raw}\n`,
     };
   }
@@ -239,11 +245,11 @@ function countWebSearchSources(text) {
 }
 
 function sanitizeSearchSummaryFilename(name) {
-  return String(name || '搜尋摘要').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 96);
+  return String(name || tForLanguage('zh-TW', 'chatSystem.summary')).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 96);
 }
 
 function renderSearchSummaryTitle(title, query) {
-  const plainTitle = String(title || '本機搜尋摘要');
+  const plainTitle = String(title || tForLanguage('zh-TW', 'chatSystem.localSearchSummary'));
   const plainQuery = String(query || '').trim();
   if (!plainQuery) return plainTitle;
   const index = plainTitle.indexOf(plainQuery);

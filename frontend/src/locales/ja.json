@@ -357,6 +357,17 @@
     "imageTooLarge": "画像が大きすぎます（上限 {max}）",
     "aiDisclaimer": "AI の内容は必ずしも正確とは限りません。必ず確認してください。"
   },
+  "chatSystem": {
+    "choose": "選択してください：",
+    "searchResults": "検索結果",
+    "webSearchCompleted": "「{query}」のウェブ検索が完了しました。",
+    "searchPurpose": "検索目的：{query}",
+    "sourceCount": "{count} 件のソース",
+    "summary": "概要",
+    "searchDetails": "検索詳細",
+    "webSearchSummaryFile": "ウェブ検索概要_{query}",
+    "localSearchSummary": "ローカル検索概要"
+  },
   "system": {
     "sidecarFail": "[System] Sidecar の起動に失敗しました。Node.js がローカルにインストールされているか確認するか、ログを確認してください。",
     "sidecarCrash": "[System] Sidecar が予期せず終了しました。CLI チャンネルが切断されました。アプリを再起動してください。",

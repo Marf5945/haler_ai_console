@@ -11,13 +11,11 @@ import (
 	"time"
 )
 
-// DEBUG_TRACE_REMOVE: This package is a temporary local trace viewer for the
-// UI -> Wails -> Go -> sidecar -> CLI path. Remove this folder and all
-// DEBUG_TRACE_REMOVE call sites when the diagnostic work is done.
-// Keep while cleanup is in progress: this is active diagnostic infrastructure,
-// not an unused watcher. The monitor URL may be stale after the app exits.
+// DEBUG_TRACE_REMOVE: This package keeps in-memory trace events for diagnostic
+// tests. The local monitor server is disabled unless an explicit address is
+// supplied by a developer environment.
 
-const DefaultAddr = "127.0.0.1:0"
+const DefaultAddr = ""
 
 // LinkSnapshot is the current monitor-link register exposed to UI/debug code.
 type LinkSnapshot struct {
@@ -52,6 +50,13 @@ var store = struct {
 }
 
 func Start(addr string) {
+	if addr == "" {
+		store.Lock()
+		store.updatedAt = time.Now().Format(time.RFC3339Nano)
+		store.version++
+		store.Unlock()
+		return
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", pageHandler)
 	mux.HandleFunc("/events", eventsHandler)
@@ -130,7 +135,7 @@ func Snapshot() LinkSnapshot {
 
 func listenWithFallback(addr string) (net.Listener, string, error) {
 	if addr == "" {
-		addr = DefaultAddr
+		return nil, "", fmt.Errorf("trace viewer address is not configured")
 	}
 	listener, err := net.Listen("tcp", addr)
 	if err == nil {

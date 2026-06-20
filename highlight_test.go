@@ -1,6 +1,13 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"ui_console/data/storage"
+)
 
 func TestGrounded(t *testing.T) {
 	src := "機車需要定期保養，才不會半路損壞"
@@ -25,11 +32,11 @@ func TestRedactPII(t *testing.T) {
 	in := "聯絡 a.b@example.com 或 0912-345-678，卡號 1234567890123"
 	out := redactPII(in, "user_text")
 	for _, leak := range []string{"a.b@example.com", "0912-345-678", "1234567890123"} {
-		if contains(out, leak) {
+		if strings.Contains(out, leak) {
 			t.Fatalf("PII 未遮蔽: %q 仍在 %q", leak, out)
 		}
 	}
-	if !contains(out, "[REDACTED_EMAIL]") {
+	if !strings.Contains(out, "[REDACTED_EMAIL]") {
 		t.Fatalf("email 應被遮蔽，得到 %q", out)
 	}
 }
@@ -115,5 +122,77 @@ func TestLexicalScoresPrefersOverlap(t *testing.T) {
 func TestColorSlotBounds(t *testing.T) {
 	if highlightMaxGroups != 8 {
 		t.Fatalf("色盤應為 8，得到 %d", highlightMaxGroups)
+	}
+}
+
+func TestClearMainTalkPurgesConversationMarks(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AI_CONSOLE_DATA_ROOT", root)
+	if err := storage.EnsureProjectLayout(root, "default"); err != nil {
+		t.Fatalf("EnsureProjectLayout error: %v", err)
+	}
+	projectRoot := storage.ProjectRoot(root, "default")
+	talkPath := filepath.Join(projectRoot, "memory", "talk_full.md")
+	if err := os.WriteFile(talkPath, []byte("user: hello"), 0o600); err != nil {
+		t.Fatalf("write talk_full: %v", err)
+	}
+	if err := saveHighlightStore("main", &highlightStore{Highlights: []Highlight{{ID: "h1", MessageID: "m1", Quote: "hello"}}}); err != nil {
+		t.Fatalf("save user highlights: %v", err)
+	}
+	sysPath, err := systemMarksPath("main")
+	if err != nil {
+		t.Fatalf("systemMarksPath error: %v", err)
+	}
+	if err := saveHighlightStoreAt(sysPath, &highlightStore{Highlights: []Highlight{{ID: "s1", MessageID: "m1", Quote: "hello", System: true}}}); err != nil {
+		t.Fatalf("save system marks: %v", err)
+	}
+	if err := saveSystemPending("main", &systemPendingQueue{Items: []SystemMarkPending{{MessageID: "m1", Text: "hello", Source: "user_text"}}}); err != nil {
+		t.Fatalf("save pending marks: %v", err)
+	}
+	statsPath, err := highlightStatsPath("main")
+	if err != nil {
+		t.Fatalf("highlightStatsPath error: %v", err)
+	}
+	if err := os.WriteFile(statsPath, []byte(`{"suggestedTotal":1,"accepted":1}`), 0o600); err != nil {
+		t.Fatalf("write stats: %v", err)
+	}
+
+	if err := (&App{}).ClearMainTalk(); err != nil {
+		t.Fatalf("ClearMainTalk error: %v", err)
+	}
+	if raw, err := os.ReadFile(talkPath); err != nil || len(raw) != 0 {
+		t.Fatalf("talk_full not empty: len=%d err=%v", len(raw), err)
+	}
+	userStore, err := loadHighlightStore("main")
+	if err != nil {
+		t.Fatalf("load user highlights: %v", err)
+	}
+	if len(userStore.Highlights) != 0 {
+		t.Fatalf("user highlights not purged: %d", len(userStore.Highlights))
+	}
+	sysStore, err := loadHighlightStoreAt(sysPath)
+	if err != nil {
+		t.Fatalf("load system marks: %v", err)
+	}
+	if len(sysStore.Highlights) != 0 {
+		t.Fatalf("system marks not purged: %d", len(sysStore.Highlights))
+	}
+	pending, err := loadSystemPending("main")
+	if err != nil {
+		t.Fatalf("load pending marks: %v", err)
+	}
+	if len(pending.Items) != 0 {
+		t.Fatalf("pending marks not purged: %d", len(pending.Items))
+	}
+	if _, err := os.Stat(statsPath); !os.IsNotExist(err) {
+		t.Fatalf("highlight_stats should be removed, err=%v", err)
+	}
+}
+
+func TestPurgeConversationMarksReportsError(t *testing.T) {
+	// 不存在 / 不合法的 subagent → 路徑解析失敗 → 應回傳非 nil 錯誤，
+	// 讓 ClearMainTalk 那層能記 log（而非靜默吞掉）。
+	if err := (&App{}).PurgeConversationMarks("__no_such_sub_zzz__"); err == nil {
+		t.Fatalf("對不存在的 sub 應回傳錯誤，供呼叫端記 log")
 	}
 }

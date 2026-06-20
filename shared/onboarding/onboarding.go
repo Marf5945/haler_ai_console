@@ -142,8 +142,8 @@ func (s *Service) ExitReadOnly() {
 
 func defaultSteps() []Step {
 	return []Step{
-		{ID: "welcome", Title: "歡迎", Description: "認識 Haㄌer AI Console 的基本介面", Completed: false},
-		{ID: "adapter", Title: "選擇 Adapter", Description: "選擇你要使用的 CLI（Claude / Codex / Gemini）", Completed: false},
+		{ID: "welcome", Title: "歡迎", Description: "選擇介面語言，並連接 API、CLI 或本地模型", Completed: false},
+		{ID: "adapter", Title: "選擇連接方式", Description: "可貼 API 設定、接本地模型 endpoint，或指定 CLI 路徑", Completed: false},
 		{ID: "persona", Title: "設定人格", Description: "設定助手的名稱與回應風格", Completed: false},
 		{ID: "tool", Title: "試用工具", Description: "開啟工具面板，嘗試使用一個工具", Completed: false},
 		{ID: "complete", Title: "完成", Description: "你已準備好開始使用！", Completed: false},

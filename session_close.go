@@ -384,6 +384,12 @@ func (a *App) ClearMainTalk() error {
 		return fmt.Errorf("清除 main talk_full 失敗: %w", err)
 	}
 
+	// 清空主對話連帶清掉重點標註與系統暗標（保留資料夾的情境）。
+	// 非致命：清理失敗不擋清對話，但記 log 以便觀測 / 重試。
+	if err := a.PurgeConversationMarks("main"); err != nil {
+		log.Printf("session_close: purge conversation marks failed: %v", err)
+	}
+
 	log.Printf("session_close: main talk_full cleared")
 	return nil
 }

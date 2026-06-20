@@ -1046,6 +1046,10 @@ export function PurgeBoundaryDir(arg1) {
   return window['go']['main']['App']['PurgeBoundaryDir'](arg1);
 }
 
+export function PurgeConversationMarks(arg1) {
+  return window['go']['main']['App']['PurgeConversationMarks'](arg1);
+}
+
 export function PurgeMessageMarks(arg1, arg2) {
   return window['go']['main']['App']['PurgeMessageMarks'](arg1, arg2);
 }

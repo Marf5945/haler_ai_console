@@ -112,7 +112,7 @@ function recolorHighlight(hlId, slot, container = document) {
     applySpanStyle(span, slot);
   });
 }
-function unwrapHighlight(hlId, container = document) {
+export function removeHighlightDomById(hlId, container = document) {
   const spans = container.querySelectorAll(`[${HL_ATTR}="${cssEsc(hlId)}"]`);
   spans.forEach((span) => {
     const parent = span.parentNode;
@@ -122,6 +122,19 @@ function unwrapHighlight(hlId, container = document) {
     parent.normalize?.();
   });
   return spans.length > 0;
+}
+// 跳回原文：捲動到該標記並閃一下（重點清單 ↔ 對話 互相對照）
+export function flashHighlightDomById(hlId, container = document) {
+  const spans = container.querySelectorAll(`[${HL_ATTR}="${cssEsc(hlId)}"]`);
+  if (spans.length === 0) return false;
+  spans[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  spans.forEach((span) => {
+    span.classList.remove('hl-flash');
+    void span.offsetWidth; // 強制 reflow，讓動畫可重複觸發
+    span.classList.add('hl-flash');
+    setTimeout(() => span.classList.remove('hl-flash'), 1200);
+  });
+  return true;
 }
 // 互斥核心：找出與 range 相交的所有既有標記 id
 function highlightIdsInRange(range, container) {
@@ -260,7 +273,7 @@ export function createHighlightLayer(opts) {
 
     // ★ 互斥：先清掉選取範圍內所有既有標記（一個詞只屬一組）
     const removed = highlightIdsInRange(pendingRange, container);
-    removed.forEach((id) => unwrapHighlight(id, container));
+    removed.forEach((id) => removeHighlightDomById(id, container));
     removed.forEach((id) => { try { onRemove(id); } catch (_) {} });
 
     // DOM 已變，用 offset 重建乾淨的 range，再包一層（不會巢狀）
@@ -311,7 +324,7 @@ export function createHighlightLayer(opts) {
   function removeCurrent() {
     if (draft) {
       const id = draft.hlId;
-      unwrapHighlight(id, container);
+      removeHighlightDomById(id, container);
       draft = null;
       hideToolbar();
       try { onRemove(id); } catch (_) {}
@@ -319,7 +332,7 @@ export function createHighlightLayer(opts) {
     }
     if (pendingRange) {
       const ids = highlightIdsInRange(pendingRange, container);
-      ids.forEach((id) => unwrapHighlight(id, container));
+      ids.forEach((id) => removeHighlightDomById(id, container));
       hideToolbar();
       ids.forEach((id) => { try { onRemove(id); } catch (_) {} });
       pendingRange = null;

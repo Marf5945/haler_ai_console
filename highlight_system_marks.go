@@ -554,3 +554,34 @@ func (a *App) GetHighlightStats(agentID string) (string, error) {
 	}
 	return string(raw), nil
 }
+
+// PurgeConversationMarks：清空某對話的全部標註衍生資料（使用者標註 + 系統暗標 +
+// 佇列 + 統計）。清空 / 刪除整個對話時呼叫；刪 subagent 因整個目錄被移除而自動涵蓋，
+// 此方法主要給「清空主對話」(ClearMainTalk) 等保留資料夾的情境。
+func (a *App) PurgeConversationMarks(agentID string) error {
+	highlightMu.Lock()
+	defer highlightMu.Unlock()
+
+	var firstErr error
+	keep := func(err error) {
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	keep(saveHighlightStore(agentID, &highlightStore{})) // 使用者標註
+	if sysPath, err := systemMarksPath(agentID); err == nil {
+		keep(saveHighlightStoreAt(sysPath, &highlightStore{})) // 系統暗標
+	} else {
+		keep(err)
+	}
+	keep(saveSystemPending(agentID, &systemPendingQueue{})) // 佇列
+	if statsPath, err := highlightStatsPath(agentID); err == nil {
+		if rmErr := os.Remove(statsPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			keep(rmErr) // 統計（不存在不算錯）
+		}
+	} else {
+		keep(err)
+	}
+	return firstErr
+}

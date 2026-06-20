@@ -72,34 +72,245 @@
 }
 .hl-remove:hover { background: rgba(255,107,107,.18); }
 
-/* ---- 重點群組列（拖出成文檔） ---- */
+/* ---- 左側重點字詞入口 ---- */
+.highlight-groups-anchor {
+  min-width: 0;
+}
 .hl-groups-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  padding-top: 2px;
+}
+.hl-groups-bar-floating {
   position: fixed;
   left: 12px;
-  bottom: 12px;
+  top: 220px;
   z-index: 2147482000;
+  width: min(320px, calc(100vw - 24px));
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(10,10,10,.92);
+  box-shadow: 0 10px 28px rgba(0,0,0,.34);
+  backdrop-filter: blur(8px);
+}
+.hl-groups-trigger {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  max-width: 60vw;
-  padding: 6px 8px;
-  border-radius: 12px;
-  background: rgba(28,28,30,.92);
-  box-shadow: 0 4px 18px rgba(0,0,0,.3);
-  backdrop-filter: blur(6px);
+  justify-content: space-between;
+  min-height: 31px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 9px;
+  border: 1px solid rgba(255,255,255,.22);
+  border-radius: 8px;
+  background: rgba(255,255,255,.045);
+  color: rgba(255,248,239,.86);
+  font: 800 12px/1 system-ui, sans-serif;
+  letter-spacing: 0;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+}
+.hl-groups-trigger:hover {
+  border-color: rgba(255,186,85,.56);
+  background: rgba(255,186,85,.09);
 }
 .hl-groups-label {
-  font: 500 12px/1 system-ui, sans-serif;
-  color: rgba(255,255,255,.7);
-  padding: 0 2px;
-}
-.hl-group-pill {
-  font: 500 13px/1 system-ui, sans-serif;
-  padding: 5px 10px;
-  border-radius: 999px;
-  cursor: grab;
-  user-select: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.hl-group-pill:active { cursor: grabbing; transform: scale(.97); }
+.hl-groups-total {
+  display: grid;
+  place-items: center;
+  min-width: 21px;
+  height: 21px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255,186,85,.16);
+  color: #ffd281;
+  font: 900 11px/1 system-ui, sans-serif;
+}
+.hl-groups-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.hl-group-pill {
+  max-width: 100%;
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 9px;
+  font: 800 12px/1 system-ui, sans-serif;
+  letter-spacing: 0;
+  cursor: pointer;
+  user-select: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hl-group-pill:hover { transform: translateY(-1px); }
+.hl-group-pill:active { transform: scale(.97); }
+
+/* ---- 已標記字詞彈窗 ---- */
+.hl-words-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(0,0,0,.52);
+}
+.hl-words-popup {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(540px, calc(100vw - 36px));
+  max-height: min(74vh, 720px);
+  padding: 16px;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 10px;
+  background: #11100e;
+  color: rgba(255,248,239,.9);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 24px 70px rgba(0,0,0,.48);
+}
+.hl-words-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.hl-words-header h3 {
+  margin: 0;
+  font: 900 16px/1.1 system-ui, sans-serif;
+  letter-spacing: 0;
+}
+.hl-words-header small {
+  display: block;
+  margin-top: 4px;
+  color: rgba(255,248,239,.58);
+  font: 700 12px/1.2 system-ui, sans-serif;
+}
+.hl-words-close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 7px;
+  background: rgba(255,255,255,.04);
+  color: rgba(255,248,239,.78);
+  font: 900 18px/1 system-ui, sans-serif;
+}
+.hl-words-close:hover {
+  border-color: rgba(255,186,85,.48);
+  color: #ffd281;
+}
+.hl-words-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.hl-words-tab {
+  min-height: 27px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: rgba(255,255,255,.045);
+  color: rgba(255,248,239,.74);
+  font: 800 12px/1 system-ui, sans-serif;
+}
+.hl-words-tab::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 999px;
+  background: var(--hl-tab-color, #ffd281);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.24);
+}
+.hl-words-tab.active {
+  border-color: rgba(255,186,85,.55);
+  background: rgba(255,186,85,.12);
+  color: rgba(255,248,239,.92);
+}
+.hl-words-list {
+  display: flex;
+  align-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 88px;
+  overflow: auto;
+  padding: 2px 2px 4px;
+}
+.hl-word-chip {
+  max-width: 100%;
+  border-radius: 7px;
+  padding: 7px 10px;
+  font: 800 13px/1.35 system-ui, sans-serif;
+  letter-spacing: 0;
+  cursor: grab;
+  user-select: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.hl-word-chip:hover { filter: brightness(1.04); }
+.hl-word-chip.dragging {
+  cursor: grabbing;
+  opacity: .54;
+  transform: scale(.98);
+}
+
+/* ---- 字詞 chip：✕ 移除鈕 + 點擊跳原文 ---- */
+.hl-word-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.hl-word-chip-text {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.hl-word-chip-remove {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(0,0,0,.20);
+  color: inherit;
+  font: 900 13px/1 system-ui, sans-serif;
+  cursor: pointer;
+  opacity: .65;
+}
+.hl-word-chip-remove:hover {
+  opacity: 1;
+  background: rgba(0,0,0,.34);
+}
+
+/* ---- 跳回原文時的閃爍（用 outline，不動版面、不蓋既有 1px 邊框）---- */
+@keyframes hl-flash-pulse {
+  0%   { outline-color: rgba(255,200,90,.95); }
+  100% { outline-color: rgba(255,200,90,0); }
+}
+.hl-flash {
+  outline: 3px solid rgba(255,200,90,.95);
+  outline-offset: 2px;
+  animation: hl-flash-pulse 1.1s ease-out forwards;
+}
+
+/* ---- 彈窗底部操作提示 ---- */
+.hl-words-hint {
+  margin: 0;
+  padding-top: 2px;
+  color: rgba(255,248,239,.5);
+  font: 700 11px/1.4 system-ui, sans-serif;
+  text-align: center;
+}

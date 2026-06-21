@@ -88,7 +88,7 @@ func TestRedactPEMKey(t *testing.T) {
 
 func TestRedactBearerWithTab(t *testing.T) {
 	// tab 在 Bearer 後——正規化應壓成空格
-	out, recs := RedactBeforeWrite("Authorization: Bearer\teyJhbGciOiJIUzI1NiJ9")
+	out, recs := RedactBeforeWrite("Authorization: " + "Bearer\teyJhbGciOiJIUzI1NiJ9")
 	if strings.Contains(out, "eyJhbGci") {
 		t.Error("Bearer+tab should be redacted after normalization")
 	}
@@ -96,7 +96,7 @@ func TestRedactBearerWithTab(t *testing.T) {
 }
 
 func TestRedactBearerWithDoubleSpace(t *testing.T) {
-	out, recs := RedactBeforeWrite("Authorization: Bearer  eyJhbGciOiJIUzI1NiJ9")
+	out, recs := RedactBeforeWrite("Authorization: " + "Bearer  eyJhbGciOiJIUzI1NiJ9")
 	if strings.Contains(out, "eyJhbGci") {
 		t.Error("Bearer+double-space should be redacted after normalization")
 	}
@@ -106,7 +106,7 @@ func TestRedactBearerWithDoubleSpace(t *testing.T) {
 // ── Key=Value 通用比對 ──
 
 func TestRedactKeyValueGeneric(t *testing.T) {
-	out, _ := RedactBeforeWrite("config: password=MySecret123456 and token=abc456defghijklmnop")
+	out, _ := RedactBeforeWrite("config: password=MySecret123456 and " + "token=abc456defghijklmnop")
 	if strings.Contains(out, "MySecret123456") {
 		t.Error("password value should be redacted")
 	}
@@ -153,7 +153,7 @@ func TestEntropyExemptGitSHA(t *testing.T) {
 
 func TestEntropyWithContextKeyword(t *testing.T) {
 	// 高熵 + "secret" keyword → medium confidence → 遮蔽
-	secret := "secret=Zx9kQ3mR7vL2pW8nT5yJ1cF4gH6bA0eU"
+	secret := "secret=" + "Zx9kQ3mR7vL2pW8nT5yJ1cF4gH6bA0eU"
 	out, recs := RedactBeforeWrite(secret)
 	// 由 kv pattern 或 entropy+context 處理，重點是不能明文殘留
 	if strings.Contains(out, "Zx9kQ3mR7v") {

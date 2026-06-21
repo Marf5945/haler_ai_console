@@ -224,7 +224,8 @@ func (a *App) RunGoProgramAuthoringLoop(adapterID, sessionID, programName, userT
 		start.Attempts = records
 		start.PendingSkillID = pendingID
 		start.FinalText = finalText
-		start.Message = finalText + "\n\n已保存為 pending skill：「" + pendingID + "」。"
+		runToken := "[[go-program:" + runIDForGoProgramWorkspace(start.ProgramID, start.WorkspaceDir) + "]]"
+		start.Message = finalText + "\n\n已保存為 pending skill：「" + pendingID + "」。\n" + runToken
 		_ = a.writeGoProgramAuthoringRun(start)
 		a.emitHookGeneDataLeft(geneSkillID, invocationID, true)
 		return start, nil

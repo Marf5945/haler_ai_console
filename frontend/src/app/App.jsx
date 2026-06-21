@@ -282,8 +282,25 @@ import {
   ClearVoiceDebug,
   TranscribeVoiceWAV,
   RouteVoiceCommand,
+  EnterFloatingAvatarNative,
+  ExitFloatingAvatarNative,
 } from '../../wailsjs/go/main/App';
-import {OnFileDrop, OnFileDropOff, EventsOn, BrowserOpenURL, Quit, ClipboardGetText, ClipboardSetText} from '../../wailsjs/runtime/runtime';
+import {
+  OnFileDrop,
+  OnFileDropOff,
+  EventsOn,
+  BrowserOpenURL,
+  Quit,
+  ClipboardGetText,
+  ClipboardSetText,
+  WindowGetPosition,
+  WindowGetSize,
+  WindowSetAlwaysOnTop,
+  WindowSetBackgroundColour,
+  WindowSetMinSize,
+  WindowSetPosition,
+  WindowSetSize,
+} from '../../wailsjs/runtime/runtime';
 
 import DocumentReviewCard from '../components/DocumentReviewCard';
 import VisualLearningPanel from '../components/VisualLearningPanel';
@@ -306,8 +323,10 @@ import ProjectManagePopup from './components/ProjectManagePopup';
 import ToolFlowSectionLabel from './components/ToolFlowSectionLabel';
 import RecordingCatalogList from './components/RecordingCatalogList';
 import GoProgramAuthoringCatalogList from './components/GoProgramAuthoringCatalogList';
+import GoCodePreviewDock from './components/GoCodePreviewDock';
 import ToolPopup from './components/ToolPopup';
 import AvatarUploadModal from './components/AvatarUploadModal';
+import FloatingAvatarMode from './components/FloatingAvatarMode';
 import PackageConfirmModal from './components/PackageConfirmModal';
 import SessionCloseDialog from './components/SessionCloseDialog';
 // small leaf components extracted to app/components
@@ -350,6 +369,14 @@ import useI18n, { t as _t, tForLanguage, getAllFemaleKeywords, getAllBeastKeywor
 const taskProgressDebugEnabled = typeof window !== 'undefined'
   && (new URLSearchParams(window.location.search).has('taskDebug')
     || window.localStorage?.getItem('task_progress_debug') === '1');
+
+const MAIN_WINDOW_MIN_SIZE = {width: 1180, height: 560};
+const FLOATING_AVATAR_SIZE = 160;
+const FLOATING_AVATAR_INSET = 16;
+const FLOATING_AVATAR_WINDOW_SIZE = FLOATING_AVATAR_SIZE + FLOATING_AVATAR_INSET * 2;
+// 後台頭像單擊展開迷你框時，需要把頭像浮窗放大到能容納面板的尺寸。
+const FLOATING_AVATAR_PANEL_W = 720;
+const FLOATING_AVATAR_PANEL_H = 540;
 
 const fallbackState = {
   /* i18n: fallbackState */ greeting: _t('greeting.hello'),
@@ -678,7 +705,10 @@ const fallbackSettings = {
     {id: 'persona-a', name: _t('persona.defaultNameA'), icon: '♙', avatarUrl: '', identity: _t('persona.defaultIdentityA'), replyStrategy: '', roleStrength: '20%', personality: '', scenario: '', description: ''},
     {id: 'persona-b', name: _t('persona.defaultNameB'), icon: '♚', avatarUrl: '', identity: _t('persona.defaultIdentityB'), replyStrategy: '', roleStrength: '20%', personality: '', scenario: '', description: ''},
     {id: 'persona-c', name: _t('persona.defaultNameC'), icon: '★', avatarUrl: '', identity: _t('persona.defaultIdentityC'), replyStrategy: '', roleStrength: '20%', personality: '', scenario: '', description: ''},
+    {id: 'persona-d', name: _t('persona.defaultNameD'), icon: '⚖', avatarUrl: '', identity: _t('persona.defaultIdentityD'), replyStrategy: '', roleStrength: '20%', personality: _t('persona.defaultPersonalityD'), scenario: '', description: ''},
+    {id: 'persona-e', name: _t('persona.defaultNameE'), icon: '☯', avatarUrl: '', identity: _t('persona.defaultIdentityE'), replyStrategy: '', roleStrength: '20%', personality: _t('persona.defaultPersonalityE'), scenario: '', description: ''},
   ],
+  removedDefaultPersonaIds: [],
 };
 
 const lockedPersonaId = 'persona-a';
@@ -971,9 +1001,71 @@ const personaAvatarUrls = {
   'persona-b': new URL('../assets/persona_avatars/persona-b.svg', import.meta.url).href,
   'persona-c': new URL('../assets/persona_avatars/persona-c.svg', import.meta.url).href,
   'persona-d': new URL('../assets/persona_avatars/persona-d.svg', import.meta.url).href,
+  'persona-e': new URL('../assets/persona_avatars/touharu/idle.png', import.meta.url).href,
+};
+
+const wolfdogAvatarUrls = {
+  idle: new URL('../assets/persona_avatars/wolfdog/idle.png', import.meta.url).href,
+  thinking: new URL('../assets/persona_avatars/wolfdog/thinking.png', import.meta.url).href,
+  working: new URL('../assets/persona_avatars/wolfdog/working.png', import.meta.url).href,
+  happy: new URL('../assets/persona_avatars/wolfdog/happy.png', import.meta.url).href,
+  warning: new URL('../assets/persona_avatars/wolfdog/warning.png', import.meta.url).href,
+  blocked: new URL('../assets/persona_avatars/wolfdog/blocked.png', import.meta.url).href,
+  sleepy: new URL('../assets/persona_avatars/wolfdog/sleepy.png', import.meta.url).href,
+  sad: new URL('../assets/persona_avatars/wolfdog/sad.png', import.meta.url).href,
+  speechless: new URL('../assets/persona_avatars/wolfdog/speechless.png', import.meta.url).href,
+};
+
+const uncleBustAvatarUrls = {
+  idle: new URL('../assets/persona_avatars/uncle_bust/idle.png', import.meta.url).href,
+  thinking: new URL('../assets/persona_avatars/uncle_bust/thinking.png', import.meta.url).href,
+  working: new URL('../assets/persona_avatars/uncle_bust/working.png', import.meta.url).href,
+  happy: new URL('../assets/persona_avatars/uncle_bust/happy.png', import.meta.url).href,
+  warning: new URL('../assets/persona_avatars/uncle_bust/warning.png', import.meta.url).href,
+  blocked: new URL('../assets/persona_avatars/uncle_bust/blocked.png', import.meta.url).href,
+  sleepy: new URL('../assets/persona_avatars/uncle_bust/sleepy.png', import.meta.url).href,
+  sad: new URL('../assets/persona_avatars/uncle_bust/sad.png', import.meta.url).href,
+  speechless: new URL('../assets/persona_avatars/uncle_bust/speechless.png', import.meta.url).href,
+};
+
+const secretaryAvatarUrls = {
+  idle: new URL('../assets/persona_avatars/secretary/idle.png', import.meta.url).href,
+  thinking: new URL('../assets/persona_avatars/secretary/thinking.png', import.meta.url).href,
+  working: new URL('../assets/persona_avatars/secretary/working.png', import.meta.url).href,
+  happy: new URL('../assets/persona_avatars/secretary/happy.png', import.meta.url).href,
+  warning: new URL('../assets/persona_avatars/secretary/warning.png', import.meta.url).href,
+  blocked: new URL('../assets/persona_avatars/secretary/blocked.png', import.meta.url).href,
+  sleepy: new URL('../assets/persona_avatars/secretary/sleepy.png', import.meta.url).href,
+  sad: new URL('../assets/persona_avatars/secretary/sad.png', import.meta.url).href,
+  speechless: new URL('../assets/persona_avatars/secretary/speechless.png', import.meta.url).href,
+};
+
+const policeAvatarUrls = {
+  idle: new URL('../assets/persona_avatars/police/idle.png', import.meta.url).href,
+  thinking: new URL('../assets/persona_avatars/police/thinking.png', import.meta.url).href,
+  working: new URL('../assets/persona_avatars/police/working.png', import.meta.url).href,
+  happy: new URL('../assets/persona_avatars/police/happy.png', import.meta.url).href,
+  warning: new URL('../assets/persona_avatars/police/warning.png', import.meta.url).href,
+  blocked: new URL('../assets/persona_avatars/police/blocked.png', import.meta.url).href,
+  sleepy: new URL('../assets/persona_avatars/police/sleepy.png', import.meta.url).href,
+  sad: new URL('../assets/persona_avatars/police/sad.png', import.meta.url).href,
+  speechless: new URL('../assets/persona_avatars/police/speechless.png', import.meta.url).href,
+};
+
+const touharuAvatarUrls = {
+  idle: new URL('../assets/persona_avatars/touharu/idle.png', import.meta.url).href,
+  thinking: new URL('../assets/persona_avatars/touharu/thinking.png', import.meta.url).href,
+  working: new URL('../assets/persona_avatars/touharu/working.png', import.meta.url).href,
+  happy: new URL('../assets/persona_avatars/touharu/happy.png', import.meta.url).href,
+  warning: new URL('../assets/persona_avatars/touharu/warning.png', import.meta.url).href,
+  blocked: new URL('../assets/persona_avatars/touharu/blocked.png', import.meta.url).href,
+  sleepy: new URL('../assets/persona_avatars/touharu/sleepy.png', import.meta.url).href,
+  sad: new URL('../assets/persona_avatars/touharu/sad.png', import.meta.url).href,
+  speechless: new URL('../assets/persona_avatars/touharu/speechless.png', import.meta.url).href,
 };
 
 const pixelAvatarRenderSize = 128;
+const pixelAvatarRenderVersion = '2026-06-21-transparent-touharu-raster-v1';
 const pixelAvatarRenderCache = new Map();
 const autoAvatarOverrideStates = new Set(['blocked', 'warning', 'working']);
 /* i18n: composer pending */ const composerPendingInitialText = _t('composer.pendingInitial');
@@ -1643,6 +1735,46 @@ function App() {
   const [schedulerBgBusy, setSchedulerBgBusy] = useState(false);
   const [schedulerConfirm, setSchedulerConfirm] = useState(null);
   const [schedulerConfirmBusy, setSchedulerConfirmBusy] = useState(false);
+  const [floatingAvatarMode, setFloatingAvatarMode] = useState(false);
+  const [floatingAvatarFlyingBack, setFloatingAvatarFlyingBack] = useState(false);
+  const [floatingAvatarCompactWindow, setFloatingAvatarCompactWindow] = useState(false);
+  const [floatingAvatarDrafts, setFloatingAvatarDrafts] = useState({});
+  const [floatingReminderPause, setFloatingReminderPause] = useState({mode: '', until: 0});
+  const floatingAvatarWindowRef = useRef({restore: null, compactPosition: null});
+  const floatingAvatarDragWindowRef = useRef(null);
+  const [floatingAvatarPosition, setFloatingAvatarPosition] = useState(() => {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem('floating_avatar_position') || 'null');
+      if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) return saved;
+    } catch {}
+    return {
+      x: Math.max(12, window.innerWidth - FLOATING_AVATAR_WINDOW_SIZE),
+      y: Math.max(12, window.innerHeight - FLOATING_AVATAR_WINDOW_SIZE - 16),
+    };
+  });
+
+  useEffect(() => {
+    if (floatingAvatarCompactWindow) return;
+    try {
+      window.localStorage.setItem('floating_avatar_position', JSON.stringify(floatingAvatarPosition));
+    } catch {}
+  }, [floatingAvatarCompactWindow, floatingAvatarPosition]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('floating-avatar-window-active', floatingAvatarMode);
+    document.body.classList.toggle('floating-avatar-window-active', floatingAvatarMode);
+    return () => {
+      document.documentElement.classList.remove('floating-avatar-window-active');
+      document.body.classList.remove('floating-avatar-window-active');
+    };
+  }, [floatingAvatarMode]);
+
+  useEffect(() => {
+    const until = Number(floatingReminderPause.until || 0);
+    if (floatingReminderPause.mode === 'manual' || !until || until <= Date.now()) return undefined;
+    const timer = window.setTimeout(() => setFloatingReminderPause({mode: '', until: 0}), Math.max(1000, until - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [floatingReminderPause.mode, floatingReminderPause.until]);
 
   // I-2: Skill Context Orchestration
   const [appSessionId, setAppSessionId] = useState('');
@@ -2382,7 +2514,7 @@ function App() {
         setSessionClosePrompt(payload.analysis);
       }
     });
-    // Phase G：關閉時若有啟用排程，後端 emit 此事件 → 顯示背景模式選擇。
+    // Phase G：關閉前後端 emit 此事件 → 顯示後台頭像選擇。
     const offSchedulerBgPrompt = EventsOn('scheduler:background_prompt', () => {
       setSchedulerBgPrompt(true);
     });
@@ -5212,10 +5344,10 @@ function App() {
   function openRemoteBridgeFieldHelp(field) {
     const queryMap = {
       telegram: {
-        ['bot_' + 'token']: 'Telegram BotFather create bot credential official guide',
+        bot_token: 'Telegram BotFather create bot token official guide',
       },
       discord: {
-        ['bot_' + 'token']: 'Discord Developer Portal create bot credential official guide',
+        bot_token: 'Discord Developer Portal create bot bot token official guide',
         guild_id: 'Discord enable developer mode copy server ID official guide',
         channel_id: 'Discord enable developer mode copy channel ID official guide',
       },
@@ -5223,13 +5355,13 @@ function App() {
         webhook_url: 'Microsoft Teams incoming webhook workflow URL official guide',
       },
       line: {
-        ['channel_access_' + 'token']: 'LINE Messaging API channel credential official guide',
+        channel_access_token: 'LINE Messaging API channel access token official guide',
         channel_secret: 'LINE Developers Messaging API channel secret webhook signature official guide',
         recipient_id: 'LINE Messaging API userId groupId roomId recipient ID official guide',
       },
       qq: {
         bot_app_id: 'QQ Bot QQ Guild Bot AppID official guide',
-        ['bot_' + 'token']: 'QQ Bot QQ Guild Bot credential official guide',
+        bot_token: 'QQ Bot QQ Guild Bot token official guide',
         channel_id: 'QQ Guild Bot channel ID official guide',
       },
     };
@@ -6405,7 +6537,8 @@ function App() {
     }
   }
 
-  async function importReferencePaths(paths = []) {
+  async function importReferencePaths(paths = [], options = {}) {
+    const addedVia = options.addedVia || '';
     const nativePaths = normalizeReferenceImportPaths(paths);
     const importPaths = [];
     const inFlight = referenceImportInFlightRef.current;
@@ -6422,6 +6555,7 @@ function App() {
           name,
           path,
           source: 'pending',
+          addedVia,
           status: 'importing',
           detail: '正在複製到引用庫',
         }));
@@ -6430,6 +6564,7 @@ function App() {
           const imported = await callWails(() => (isVideoPath(path) ? ImportVideoFile(path) : ImportReferenceFile(path)));
           const importedFile = {
             ...imported,
+            addedVia: addedVia || imported?.addedVia || '',
             status: isW3AMediaPath(path) ? 'checking' : 'ready',
             detail: isW3AMediaPath(path) ? '正在檢查媒體來源' : '',
           };
@@ -6449,6 +6584,7 @@ function App() {
             name,
             path,
             source: 'memory',
+            addedVia,
             status: 'error',
             detail: message,
           }));
@@ -7091,6 +7227,30 @@ function App() {
   const mainAvatarProvider = resolveAvatarProvider(mainAvatarConfig);
   const renderedPixelAvatar = renderedPixelAvatars[mainPersona.id] || '';
   const mainAvatarSrc = resolvePersonaAvatarSrc(mainPersona, mainAvatarConfig, staticAvatarPreviews, renderedPixelAvatar);
+  const floatingPersona = activePersona || mainPersona;
+  const floatingAvatarConfig = avatarConfigs[floatingPersona.id] || null;
+  const floatingRenderedPixelAvatar = renderedPixelAvatars[floatingPersona.id] || '';
+  const floatingAvatarSrc = resolvePersonaAvatarSrc(floatingPersona, floatingAvatarConfig, staticAvatarPreviews, floatingRenderedPixelAvatar);
+  const activeFloatingAgentId = activeConversationId === 'main'
+    ? floatingPersona.id || 'main'
+    : activeConversationId || floatingPersona.id || 'main';
+  const floatingAvatarDraft = floatingAvatarDrafts[activeFloatingAgentId] || '';
+  const floatingReminderPaused = floatingReminderPause.mode === 'manual'
+    || Number(floatingReminderPause.until || 0) > (avatarClock || Date.now());
+  const floatingReminderLabel = floatingReminderPause.mode === 'manual'
+    ? t('floatingAvatar.reminderManualActive')
+    : floatingReminderPaused
+      ? t('floatingAvatar.reminderUntil', {time: new Date(Number(floatingReminderPause.until)).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})})
+      : '';
+  const floatingAvatarPersonas = settingsState.personas.map((persona) => ({
+    ...persona,
+    avatarSrc: resolvePersonaAvatarSrc(
+      persona,
+      avatarConfigs[persona.id],
+      staticAvatarPreviews,
+      renderedPixelAvatars[persona.id] || '',
+    ),
+  }));
 
   useEffect(() => {
     if (mainPersona?.id) loadCurrentAvatar(mainPersona.id);
@@ -7182,9 +7342,251 @@ function App() {
     importReferenceFileObjects(files);
   }
 
+  async function enterFloatingAvatarMode() {
+    try {
+      const [windowSize, windowPosition] = await Promise.all([
+        WindowGetSize(),
+        WindowGetPosition(),
+      ]);
+      const avatarX = Number(floatingAvatarPosition?.x ?? Math.max(12, window.innerWidth - FLOATING_AVATAR_WINDOW_SIZE));
+      const avatarY = Number(floatingAvatarPosition?.y ?? Math.max(12, window.innerHeight - FLOATING_AVATAR_WINDOW_SIZE - 16));
+      const compactX = Math.round((windowPosition?.x ?? 0) + avatarX - FLOATING_AVATAR_INSET);
+      const compactY = Math.round((windowPosition?.y ?? 0) + avatarY - FLOATING_AVATAR_INSET);
+      floatingAvatarWindowRef.current = {
+        restore: {
+          size: windowSize || {w: window.innerWidth, h: window.innerHeight},
+          position: windowPosition || {x: 0, y: 0},
+          avatarPosition: {x: avatarX, y: avatarY},
+        },
+        compactPosition: {x: compactX, y: compactY},
+      };
+      WindowSetMinSize(FLOATING_AVATAR_WINDOW_SIZE, FLOATING_AVATAR_WINDOW_SIZE);
+      WindowSetBackgroundColour(0, 0, 0, 0);
+      WindowSetAlwaysOnTop(true);
+      WindowSetSize(FLOATING_AVATAR_WINDOW_SIZE, FLOATING_AVATAR_WINDOW_SIZE);
+      WindowSetPosition(compactX, compactY);
+      // 切成原生無框透明置頂浮窗（macOS 真實作；其他平台 no-op）。
+      await callWails(() => EnterFloatingAvatarNative()).catch((e) => console.warn('EnterFloatingAvatarNative failed', e));
+      setFloatingAvatarPosition({x: FLOATING_AVATAR_INSET, y: FLOATING_AVATAR_INSET});
+      setFloatingAvatarCompactWindow(true);
+    } catch (error) {
+      console.warn('floating avatar compact window failed', error);
+      setFloatingAvatarCompactWindow(false);
+    }
+    setFloatingAvatarMode(true);
+    setSchedulerBgPrompt(false);
+    setManualAvatarState('happy');
+    setToolResult({toolId: 'scheduler', ok: true, message: t('floatingAvatar.entered')});
+  }
+
+  async function restoreFloatingAvatarWindow() {
+    if (!floatingAvatarCompactWindow) return;
+    const restore = floatingAvatarWindowRef.current?.restore;
+    // 先在頭像浮窗內播放「飛回」動畫，再真正放大視窗，避免縮放當下硬切。
+    setFloatingAvatarFlyingBack(true);
+    await new Promise((resolve) => window.setTimeout(resolve, 240));
+    try {
+      // 還原一般有框、不透明視窗。
+      await callWails(() => ExitFloatingAvatarNative()).catch((e) => console.warn('ExitFloatingAvatarNative failed', e));
+      WindowSetAlwaysOnTop(false);
+      WindowSetBackgroundColour(5, 5, 5, 255);
+      WindowSetMinSize(MAIN_WINDOW_MIN_SIZE.width, MAIN_WINDOW_MIN_SIZE.height);
+      if (restore?.size) {
+        WindowSetSize(restore.size.w || restore.size.width || 1536, restore.size.h || restore.size.height || 860);
+      }
+      if (restore?.position) {
+        WindowSetPosition(restore.position.x || 0, restore.position.y || 0);
+      }
+    } catch (error) {
+      console.warn('floating avatar restore window failed', error);
+    }
+    setFloatingAvatarCompactWindow(false);
+    setFloatingAvatarFlyingBack(false);
+    floatingAvatarWindowRef.current = {restore: null, compactPosition: null};
+    setFloatingAvatarPosition(
+      restore?.avatarPosition
+        || {
+          x: Math.max(12, window.innerWidth - FLOATING_AVATAR_WINDOW_SIZE),
+          y: Math.max(12, window.innerHeight - FLOATING_AVATAR_WINDOW_SIZE - 16),
+        },
+    );
+  }
+
+  async function restoreFromFloatingAvatar(target = 'auto') {
+    await restoreFloatingAvatarWindow();
+    setFloatingAvatarMode(false);
+    setManualAvatarState('');
+    if (target === 'settings') {
+      setActivePanel('settings');
+    } else {
+      // 自動定位：待確認優先 → 否則最近任務。
+      // 先回到主視圖（關掉設定等面板），待確認卡片本身有 effect 會 scrollIntoView，
+      // 沒有待確認時則確保最近任務/對話在主視圖可見。
+      setActivePanel(null);
+      if (pendingTaskReview?.id) {
+        setReviewPopup('risk');
+      }
+    }
+    setToolResult({
+      toolId: 'scheduler',
+      ok: true,
+      message: pendingTaskReview?.id ? t('floatingAvatar.restoredPending') : t('floatingAvatar.restoredLatest'),
+    });
+  }
+
+  // 單擊頭像展開迷你框時，把浮窗放大到面板尺寸；關閉時縮回頭像尺寸。
+  // 視窗會貼著頭像展開，並自動避開螢幕右/下邊緣，頭像螢幕位置維持不變。
+  async function setCompactAvatarExpanded(open) {
+    if (!floatingAvatarCompactWindow) return;
+    const ref = floatingAvatarWindowRef.current;
+    if (!ref) return;
+    try {
+      if (open) {
+        if (ref.expanded) return;
+        // compact 模式可由原生 draggable 移動，展開前先同步真實視窗位置。
+        const livePosition = await WindowGetPosition().catch(() => null);
+        const origin = Number.isFinite(livePosition?.x) && Number.isFinite(livePosition?.y)
+          ? {x: Math.round(livePosition.x), y: Math.round(livePosition.y)}
+          : ref.compactPosition || {x: 0, y: 0};
+        ref.compactPosition = origin;
+        const avatarScreenX = origin.x + FLOATING_AVATAR_INSET;
+        const avatarScreenY = origin.y + FLOATING_AVATAR_INSET;
+        const sw = window.screen?.availWidth || window.innerWidth || 1440;
+        const sh = window.screen?.availHeight || window.innerHeight || 900;
+        // 視窗展開後保留上方回覆泡泡、左側提示、右側迷你框與下方選項，
+        // 並讓頭像螢幕位置在展開前後維持不變（不會跳）。
+        const LEFT_ROOM = 236;
+        const TOP_ROOM = 118;
+        const expandedW = Math.min(FLOATING_AVATAR_PANEL_W, sw);
+        const expandedH = Math.min(FLOATING_AVATAR_PANEL_H, sh);
+        let newX = avatarScreenX - LEFT_ROOM;
+        let newY = avatarScreenY - TOP_ROOM;
+        if (newX < 0) newX = 0;
+        if (newX + expandedW > sw) newX = Math.max(0, sw - expandedW);
+        if (newY + expandedH > sh) newY = Math.max(0, sh - expandedH);
+        if (newY < 0) newY = 0;
+        const avatarLocalX = avatarScreenX - newX;
+        const avatarLocalY = avatarScreenY - newY;
+        ref.expanded = {avatarScreenX, avatarScreenY};
+        WindowSetSize(expandedW, expandedH);
+        WindowSetPosition(Math.round(newX), Math.round(newY));
+        ref.compactPosition = {x: Math.round(newX), y: Math.round(newY)};
+        setFloatingAvatarPosition({x: Math.round(avatarLocalX), y: Math.round(avatarLocalY)});
+      } else {
+        if (!ref.expanded) return;
+        const {avatarScreenX, avatarScreenY} = ref.expanded;
+        const newX = Math.round(avatarScreenX - FLOATING_AVATAR_INSET);
+        const newY = Math.round(avatarScreenY - FLOATING_AVATAR_INSET);
+        WindowSetSize(FLOATING_AVATAR_WINDOW_SIZE, FLOATING_AVATAR_WINDOW_SIZE);
+        WindowSetPosition(newX, newY);
+        ref.compactPosition = {x: newX, y: newY};
+        ref.expanded = null;
+        setFloatingAvatarPosition({x: FLOATING_AVATAR_INSET, y: FLOATING_AVATAR_INSET});
+      }
+    } catch (e) {
+      console.warn('setCompactAvatarExpanded failed', e);
+    }
+  }
+
+  function updateFloatingAvatarPosition(nextPosition) {
+    setFloatingAvatarPosition(nextPosition);
+  }
+
+  function beginCompactFloatingAvatarDrag() {
+    floatingAvatarDragWindowRef.current = floatingAvatarWindowRef.current?.compactPosition || null;
+  }
+
+  function moveCompactFloatingAvatarWindow(dx, dy) {
+    const start = floatingAvatarDragWindowRef.current;
+    if (!start) return;
+    const next = {x: Math.round(start.x + dx), y: Math.round(start.y + dy)};
+    floatingAvatarWindowRef.current = {
+      ...floatingAvatarWindowRef.current,
+      compactPosition: next,
+    };
+    WindowSetPosition(next.x, next.y);
+  }
+
+  function updateFloatingAvatarDraft(value) {
+    setFloatingAvatarDrafts((prev) => ({...prev, [activeFloatingAgentId]: value}));
+  }
+
+  function setFloatingReminderMode(mode) {
+    const now = Date.now();
+    if (mode === 'resume') {
+      setFloatingReminderPause({mode: '', until: 0});
+      setToolResult({toolId: 'floating-avatar', ok: true, message: t('floatingAvatar.reminderResumed')});
+      return;
+    }
+    let until = 0;
+    if (mode === '30m') until = now + 30 * 60 * 1000;
+    if (mode === '1h') until = now + 60 * 60 * 1000;
+    if (mode === 'tomorrow') {
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(8, 0, 0, 0);
+      until = tomorrow.getTime();
+    }
+    const next = mode === 'manual' ? {mode, until: 0} : {mode, until};
+    setFloatingReminderPause(next);
+    setToolResult({toolId: 'floating-avatar', ok: true, message: t('floatingAvatar.reminderPausedNotice')});
+  }
+
+  async function switchFloatingAvatarAgent(personaId) {
+    const persona = settingsState.personas.find((item) => item.id === personaId);
+    if (!persona) return;
+    await savePersonaPatch(persona.id, persona);
+    await loadCurrentAvatar(persona.id);
+    setToolResult({toolId: persona.id, ok: true, message: t('floatingAvatar.agentSwitched', {name: persona.name || t('floatingAvatar.agentFallback')})});
+  }
+
+  async function submitFloatingAvatarText(rawText) {
+    const selectedText = selectedFloatingCandidateIDs
+      .map((candidateID) => (readinessGate.floating_candidates || []).find((candidate) => candidate.id === candidateID))
+      .map(candidateReplyText)
+      .filter(Boolean)
+      .join('\n');
+    const text = [selectedText, String(rawText || '').trim()].filter(Boolean).join('\n');
+    if (!text) return;
+    updateFloatingAvatarDraft('');
+    await submitComposerText(text);
+  }
+
+  function handleFloatingAvatarDrop(files = []) {
+    const fileList = Array.from(files || []);
+    const nativePaths = normalizeReferenceImportPaths(fileList.map((file) => file.path));
+    if (nativePaths.length) {
+      if (shouldProbeDroppedInstallPackage(nativePaths)) {
+        detectDroppedInstallPackage(nativePaths[0]).then((recognized) => {
+          if (!recognized) importReferencePaths(nativePaths, {addedVia: 'floating_avatar'});
+        });
+        return;
+      }
+      importReferencePaths(nativePaths, {addedVia: 'floating_avatar'});
+      return;
+    }
+    importReferenceFileObjects(fileList);
+  }
+
+  const floatingAdapter = resolveActiveAdapter();
+  const floatingStatusText = pendingTaskReview?.title
+    || schedulerConfirm?.title
+    || toolResult?.message
+    || state.statusRail?.text
+    || state.greeting
+    || '';
+  const floatingLatestText = messages[messages.length - 1] || state.greeting || '';
+  // 只在「需要主動提醒」時才浮出上方泡泡（待確認/排程確認）。
+  // 進後台、一般狀態、問候語都不浮泡泡，維持乾淨頭像；人格名稱/回覆改由點開迷你框顯示。
+  const floatingBubbleText = pendingTaskReview?.reason
+    || pendingTaskReview?.title
+    || schedulerConfirm?.reason
+    || schedulerConfirm?.title
+    || '';
+
   return (
     <div
-      className={`console-shell ${activePanel === 'settings' ? 'settings-open' : ''}`}
+      className={`console-shell ${activePanel === 'settings' ? 'settings-open' : ''} ${floatingAvatarMode ? 'floating-avatar-shell-active' : ''}`}
       data-theme={panelTheme}
       data-lang={_i18nLang}
       dir={_i18nDir}
@@ -7192,6 +7594,55 @@ function App() {
       onDrop={handleGlobalFileDrop}
       style={{'--ui-font-scale': fontScaleValue(settingsState.panel.fontScale), ...fontPresetVars(settingsState.panel.fontPreset)}}
     >
+      <FloatingAvatarMode
+        active={floatingAvatarMode}
+        t={t}
+        avatarSrc={floatingAvatarSrc}
+        avatarExpression={!floatingReminderPaused && (pendingTaskReview || schedulerConfirm) ? 'warning' : avatarExpression}
+        persona={floatingPersona}
+        personas={floatingAvatarPersonas}
+        adapterLabel={floatingAdapter?.name || floatingAdapter?.Name || activeAdapterId || ''}
+        position={floatingAvatarPosition}
+        avatarSize={FLOATING_AVATAR_SIZE}
+        onPositionChange={updateFloatingAvatarPosition}
+        compactWindowMode={floatingAvatarCompactWindow}
+        onCompactDragStart={beginCompactFloatingAvatarDrag}
+        onCompactDrag={moveCompactFloatingAvatarWindow}
+        onCompactExpandChange={setCompactAvatarExpanded}
+        flyingBack={floatingAvatarFlyingBack}
+        onRestore={() => restoreFromFloatingAvatar('auto')}
+        onQuit={async () => {
+          await restoreFloatingAvatarWindow();
+          try { await callWails(() => ResolveSchedulerBackgroundPrompt(false)); } catch { /* 停用 best-effort */ }
+          Quit();
+        }}
+        onOpenSettings={() => restoreFromFloatingAvatar('settings')}
+        onDropFiles={handleFloatingAvatarDrop}
+        onSubmit={submitFloatingAvatarText}
+        onSwitchAgent={switchFloatingAvatarAgent}
+        onSetReminderMode={setFloatingReminderMode}
+        activePersonaId={floatingPersona.id}
+        reminderPaused={floatingReminderPaused}
+        reminderLabel={floatingReminderLabel}
+        candidates={readinessGate.floating_candidates || []}
+        selectedCandidateIDs={selectedFloatingCandidateIDs}
+        exclusiveCandidates={isExclusiveCandidateSet(readinessGate.floating_candidates || [])}
+        onSelectCandidate={handleSelectCandidate}
+        statusTitle={pendingTaskReview?.id ? t('floatingAvatar.pendingConfirm') : t('floatingAvatar.statusTitle')}
+        statusText={floatingStatusText}
+        latestText={floatingLatestText}
+        bubbleText={floatingBubbleText}
+        pendingConfirm={pendingTaskReview || schedulerConfirm}
+        installCandidate={installCandidate}
+        onConfirmInstall={confirmInstallCandidate}
+        onCancelInstall={() => setInstallCandidate(null)}
+        draft={floatingAvatarDraft}
+        onDraftChange={updateFloatingAvatarDraft}
+        onShakeTooLong={() => {
+          setManualAvatarState('speechless');
+          setToolResult({toolId: 'scheduler', ok: false, message: t('floatingAvatar.shakeTooLong')});
+        }}
+      />
       {/* v2.4: 首次啟動引導覆蓋層 */}
       <OnboardingOverlay
         state={onboardingState}
@@ -7291,7 +7742,7 @@ function App() {
           setToolResult({toolId: adapterID, ok: true, message: t('adapter.cliUnlinked')});
         }}
       />
-      {installCandidate && (
+      {installCandidate && !floatingAvatarMode && (
         <PackageInstallDecisionDialog
           candidate={installCandidate}
           onConfirm={confirmInstallCandidate}
@@ -7785,7 +8236,12 @@ function App() {
       )}
       {typeof document !== 'undefined' && createPortal(
         <button
-          className={`vl-monitor-launcher${vlMonitorOpen ? ' vl-monitor-launcher-active' : ''}`}
+          className={[
+            'vl-monitor-launcher',
+            vlMonitorOpen ? 'vl-monitor-launcher-active' : '',
+            floatingAvatarMode ? 'vl-monitor-launcher-avatar-mode' : '',
+            floatingAvatarMode && (vlHasBlocking || vlPendingCount > 0) ? 'vl-monitor-launcher-attention' : '',
+          ].filter(Boolean).join(' ')}
           data-vl-target="visual-learning-monitor-launcher"
           onClick={() => setVlMonitorOpen((v) => !v)}
           type="button"
@@ -8173,6 +8629,7 @@ function App() {
           ]}
         />
       )}
+      <GoCodePreviewDock />
       {referenceLinkOpen && (
         <ReferenceLinkModal
           value={referenceLinkValue}
@@ -8270,14 +8727,15 @@ function App() {
         </div>
       )}
 
-      {/* Phase G：關閉前的背景喚醒選擇 */}
+      {/* Phase G：關閉前的後台頭像選擇 */}
       {schedulerBgPrompt && (
-        <div className="session-close-overlay" role="dialog" aria-modal="true" aria-label="排程背景模式">
+        <div className="session-close-overlay" role="dialog" aria-modal="true" aria-label={t('floatingAvatar.closeDialogLabel')}>
           <div className="session-close-dialog">
-            <h3>關閉前：要讓排程在背景繼續嗎？</h3>
+            <h3>{t('floatingAvatar.closeDialogTitle')}</h3>
             <p className="session-close-hint">
-              你有啟用中的排程。選「進入低耗能背景」會在排程時間自動喚醒電腦執行（可從睡眠喚醒）；
-              <strong>請勿關機</strong>——關機後無法被喚醒。選「直接關閉」則下次開啟時才補跑。
+              {t('floatingAvatar.closeDialogHintBefore')}
+              <strong>{t('floatingAvatar.closeDialogNoShutdown')}</strong>
+              {t('floatingAvatar.closeDialogHintAfter')}
             </p>
             <div className="session-close-actions">
               <button
@@ -8288,15 +8746,14 @@ function App() {
                   setSchedulerBgBusy(true);
                   try {
                     await callWails(() => ResolveSchedulerBackgroundPrompt(true));
-                    setSchedulerBgPrompt(false);
-                    Quit();
+                    await enterFloatingAvatarMode();
                   } catch (error) {
-                    setToolResult({toolId: 'scheduler', ok: false, message: `背景喚醒設定失敗，已取消關閉：${error?.message || error}`});
+                    setToolResult({toolId: 'scheduler', ok: false, message: t('floatingAvatar.backgroundFail', {error: error?.message || error})});
                   } finally {
                     setSchedulerBgBusy(false);
                   }
                 }}
-              >進入低耗能背景</button>
+              >{t('floatingAvatar.enterBackground')}</button>
               <button
                 type="button"
                 className="session-close-btn session-close-discard"
@@ -8309,7 +8766,7 @@ function App() {
                     Quit();
                   }
                 }}
-              >直接關閉</button>
+              >{t('floatingAvatar.closeDirectly')}</button>
             </div>
           </div>
         </div>
@@ -9225,7 +9682,9 @@ function avatarStateLabel(state) {
 }
 
 function getPixelAvatarDataUrl(pack, state, size = pixelAvatarRenderSize) {
-  const cacheKey = `${pack}:${state}:${size}`;
+  const bundledAvatar = getBundledAvatarPackUrl(pack, state);
+  if (bundledAvatar) return Promise.resolve(bundledAvatar);
+  const cacheKey = `${pixelAvatarRenderVersion}:${pack}:${state}:${size}`;
   const cached = pixelAvatarRenderCache.get(cacheKey);
   if (typeof cached === 'string') return Promise.resolve(cached);
   if (cached) return cached;
@@ -9243,6 +9702,15 @@ function getPixelAvatarDataUrl(pack, state, size = pixelAvatarRenderSize) {
     });
   pixelAvatarRenderCache.set(cacheKey, pending);
   return pending;
+}
+
+function getBundledAvatarPackUrl(pack, state = 'idle') {
+  if (pack === 'wolf') return wolfdogAvatarUrls[state] || wolfdogAvatarUrls.idle;
+  if (pack === 'uncle') return uncleBustAvatarUrls[state] || uncleBustAvatarUrls.idle;
+  if (pack === 'secretary') return secretaryAvatarUrls[state] || secretaryAvatarUrls.idle;
+  if (pack === 'police') return policeAvatarUrls[state] || policeAvatarUrls.idle;
+  if (pack === 'touharu') return touharuAvatarUrls[state] || touharuAvatarUrls.idle;
+  return '';
 }
 
 let monitorLinkCache = null;
@@ -9345,14 +9813,17 @@ function normalizeSettingsState(settingsState = {}, fallback = fallbackSettings)
       ...(settingsState.panel || {}),
     },
   };
-  const personas = normalizeLockedPersonas(merged.personas || fallbackSettings.personas);
+  const personas = normalizeLockedPersonas(
+    merged.personas || fallbackSettings.personas,
+    merged.removedDefaultPersonaIds || [],
+  );
   const activePersonaId = personas.some((persona) => persona.id === merged.activePersonaId)
     ? merged.activePersonaId
     : lockedPersonaId;
   return {...merged, activePersonaId, personas, panel: normalizePanelSettings(merged.panel)};
 }
 
-function normalizeLockedPersonas(personas = []) {
+function normalizeLockedPersonas(personas = [], removedDefaultPersonaIds = []) {
   // "憂樂傻酷" is a reserved persona identity, not a reserved slot. Keep its
   // name stable while preserving whatever ordering the user chose, because the
   // app treats the first card as the current main persona.
@@ -9363,9 +9834,18 @@ function normalizeLockedPersonas(personas = []) {
   ));
   const lockedIndex = normalized.findIndex((persona) => persona.id === lockedPersonaId);
   if (lockedIndex < 0) {
-    return [fallbackSettings.personas[0], ...normalized];
+    return appendMissingDefaultPersonas([fallbackSettings.personas[0], ...normalized], removedDefaultPersonaIds);
   }
-  return normalized;
+  return appendMissingDefaultPersonas(normalized, removedDefaultPersonaIds);
+}
+
+function appendMissingDefaultPersonas(personas = [], removedDefaultPersonaIds = []) {
+  const known = new Set(personas.map((persona) => persona.id));
+  const removed = new Set(removedDefaultPersonaIds || []);
+  const seeds = fallbackSettings.personas.filter((persona) => (
+    persona.id !== lockedPersonaId && !known.has(persona.id) && !removed.has(persona.id)
+  ));
+  return seeds.length > 0 ? [...personas, ...seeds] : personas;
 }
 
 function normalizeToolList(toolList = []) {
@@ -9413,12 +9893,14 @@ function resolveStaticAvatarPath(config) {
 function defaultPixelPackForPersona(personaID) {
   if (personaID === 'persona-b') return 'uncle';
   if (personaID === 'persona-c') return 'secretary';
+  if (personaID === 'persona-d') return 'police';
+  if (personaID === 'persona-e') return 'touharu';
   return 'wolf';
 }
 
 function pixelPackForPersona(persona, config) {
   const pack = config?.pixel_pack || config?.PixelPack || '';
-  if (['wolf', 'uncle', 'secretary'].includes(pack)) return pack;
+  if (['wolf', 'uncle', 'secretary', 'police', 'touharu'].includes(pack)) return pack;
   return defaultPixelPackForPersona(persona?.id);
 }
 
@@ -9961,6 +10443,11 @@ export function PersonaSettingsDrawer({
         setCurrentPack2(pixelPackForPersona(activePersona, activeAvatarConfig));
         const previews = {};
         for (const p of packs) {
+          const bundledPreview = getBundledAvatarPackUrl(p.id, 'idle');
+          if (bundledPreview) {
+            previews[p.id] = bundledPreview;
+            continue;
+          }
           try {
             const bytes = await RenderPixelAvatarPreview(p.id, 'idle', pixelAvatarRenderSize);
             if (bytes && bytes.length) {
@@ -10756,6 +11243,11 @@ function TopConsole({
         setCurrentPack(pixelPackForPersona(activePersona, activeAvatarConfig));
         const previews = {};
         for (const p of packs) {
+          const bundledPreview = getBundledAvatarPackUrl(p.id, 'idle');
+          if (bundledPreview) {
+            previews[p.id] = bundledPreview;
+            continue;
+          }
           try {
             const bytes = await RenderPixelAvatarPreview(p.id, 'idle', pixelAvatarRenderSize);
             if (bytes && bytes.length) {
@@ -13144,6 +13636,9 @@ function RightRail({
                 {twoLineFileName(file.name, t('rightRail.unnamedFile')).map((line, lineIndex) => <span key={lineIndex}>{line}</span>)}
               </span>
               <small className="reference-file-status">{referenceFileStatusLabel(file.status, t)}</small>
+              {file.addedVia === 'floating_avatar' && (
+                <small className="reference-file-source-badge">{t('floatingAvatar.addedViaFloating')}</small>
+              )}
             </div>
             {shouldShowReferenceFileDetail(file) && <small className="reference-file-detail">{file.detail}</small>}
             {fileExtLabel(file.name) && <span className="reference-file-ext-badge">{fileExtLabel(file.name)}</span>}

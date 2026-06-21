@@ -20,7 +20,7 @@ func TestEntryFilterAPIKey(t *testing.T) {
 
 // 測試入口粗篩：移除 bearer token
 func TestEntryFilterBearerToken(t *testing.T) {
-	input := "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.test.signature"
+	input := "Authorization: " + "Bearer eyJhbGciOiJIUzI1NiJ9.test.signature"
 	cleaned, removed := EntryFilter(input)
 
 	if strings.Contains(cleaned, "eyJhbGci") {
@@ -229,7 +229,7 @@ func TestNormalizePreservesNormalText(t *testing.T) {
 // ── 入口粗篩 + 正規化整合 ──
 
 func TestEntryFilterBearerTab(t *testing.T) {
-	input := "Authorization: Bearer\teyJhbGciOiJIUzI1NiJ9.test.sig"
+	input := "Authorization: " + "Bearer\teyJhbGciOiJIUzI1NiJ9.test.sig"
 	cleaned, removed := EntryFilter(input)
 	if strings.Contains(cleaned, "eyJhbGci") {
 		t.Error("Bearer+tab should be caught by entry filter after normalization")

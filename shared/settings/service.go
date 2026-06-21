@@ -34,13 +34,14 @@ type Persona struct {
 }
 
 type State struct {
-	Panel               PanelSettings        `json:"panel"`
-	Personas            []Persona            `json:"personas"`
-	ActivePersonaID     string               `json:"activePersonaId"`
-	SummaryModel        SummaryModelSettings `json:"summaryModel"`
-	ControlSeal         controlseal.Settings `json:"controlSeal"`
-	AdapterModelChoices map[string]string    `json:"adapterModelChoices,omitempty"`
-	EmbeddingConfig     EmbeddingConfig      `json:"embeddingConfig,omitempty"`
+	Panel                    PanelSettings        `json:"panel"`
+	Personas                 []Persona            `json:"personas"`
+	ActivePersonaID          string               `json:"activePersonaId"`
+	SummaryModel             SummaryModelSettings `json:"summaryModel"`
+	ControlSeal              controlseal.Settings `json:"controlSeal"`
+	AdapterModelChoices      map[string]string    `json:"adapterModelChoices,omitempty"`
+	EmbeddingConfig          EmbeddingConfig      `json:"embeddingConfig,omitempty"`
+	RemovedDefaultPersonaIDs []string             `json:"removedDefaultPersonaIds,omitempty"`
 }
 
 // EmbeddingConfig — Phase B M2：使用者選的 embedding 模型。
@@ -77,6 +78,14 @@ type Service struct {
 const MaxPersonas = 16
 const reservedPersonaID = "persona-a"
 const reservedPersonaName = "憂樂傻酷"
+
+var defaultPersonas = []Persona{
+	{ID: reservedPersonaID, Name: reservedPersonaName, Icon: "♙", Identity: "酷酷的男性狼犬獸人助手"},
+	{ID: "persona-b", Name: "厭世大叔", Icon: "♚", Identity: "厭世社畜但帥帥的粗眉硬漢助手"},
+	{ID: "persona-c", Name: "秘書小妹", Icon: "★", Identity: "聰明俐落的秘書小妹助手"},
+	{ID: "persona-d", Name: "規則警察", Icon: "⚖", Identity: "循規蹈矩、嚴格守序、看到違規就會說教的警察助手", Personality: "重視規則、流程與安全，回答會先提醒限制與責任，語氣像警察一樣嚴肅但可靠。"},
+	{ID: "persona-e", Name: "東春巫女", Icon: "☯", Identity: "白髮馬尾、棕眼曬黑、直覺敏銳的巫女助手", Personality: "傲嬌、淘氣又直覺敏銳，嘴上不饒人，但能很快察覺問題不對勁。"},
+}
 
 func NewService(root string) *Service {
 	if root == "" {
@@ -237,6 +246,9 @@ func (s *Service) RemovePersona(personaID string) (State, error) {
 	if s.data.ActivePersonaID == personaID {
 		s.data.ActivePersonaID = s.data.Personas[0].ID
 	}
+	if isRemovableDefaultPersona(personaID) {
+		s.data.RemovedDefaultPersonaIDs = appendUniqueString(s.data.RemovedDefaultPersonaIDs, personaID)
+	}
 	// Persona removal also clears per-persona assets such as avatar files.
 	_ = os.RemoveAll(storage.PersonaRoot(s.root, personaID))
 	_ = s.saveLocked()
@@ -362,6 +374,7 @@ func (s *Service) load() error {
 	}
 	next.Personas = removeLegacyDefaultPersonaD(next.Personas)
 	next.Personas = normalizeBuiltInPersonaDefaults(next.Personas)
+	next.Personas = appendMissingDefaultPersonas(next.Personas, next.RemovedDefaultPersonaIDs)
 	next.Personas = normalizeReservedPersona(next.Personas)
 	next.SummaryModel = normalizeSummaryModelSettings(next.SummaryModel)
 	next.ControlSeal = next.ControlSeal.Normalize()
@@ -392,6 +405,10 @@ func normalizeBuiltInPersonaDefaults(personas []Persona) []Persona {
 			if personas[index].Identity == "" {
 				personas[index].Identity = "聰明俐落的秘書小妹助手"
 			}
+		case "persona-d":
+			applyPersonaDefaults(&personas[index], "persona-d")
+		case "persona-e":
+			applyPersonaDefaults(&personas[index], "persona-e")
 		}
 	}
 	return personas
@@ -406,13 +423,9 @@ func defaultState() State {
 		// Panel 欄位不在此初始化——面板設定由 UISettingsService 管理。
 		// State.Panel 僅作為 DTO 供 app.go 組合回傳給前端。
 		ActivePersonaID: reservedPersonaID,
-		Personas: []Persona{
-			{ID: reservedPersonaID, Name: reservedPersonaName, Icon: "♙", Identity: "酷酷的男性狼犬獸人助手"},
-			{ID: "persona-b", Name: "厭世大叔", Icon: "♚", Identity: "厭世社畜但帥帥的粗眉硬漢助手"},
-			{ID: "persona-c", Name: "秘書小妹", Icon: "★", Identity: "聰明俐落的秘書小妹助手"},
-		},
-		SummaryModel: defaultSummaryModelSettings(),
-		ControlSeal:  controlseal.DefaultSettings(),
+		Personas:        clonePersonas(defaultPersonas),
+		SummaryModel:    defaultSummaryModelSettings(),
+		ControlSeal:     controlseal.DefaultSettings(),
 	}
 }
 
@@ -464,6 +477,7 @@ func normalizeReservedPersona(personas []Persona) []Persona {
 
 func cloneState(state State) State {
 	state.Personas = append([]Persona(nil), state.Personas...)
+	state.RemovedDefaultPersonaIDs = append([]string(nil), state.RemovedDefaultPersonaIDs...)
 	if state.AdapterModelChoices != nil {
 		m := make(map[string]string, len(state.AdapterModelChoices))
 		for k, v := range state.AdapterModelChoices {
@@ -472,6 +486,72 @@ func cloneState(state State) State {
 		state.AdapterModelChoices = m
 	}
 	return state
+}
+
+func clonePersonas(personas []Persona) []Persona {
+	return append([]Persona(nil), personas...)
+}
+
+func appendMissingDefaultPersonas(personas []Persona, removedIDs []string) []Persona {
+	known := make(map[string]bool, len(personas))
+	for _, persona := range personas {
+		known[persona.ID] = true
+	}
+	removed := make(map[string]bool, len(removedIDs))
+	for _, id := range removedIDs {
+		removed[id] = true
+	}
+	for _, persona := range defaultPersonas {
+		if persona.ID == reservedPersonaID || known[persona.ID] || removed[persona.ID] {
+			continue
+		}
+		// Default personas are seeds, not locks; RemovePersona records a tombstone.
+		personas = append(personas, persona)
+		known[persona.ID] = true
+	}
+	return personas
+}
+
+func applyPersonaDefaults(persona *Persona, defaultID string) {
+	for _, seed := range defaultPersonas {
+		if seed.ID != defaultID {
+			continue
+		}
+		if persona.Name == "" {
+			persona.Name = seed.Name
+		}
+		if persona.Icon == "" {
+			persona.Icon = seed.Icon
+		}
+		if persona.Identity == "" {
+			persona.Identity = seed.Identity
+		}
+		if persona.Personality == "" {
+			persona.Personality = seed.Personality
+		}
+		return
+	}
+}
+
+func isRemovableDefaultPersona(personaID string) bool {
+	if personaID == reservedPersonaID {
+		return false
+	}
+	for _, persona := range defaultPersonas {
+		if persona.ID == personaID {
+			return true
+		}
+	}
+	return false
+}
+
+func appendUniqueString(values []string, value string) []string {
+	for _, item := range values {
+		if item == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 func (s *Service) findPersonaLocked(personaID string) (Persona, bool) {

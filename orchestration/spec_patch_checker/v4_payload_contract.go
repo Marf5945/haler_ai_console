@@ -177,8 +177,8 @@ func CheckNoAbsolutePathInPayload(payload string) error {
 	absolutePrefixes := []string{
 		"/" + "Users/",
 		"/" + "home/",
-		`C:` + `\` + `Users` + `\`,
-		`C:` + `\\` + `Users` + `\\`,
+		`C:\` + `Users\`,
+		`C:\\` + `Users\\`,
 		"/" + "tmp/",
 		"/" + "var/",
 	}

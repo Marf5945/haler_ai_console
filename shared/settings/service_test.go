@@ -54,16 +54,16 @@ func TestUISettingsServiceSavesPanel(t *testing.T) {
 	}
 }
 
-func TestServiceDefaultsReserveFourthSlotForAddPersona(t *testing.T) {
+func TestServiceDefaultsIncludeTouharuInFifthSlot(t *testing.T) {
 	service := NewService(t.TempDir())
 	state := service.State()
-	if len(state.Personas) != 3 {
-		t.Fatalf("default personas should leave the fourth UI slot for add/install, got %d", len(state.Personas))
+	if len(state.Personas) != 5 {
+		t.Fatalf("default personas should include five built-ins, got %d", len(state.Personas))
 	}
-	if state.Personas[2].ID != "persona-c" {
-		t.Fatalf("unexpected third default persona: %#v", state.Personas[2])
+	if state.Personas[4].ID != "persona-e" {
+		t.Fatalf("unexpected fifth default persona: %#v", state.Personas[4])
 	}
-	if state.Personas[1].Name != "厭世大叔" || state.Personas[2].Name != "秘書小妹" {
+	if state.Personas[1].Name != "厭世大叔" || state.Personas[2].Name != "秘書小妹" || state.Personas[4].Name != "東春巫女" {
 		t.Fatalf("built-in persona defaults were not applied: %#v", state.Personas)
 	}
 }
@@ -139,6 +139,58 @@ func TestServiceExportsAndRemovesPersona(t *testing.T) {
 	}
 	if _, err := os.Stat(assetDir); !os.IsNotExist(err) {
 		t.Fatalf("persona asset dir should be removed, err=%v", err)
+	}
+}
+
+func TestServiceRemovesDefaultTouharuWithoutReseeding(t *testing.T) {
+	root := t.TempDir()
+	service := NewService(root)
+
+	state, err := service.RemovePersona("persona-e")
+	if err != nil {
+		t.Fatalf("RemovePersona persona-e failed: %v", err)
+	}
+	for _, persona := range state.Personas {
+		if persona.ID == "persona-e" {
+			t.Fatalf("persona-e should be removed: %#v", state.Personas)
+		}
+	}
+
+	reloaded := NewService(root).State()
+	for _, persona := range reloaded.Personas {
+		if persona.ID == "persona-e" {
+			t.Fatalf("removed default persona should not be reseeded: %#v", reloaded.Personas)
+		}
+	}
+	if len(reloaded.RemovedDefaultPersonaIDs) != 1 || reloaded.RemovedDefaultPersonaIDs[0] != "persona-e" {
+		t.Fatalf("removed default tombstone missing: %#v", reloaded.RemovedDefaultPersonaIDs)
+	}
+}
+
+func TestServiceMigratesLegacyDefaultsToFivePersonas(t *testing.T) {
+	root := t.TempDir()
+	prefsDir := filepath.Join(root, "data", "preferences")
+	if err := os.MkdirAll(prefsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{
+  "activePersonaId": "persona-a",
+  "personas": [
+    {"id": "persona-a", "name": "憂樂傻酷", "icon": "♙", "identity": "酷酷的男性狼犬獸人助手"},
+    {"id": "persona-b", "name": "厭世大叔", "icon": "♚", "identity": "厭世社畜但帥帥的粗眉硬漢助手"},
+    {"id": "persona-c", "name": "秘書小妹", "icon": "★", "identity": "聰明俐落的秘書小妹助手"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(prefsDir, "settings.json"), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	state := NewService(root).State()
+	if len(state.Personas) != 5 {
+		t.Fatalf("legacy defaults should migrate to five personas, got %#v", state.Personas)
+	}
+	if state.Personas[3].ID != "persona-d" || state.Personas[4].ID != "persona-e" {
+		t.Fatalf("legacy defaults should append rule police and Touharu, got %#v", state.Personas)
 	}
 }
 

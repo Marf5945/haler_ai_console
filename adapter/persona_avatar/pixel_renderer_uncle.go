@@ -43,6 +43,8 @@ var (
 	uclLipD     = color.RGBA{155, 100, 85, 255}
 	uclNeckSh   = color.RGBA{185, 150, 118, 255}
 	uclCheekH   = color.RGBA{225, 192, 162, 255} // 頰高光
+	uclChestH   = color.RGBA{226, 190, 158, 255}
+	uclChestSh  = color.RGBA{174, 132, 104, 255}
 
 	uclStateColors = map[AvatarStateTrigger]color.RGBA{
 		StateIdle:       {215, 180, 148, 255},
@@ -247,9 +249,40 @@ func drawUncleBase(c *canvas64) {
 			c.set(64-margin, yy, uclOutline)
 		}
 	}
-	c.fillRect(25, 56, 38, 59, uclSkin)
-	c.fillRect(27, 57, 36, 59, uclNeckSh)
-	c.hline(60, 25, 38, uclOutline)
+	drawUncleUpperTorso(c)
+}
+
+func drawUncleUpperTorso(c *canvas64) {
+	// 64x64 胸像版：用斜方肌把下巴、脖子、肩胸接成一體，避免只剩頭和一截脖子。
+	c.fillRect(24, 51, 39, 58, uclSkin)
+	c.fillRect(27, 52, 36, 60, uclNeckSh)
+	c.fillRect(29, 51, 34, 56, uclSkin)
+	c.hline(55, 22, 27, uclSkinD)
+	c.hline(55, 36, 41, uclSkinD)
+	c.hline(58, 20, 28, uclSkinD)
+	c.hline(58, 35, 43, uclSkinD)
+
+	c.fillRect(4, 57, 59, 63, uclSkin)
+	c.hline(56, 9, 23, uclOutline)
+	c.hline(56, 40, 54, uclOutline)
+	c.set(3, 59, uclOutline)
+	c.set(60, 59, uclOutline)
+	c.set(2, 62, uclOutline)
+	c.set(61, 62, uclOutline)
+
+	c.fillRect(10, 59, 29, 63, uclChestH)
+	c.fillRect(34, 59, 53, 63, uclChestH)
+	c.hline(58, 14, 26, uclChestSh)
+	c.hline(58, 37, 49, uclChestSh)
+	c.hline(60, 12, 29, uclChestSh)
+	c.hline(60, 34, 51, uclChestSh)
+	c.hline(62, 14, 28, uclChestSh)
+	c.hline(62, 35, 49, uclChestSh)
+	c.hline(59, 30, 33, uclChestSh)
+	c.hline(60, 31, 32, uclChestSh)
+	c.hline(61, 30, 33, uclChestSh)
+	c.hline(63, 23, 30, uclSkinD)
+	c.hline(63, 33, 40, uclSkinD)
 }
 
 func drawUncleSharpEyes(c *canvas64) {

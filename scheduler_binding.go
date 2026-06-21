@@ -345,7 +345,7 @@ func (a *App) RegisterSchedulerCallback(name string) error {
 // 背景喚醒（Phase G）— 前端關閉時詢問是否進低耗能背景並安裝喚醒鬧鐘
 // --------------------------------------------------------------------------
 
-// SchedulerHasActiveJobs 回報是否有啟用中的排程，前端關閉時用來決定要不要問「背景喚醒」。
+// SchedulerHasActiveJobs 回報是否有啟用中的排程，用來決定後台頭像是否需要背景喚醒。
 func (a *App) SchedulerHasActiveJobs() bool {
 	if a == nil || a.schedulerService == nil {
 		return false
@@ -368,15 +368,25 @@ func (a *App) SetSchedulerBackgroundWake(enable bool) error {
 	return a.setSchedulerWake(enable)
 }
 
-// ResolveSchedulerBackgroundPrompt 前端在「關閉時背景選擇」對話框做出選擇後呼叫。
-// enable=true → 安裝背景喚醒；false → 確保移除。決定後標記 bgPromptResolved，前端再 Quit()
-// 即正常關閉（仍會走既有 save-as-sub 提示，不被本提示吃掉）。
+// ResolveSchedulerBackgroundPrompt 前端在「關閉時後台頭像選擇」對話框做出選擇後呼叫。
+// enable=true → 有啟用排程時安裝背景喚醒；無排程時只保留後台頭像模式，不消耗下次關閉提示。
+// false → 確保移除背景喚醒，並標記 bgPromptResolved；前端再 Quit() 即正常關閉。
+// 直接關閉仍會走既有 save-as-sub 提示，不被本提示吃掉。
 func (a *App) ResolveSchedulerBackgroundPrompt(enable bool) error {
-	werr := a.setSchedulerWake(enable)
-	a.closeMu.Lock()
-	a.bgPromptResolved = true
-	a.closeMu.Unlock()
-	if enable {
+	var werr error
+	hasActiveJobs := a.SchedulerHasActiveJobs()
+	if enable && hasActiveJobs {
+		werr = a.setSchedulerWake(true)
+	} else {
+		// 沒有啟用排程時，後台頭像不需要 LaunchAgent；同時清掉可能殘留的 wake 設定。
+		werr = a.setSchedulerWake(false)
+	}
+	if !enable {
+		a.closeMu.Lock()
+		a.bgPromptResolved = true
+		a.closeMu.Unlock()
+	}
+	if enable && hasActiveJobs {
 		return werr // 啟用失敗要讓前端知道；停用則 best-effort
 	}
 	return nil

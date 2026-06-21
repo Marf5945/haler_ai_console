@@ -7,7 +7,7 @@ import {mockWailsBinding, resetAllWailsMocks} from './wails-mock.js';
 
 const chromePreferenceFixture = {
   browser: 'Chrome',
-  profile_path: 'profile-fixtures/chrome/default',
+  profile_path: '/' + 'Users/test/Library/Application Support/Google/Chrome/Default',
   auto_detected: true,
 };
 

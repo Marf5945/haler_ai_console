@@ -128,7 +128,7 @@ function traceEndpoint() {
     if (!raw) return null;
     const parsed = new URL(raw);
     return {
-      hostname: parsed.hostname,
+      hostname: parsed.hostname || "127.0.0.1",
       port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
       pathname: parsed.pathname || "",
     };

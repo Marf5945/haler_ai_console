@@ -414,10 +414,15 @@ func (a *App) beforeClose(ctx context.Context) bool {
 		return false
 	}
 	bgResolved := a.bgPromptResolved
+	if bgResolved {
+		// Consume this one-shot decision. If a later session/task prompt is
+		// cancelled, the next close attempt must ask about background avatar again.
+		a.bgPromptResolved = false
+	}
 	a.closeMu.Unlock()
 
-	// Phase G：有啟用排程且尚未決定背景模式 → 先問「進入低耗能背景 / 直接關閉」。
-	if !bgResolved && a.SchedulerHasActiveJobs() {
+	// Phase G：一般關閉先詢問是否轉為後台頭像；排程只影響是否額外設定背景喚醒。
+	if !bgResolved {
 		a.eventBus.Emit("scheduler:background_prompt", map[string]interface{}{})
 		return true
 	}

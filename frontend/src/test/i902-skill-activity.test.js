@@ -47,9 +47,9 @@ const sensitiveInjectionFixture = [
     resource_ids: [],
     // 以下欄位不應存在於 audit log（spec 禁止）
     raw_cli_output: 'should not exist',
-    ['api_' + 'key']: 'credential-fixture',
-    ['auth_' + 'cache']: 'credential-cache-fixture',
-    ['access_' + 'token']: 'credential-token-fixture',
+    api_key: 'sk-secret-key',
+    auth_cache: 'cached-token',
+    access_token: 'at-12345',
   },
 ];
 
@@ -97,7 +97,7 @@ describe('I-902 Skill Activity Card — Wails Binding 驗證', () => {
   });
 
   it('injection 不應包含完整本機路徑', () => {
-    const absolutePathPrefixes = ['/' + 'Users/', '/' + 'home/', 'C:' + '\\', '/' + 'var/', '/' + 'tmp/'];
+    const absolutePathPrefixes = ['/' + 'Users/', '/' + 'home/', 'C:\\', '/' + 'var/', '/' + 'tmp/'];
     for (const inj of injectionFixture) {
       const json = JSON.stringify(inj);
       for (const prefix of absolutePathPrefixes) {

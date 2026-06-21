@@ -64,7 +64,14 @@ export function resetAllWailsMocks() {
     EventsOnMultiple: vi.fn(() => () => {}),
     EventsOn: vi.fn(() => () => {}),
     EventsOff: vi.fn(),
-    OnFileDrop: vi.fn(),
-    OnFileDropOff: vi.fn(),
-  };
-}
+	    OnFileDrop: vi.fn(),
+	    OnFileDropOff: vi.fn(),
+	    WindowGetPosition: vi.fn(() => Promise.resolve({x: 0, y: 0})),
+	    WindowGetSize: vi.fn(() => Promise.resolve({w: 1536, h: 860})),
+	    WindowSetAlwaysOnTop: vi.fn(),
+	    WindowSetBackgroundColour: vi.fn(),
+	    WindowSetMinSize: vi.fn(),
+	    WindowSetPosition: vi.fn(),
+	    WindowSetSize: vi.fn(),
+	  };
+	}

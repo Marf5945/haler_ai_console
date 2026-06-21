@@ -15,7 +15,7 @@ func TestImportedSkillNoAbsolutePath(t *testing.T) {
 		t.Errorf("expected no error for relative refs, got: %v", err)
 	}
 	// 違規情境：injection 含絕對路徑
-	bad := `{"resource_refs":{"programs":["` + `/` + `Users/tester/data/skills/weather/programs/fetcher"]}}`
+	bad := `{"resource_refs":{"programs":["/` + `Users/tester/data/skills/weather/programs/fetcher"]}}`
 	if err := CheckSkillContextNotExposingAbsolutePaths(bad); err == nil {
 		t.Error("expected error for absolute path in injection, got nil")
 	}
@@ -92,11 +92,11 @@ func TestAuditLogNoRawOutput(t *testing.T) {
 
 // T9: audit log 不含 token / auth_cache
 func TestAuditLogNoTokenOrAuth(t *testing.T) {
-	withToken := `{"skill_id":"x","` + `api_` + `key":"sk-123"}`
+	withToken := `{"skill_id":"x","api_key":"sk-123"}`
 	if err := CheckSkillInjectionNoRawOutput(withToken); err == nil {
 		t.Error("expected error for api_key in audit log")
 	}
-	withAuth := `{"skill_id":"x","auth_cache":"` + `/` + `home/user/.claude/auth"}`
+	withAuth := `{"skill_id":"x","auth_cache":"/` + `home/user/.claude/auth"}`
 	if err := CheckSkillInjectionNoRawOutput(withAuth); err == nil {
 		t.Error("expected error for auth_cache in audit log")
 	}

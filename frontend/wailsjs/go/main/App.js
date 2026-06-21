@@ -326,6 +326,10 @@ export function EnterDegradedMode(arg1) {
   return window['go']['main']['App']['EnterDegradedMode'](arg1);
 }
 
+export function EnterFloatingAvatarNative() {
+  return window['go']['main']['App']['EnterFloatingAvatarNative']();
+}
+
 export function EscapeExternalTokens(arg1) {
   return window['go']['main']['App']['EscapeExternalTokens'](arg1);
 }
@@ -344,6 +348,10 @@ export function ExecuteSkillMessage(arg1, arg2, arg3, arg4) {
 
 export function ExitDegradedMode() {
   return window['go']['main']['App']['ExitDegradedMode']();
+}
+
+export function ExitFloatingAvatarNative() {
+  return window['go']['main']['App']['ExitFloatingAvatarNative']();
 }
 
 export function ExportDocumentToPath(arg1) {
@@ -480,6 +488,10 @@ export function GetEmbeddingConfig() {
 
 export function GetGoProgramAuthoringDetail(arg1) {
   return window['go']['main']['App']['GetGoProgramAuthoringDetail'](arg1);
+}
+
+export function GetGoProgramAuthoringSourcePreview(arg1) {
+  return window['go']['main']['App']['GetGoProgramAuthoringSourcePreview'](arg1);
 }
 
 export function GetHighImpactDomains() {

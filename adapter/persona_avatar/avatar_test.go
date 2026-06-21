@@ -172,6 +172,34 @@ func TestLockedPersonaAvatarCannotChange(t *testing.T) {
 	}
 }
 
+func TestPolicePixelPackCanBeStored(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc := NewService(tmpDir)
+
+	if err := svc.SetPixelPack("persona-d", "police"); err != nil {
+		t.Fatalf("SetPixelPack police failed: %v", err)
+	}
+
+	config := svc.GetCurrentAvatar("persona-d")
+	if config.AvatarProvider != ProviderPixel || config.PixelPack != "police" {
+		t.Fatalf("persona-d should store police pixel pack, got %#v", config)
+	}
+}
+
+func TestTouharuPixelPackCanBeStored(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc := NewService(tmpDir)
+
+	if err := svc.SetPixelPack("custom-touharu", "touharu"); err != nil {
+		t.Fatalf("SetPixelPack touharu failed: %v", err)
+	}
+
+	config := svc.GetCurrentAvatar("custom-touharu")
+	if config.AvatarProvider != ProviderPixel || config.PixelPack != "touharu" {
+		t.Fatalf("custom persona should store touharu pixel pack, got %#v", config)
+	}
+}
+
 // 測試 DeleteStaticAvatar fallback 到 pixel
 func TestDeleteStaticAvatarFallback(t *testing.T) {
 	tmpDir := t.TempDir()

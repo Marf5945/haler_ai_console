@@ -10,6 +10,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/mac"
 )
 
 //go:embed all:frontend/dist
@@ -64,6 +65,13 @@ func main() {
 			DisableWebViewDrop: true,
 		},
 		BackgroundColour: &options.RGBA{R: 5, G: 5, B: 5, A: 255},
+		// 後台浮動頭像需要真透明：WebView 設為透明，避免 WKWebView 自身白底
+		// 蓋住前端的 transparent CSS。視窗外框/紅綠燈改由執行期 cgo 切換
+		// （floating_avatar_darwin.go），一般主控台維持正常有框視窗。
+		Mac: &mac.Options{
+			WebviewIsTransparent: true,
+			WindowIsTranslucent:  false,
+		},
 		// Phase G：排程喚醒時不跳視窗（隱藏啟動）。
 		StartHidden: scheduledWake,
 		// 單一實例鎖：避免每次喚醒堆積行程／重複執行；第二實例會被導回第一實例。

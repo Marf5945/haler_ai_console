@@ -17,6 +17,7 @@ import (
 
 const goProgramAuthoringRunFile = "authoring_run.json"
 const goProgramExportManifestFile = "go_program_export_manifest.json"
+const goProgramSourcePreviewMaxBytes int64 = 200 * 1024
 
 type GoProgramAuthoringCatalogItem struct {
 	RunID             string `json:"run_id"`
@@ -40,6 +41,24 @@ type GoProgramAuthoringDetail struct {
 	Manifest        *go_program.Manifest       `json:"manifest,omitempty"`
 	Attempts        []go_program.AttemptRecord `json:"attempts,omitempty"`
 	Exportable      bool                       `json:"exportable"`
+}
+
+type GoProgramSourcePreview struct {
+	RunID       string                `json:"run_id"`
+	ProgramID   string                `json:"program_id"`
+	ProgramName string                `json:"program_name"`
+	Status      string                `json:"status"`
+	Attempt     int                   `json:"attempt"`
+	AttemptHash string                `json:"attempt_hash,omitempty"`
+	Files       []GoProgramSourceFile `json:"files"`
+}
+
+type GoProgramSourceFile struct {
+	Path      string `json:"path"`
+	Language  string `json:"language"`
+	Content   string `json:"content,omitempty"`
+	SizeBytes int64  `json:"size_bytes,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 type GoProgramAuthoringRunMeta struct {
@@ -125,6 +144,39 @@ func (a *App) GetGoProgramAuthoringDetail(runID string) (*GoProgramAuthoringDeta
 		return nil, err
 	}
 	return detail, nil
+}
+
+func (a *App) GetGoProgramAuthoringSourcePreview(runID string) (*GoProgramSourcePreview, error) {
+	detail, err := findGoProgramAuthoringDetail(strings.TrimSpace(runID))
+	if err != nil {
+		return nil, err
+	}
+	out := &GoProgramSourcePreview{
+		RunID:       detail.RunID,
+		ProgramID:   detail.ProgramID,
+		ProgramName: detail.ProgramName,
+		Status:      detail.Status,
+		Files:       []GoProgramSourceFile{},
+	}
+	if len(detail.Attempts) == 0 {
+		return out, nil
+	}
+	rec := detail.Attempts[len(detail.Attempts)-1]
+	out.Attempt = rec.Attempt
+	out.AttemptHash = rec.Hash
+	sourceDir := rec.Manifest.SourceDir
+	files := rec.Files
+	if len(files) == 0 {
+		files = goProgramPreviewGoFiles(sourceDir)
+	}
+	sort.Strings(files)
+	for _, rel := range files {
+		if filepath.Ext(rel) != ".go" {
+			continue
+		}
+		out.Files = append(out.Files, readGoProgramPreviewFile(sourceDir, rel))
+	}
+	return out, nil
 }
 
 func (a *App) NativeDragExportGoProgramAuthoring(runID string) (*NativeGoProgramDragExportResult, error) {
@@ -410,6 +462,70 @@ func readGoProgramAttempts(root string) []go_program.AttemptRecord {
 	}
 	sort.Slice(attempts, func(i, j int) bool { return attempts[i].Attempt < attempts[j].Attempt })
 	return attempts
+}
+
+func goProgramPreviewGoFiles(root string) []string {
+	if strings.TrimSpace(root) == "" {
+		return nil
+	}
+	var files []string
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry == nil || entry.IsDir() || filepath.Ext(path) != ".go" {
+			return nil
+		}
+		if rel, relErr := filepath.Rel(root, path); relErr == nil {
+			files = append(files, rel)
+		}
+		return nil
+	})
+	return files
+}
+
+func readGoProgramPreviewFile(root, rel string) GoProgramSourceFile {
+	out := GoProgramSourceFile{Path: rel, Language: "go"}
+	path, err := safeGoProgramPreviewPath(root, rel)
+	if err != nil {
+		out.Error = err.Error()
+		return out
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		out.Error = "source file is unavailable"
+		return out
+	}
+	out.SizeBytes = info.Size()
+	if info.Mode()&os.ModeSymlink != 0 {
+		out.Error = "symlink source preview is not allowed"
+		return out
+	}
+	if info.Size() > goProgramSourcePreviewMaxBytes {
+		out.Error = fmt.Sprintf("source file is too large: %d bytes", info.Size())
+		return out
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		out.Error = "source file could not be read"
+		return out
+	}
+	out.Content = string(data)
+	return out
+}
+
+func safeGoProgramPreviewPath(root, rel string) (string, error) {
+	if strings.TrimSpace(root) == "" {
+		return "", fmt.Errorf("go program source preview: missing source directory")
+	}
+	cleanRel := filepath.Clean(rel)
+	if cleanRel == "." || filepath.IsAbs(cleanRel) || cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("go program source preview: invalid source path %q", rel)
+	}
+	root = filepath.Clean(root)
+	path := filepath.Join(root, cleanRel)
+	back, err := filepath.Rel(root, path)
+	if err != nil || back == ".." || strings.HasPrefix(back, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("go program source preview: source path escaped workspace")
+	}
+	return path, nil
 }
 
 func packGoProgramAuthoringExport(tempRoot string, detail *GoProgramAuthoringDetail) (string, error) {

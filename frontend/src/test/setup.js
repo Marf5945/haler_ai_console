@@ -24,7 +24,14 @@ if (!window.runtime) {
     EventsOnMultiple: () => () => {},
     EventsOn: () => () => {},
     EventsOff: () => {},
-    OnFileDrop: () => {},
-    OnFileDropOff: () => {},
-  };
-}
+	    OnFileDrop: () => {},
+	    OnFileDropOff: () => {},
+	    WindowGetPosition: () => Promise.resolve({x: 0, y: 0}),
+	    WindowGetSize: () => Promise.resolve({w: 1536, h: 860}),
+	    WindowSetAlwaysOnTop: () => {},
+	    WindowSetBackgroundColour: () => {},
+	    WindowSetMinSize: () => {},
+	    WindowSetPosition: () => {},
+	    WindowSetSize: () => {},
+	  };
+	}

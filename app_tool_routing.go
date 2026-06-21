@@ -467,6 +467,16 @@ func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sess
 		if strings.TrimSpace(decision.Action) == "提問" {
 			return true, a.handleJudgeClarification(sessionID, userText, decision.Target, traceID)
 		}
+		// 出境前『資料充分性』驗證：judge 對網路 query 標 待命 時，再做一次無狀態
+		// 自問自答；缺關鍵 slot（地點/日期/標的…）就把 待命 翻成 提問，交同一套
+		// 澄清狀態機。逐查詢推理而非關鍵字表，新主題零修改。judge 為 nil 不啟用。
+		if rerouteJudge != nil &&
+			strings.TrimSpace(decision.Action) == "網路" &&
+			actionchain.IsStandbyNext(decision.Next) {
+			if question, insufficient := a.assessQuerySufficiency(decision, userText, rerouteJudge, traceID); insufficient {
+				return true, a.handleJudgeClarification(sessionID, userText, question, traceID)
+			}
+		}
 		if resp, handled := a.maybeHandleResourceGate(strings.TrimSpace(decision.Action+" "+decision.Target), sessionID, traceID); handled {
 			return true, *resp
 		}

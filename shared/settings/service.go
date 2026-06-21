@@ -83,8 +83,8 @@ var defaultPersonas = []Persona{
 	{ID: reservedPersonaID, Name: reservedPersonaName, Icon: "♙", Identity: "酷酷的男性狼犬獸人助手"},
 	{ID: "persona-b", Name: "厭世大叔", Icon: "♚", Identity: "厭世社畜但帥帥的粗眉硬漢助手"},
 	{ID: "persona-c", Name: "秘書小妹", Icon: "★", Identity: "聰明俐落的秘書小妹助手"},
-	{ID: "persona-d", Name: "規則警察", Icon: "⚖", Identity: "循規蹈矩、嚴格守序、看到違規就會說教的警察助手", Personality: "重視規則、流程與安全，回答會先提醒限制與責任，語氣像警察一樣嚴肅但可靠。"},
-	{ID: "persona-e", Name: "東春巫女", Icon: "☯", Identity: "白髮馬尾、棕眼曬黑、直覺敏銳的巫女助手", Personality: "傲嬌、淘氣又直覺敏銳，嘴上不饒人，但能很快察覺問題不對勁。"},
+	{ID: "persona-d", Name: "警察桂澤", Icon: "⚖", Identity: "循規蹈矩的警察助手；「桂澤」聽起來像規則，看到流程被跳過就會立刻吹哨。", Personality: "把規則、流程與安全放第一，回答會先提醒限制、責任與風險；嚴肅但可靠，說教時也有一點冷面幽默。"},
+	{ID: "persona-e", Name: "東春巫女", Icon: "☯", Identity: "白髮馬尾、棕眼曬黑、直覺敏銳的東春巫女助手", Personality: "傲嬌又淘氣，嘴上不饒人，但能很快察覺問題不對勁，像春雷一樣先提醒你。"},
 }
 
 func NewService(root string) *Service {
@@ -517,6 +517,14 @@ func applyPersonaDefaults(persona *Persona, defaultID string) {
 		if seed.ID != defaultID {
 			continue
 		}
+		if defaultID == "persona-d" {
+			applyDefaultPersonaDMigration(persona, seed)
+			return
+		}
+		if defaultID == "persona-e" {
+			applyDefaultPersonaEMigration(persona, seed)
+			return
+		}
 		if persona.Name == "" {
 			persona.Name = seed.Name
 		}
@@ -531,6 +539,67 @@ func applyPersonaDefaults(persona *Persona, defaultID string) {
 		}
 		return
 	}
+}
+
+func applyDefaultPersonaDMigration(persona *Persona, seed Persona) {
+	applyDefaultPersonaTextMigration(persona, seed,
+		[]string{"人格 D", "規則警察", "警察桂澤", "Rule Police", "Officer Reggie Law"},
+		[]string{
+			"循規蹈矩、嚴格守序、看到違規就會說教的警察助手",
+			"循規蹈矩的警察助手；「桂澤」聽起來像規則，看到流程被跳過就會立刻吹哨。",
+			"A strict rule-following police assistant who lectures when rules are bent",
+			"Rules-first police assistant who lectures when rules are bent",
+		},
+		[]string{
+			"重視規則、流程與安全，回答會先提醒限制與責任，語氣像警察一樣嚴肅但可靠。",
+			"把規則、流程與安全放第一，回答會先提醒限制、責任與風險；嚴肅但可靠，說教時也有一點冷面幽默。",
+			"Prioritizes rules, process, and safety. Replies first with constraints and responsibility, stern like a police officer but reliable.",
+		})
+}
+
+func applyDefaultPersonaEMigration(persona *Persona, seed Persona) {
+	applyDefaultPersonaTextMigration(persona, seed,
+		[]string{"東春巫女", "Touharu Miko", "Miko Touharu"},
+		[]string{
+			"白髮馬尾、棕眼曬黑、直覺敏銳的巫女助手",
+			"白髮馬尾、棕眼曬黑、直覺敏銳的東春巫女助手",
+			"A tan white-ponytailed miko assistant with sharp intuition",
+			"Tan-skinned white-ponytailed miko assistant with sharp intuition",
+		},
+		[]string{
+			"傲嬌、淘氣又直覺敏銳，嘴上不饒人，但能很快察覺問題不對勁。",
+			"傲嬌又淘氣，嘴上不饒人，但能很快察覺問題不對勁，像春雷一樣先提醒你。",
+			"Tsundere and mischievous, with quick instincts and a habit of noticing when something feels off.",
+			"Tsundere and mischievous, but highly intuitive and quick to sense when something is wrong.",
+		})
+}
+
+func applyDefaultPersonaTextMigration(persona *Persona, seed Persona, legacyNames, legacyIdentities, legacyPersonalities []string) {
+	if legacyDefaultText(persona.Name, legacyNames) {
+		persona.Name = seed.Name
+	}
+	if persona.Icon == "" {
+		persona.Icon = seed.Icon
+	}
+	if legacyDefaultText(persona.Identity, legacyIdentities) {
+		persona.Identity = seed.Identity
+	}
+	if legacyDefaultText(persona.Personality, legacyPersonalities) {
+		persona.Personality = seed.Personality
+	}
+}
+
+func legacyDefaultText(value string, legacyValues []string) bool {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return true
+	}
+	for _, legacy := range legacyValues {
+		if text == legacy {
+			return true
+		}
+	}
+	return false
 }
 
 func isRemovableDefaultPersona(personaID string) bool {

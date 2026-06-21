@@ -107,6 +107,11 @@ coverage.out
 coverage.html
 *.test.log
 **/_perm_test_*
+*_test.go
+frontend/src/test/
+**/testdata/
+assets/models/__dummy_test__
+test_dialogues*.md
 
 # === 環境設定 ===
 .env
@@ -134,6 +139,8 @@ ARCHITECTURE_*.md
 FONT_SPEC.md
 test_dialogues*.md
 _install_*/
+build/darwin/Info.dev.plist
+scripts/*smoke*.sh
 
 # === Python cache artifacts ===
 __pycache__/

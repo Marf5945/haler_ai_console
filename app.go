@@ -522,14 +522,7 @@ func appDataRoot() string {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.startHookGeneRecorder()
-	// DEBUG_TRACE_REMOVE: Temporary local trace viewer for UI -> CLI diagnostics.
-	// Keep while cleaning dead code: the monitor can look offline when the app is
-	// stopped, but previous trace logs depend on this UI -> Go -> sidecar path.
-	debugtrace.Start(debugtrace.DefaultAddr)
-	debugtrace.Record("go.startup", "", map[string]interface{}{
-		"trace_link": debugtrace.Snapshot(),
-	})
-	writeMonitorLinkSnapshot(debugtrace.Snapshot())
+	debugtrace.Record("go.startup", "", map[string]interface{}{})
 	// SEC-06: 清掉上次未正常停止的 ephemeral browser profile（冪等）。
 	_ = a.CleanupEphemeralProfiles()
 	// #7: Inject Wails context into event bus so it can emit to frontend.
@@ -3492,22 +3485,23 @@ func (a *App) replyLanguageField() string {
 	}
 	switch role {
 	case "中", "中文", "繁中", "繁體中文", "Traditional Chinese", "Chinese", "zh-TW", "zh":
-		return "語言=繁體中文（請一律以繁體中文回覆）"
+		return "語言=繁體中文（一律使用台灣繁體中文回覆，嚴禁簡體字與大陸用詞，不得切換其他語言）"
 	case "en", "英文", "English":
-		return "語言=English（always reply in English）"
+		return "語言=English（always reply in English only; never switch to Chinese or any other language）"
 	case "ja", "日文", "日本語", "Japanese":
-		return "語言=日本語（必ず日本語で返信してください）"
+		return "語言=日本語（必ず日本語のみで返信。中国語や他の言語に切り替えないこと）"
 	case "ko", "韓文", "韓語", "한국어", "Korean":
-		return "語言=한국어（항상 한국어로 답변하세요）"
+		return "語言=한국어（항상 한국어로만 답변하고, 중국어나 다른 언어로 바꾸지 마세요）"
 	case "pt", "pt-PT", "Português", "葡萄牙文":
-		return "語言=Português de Portugal（responda sempre em português）"
+		return "語言=Português de Portugal（responda sempre em português de Portugal; nunca mude para outro idioma）"
 	case "es", "Español", "西班牙文":
-		return "語言=Español（responde siempre en español）"
+		return "語言=Español（responde siempre en español; nunca cambies a otro idioma）"
 	case "th", "ไทย", "泰文":
-		return "語言=ไทย（ตอบกลับเป็นภาษาไทยเสมอ）"
+		return "語言=ไทย（ตอบกลับเป็นภาษาไทยเท่านั้น ห้ามเปลี่ยนเป็นภาษาอื่น）"
 	default:
-		// Auto / 自動 / unrecognised: mirror the user's input language.
-		return "語言=與使用者輸入語言一致"
+		// Auto / 自動 / unrecognised: mirror the user's input language, but pin
+		// Chinese to Taiwan Traditional so Simplified-trained models don't drift.
+		return "語言=與使用者輸入語言一致（若使用者使用中文，一律以台灣繁體中文回覆，嚴禁簡體字與大陸用詞）"
 	}
 }
 
@@ -4410,7 +4404,7 @@ func (a *App) ListPixelAvatarPacks() []map[string]string {
 		{"id": "wolf", "name": "狼犬獸人", "desc": "銀白毛色 · 琥珀金瞳 · 尖耳"},
 		{"id": "uncle", "name": "帥氣大叔", "desc": "黑短髮 · 淺藍灰瞳 · 金耳環"},
 		{"id": "secretary", "name": "專業秘書", "desc": "白色制服 · 藍框眼鏡 · 青春挑染"},
-		{"id": "police", "name": "規則警察", "desc": "循規蹈矩 · 嚴格說教 · 抓違規"},
+		{"id": "police", "name": "警察桂澤", "desc": "桂澤諧音 · 嚴格守序 · 抓違規"},
 		{"id": "touharu", "name": "東春巫女", "desc": "白髮馬尾 · 棕眼曬黑 · 淘氣算計"},
 	}
 }

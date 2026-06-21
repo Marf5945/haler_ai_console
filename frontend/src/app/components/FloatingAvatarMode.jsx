@@ -2,6 +2,10 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 
 const defaultAvatarSize = 64;
 const edgeGap = 12;
+const shakePreviewDelayMs = 1200;
+const shakePreviewDistance = 80;
+const shakeVomitDelayMs = 3000;
+const shakeVomitDistance = 500;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -20,6 +24,12 @@ function installRiskSummary(candidate, t) {
   return candidate?.type === 'learningrun'
     ? t('floatingAvatar.installRiskLow')
     : t('floatingAvatar.installRiskExec');
+}
+
+function randomShakePreview(options = []) {
+  const pool = (options || []).filter((item) => String(item?.text || '').trim());
+  if (pool.length === 0) return {text: '', expression: 'sad'};
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 // 後台迷你框：自然語言排程的輕量偵測，送出前在泡泡裡先確認一次。
@@ -67,6 +77,8 @@ export default function FloatingAvatarMode({
   onCancelInstall,
   draft,
   onDraftChange,
+  shakeDialogueOptions = [],
+  onShakePreview,
   onShakeTooLong,
   avatarSize = defaultAvatarSize,
 }) {
@@ -79,6 +91,7 @@ export default function FloatingAvatarMode({
   const [guideVisible, setGuideVisible] = useState(true);
   const [shakeState, setShakeState] = useState(null);
   const [shakeMessageVisible, setShakeMessageVisible] = useState(false);
+  const [shakeDialogue, setShakeDialogue] = useState('');
   const [bubbleDismissed, setBubbleDismissed] = useState(false);
   const [installArmed, setInstallArmed] = useState(false);
   const [scheduleConfirmPending, setScheduleConfirmPending] = useState(false);
@@ -86,7 +99,7 @@ export default function FloatingAvatarMode({
   const dragRef = useRef(null);
   const clickTimerRef = useRef(null);
   const shakeResetRef = useRef(null);
-  const shakeRef = useRef({startedAt: 0, lastPoint: null, distance: 0, fired: false});
+  const shakeRef = useRef({startedAt: 0, lastPoint: null, distance: 0, previewFired: false, vomitFired: false});
 
   const clampedPosition = useMemo(() => {
     const maxX = Math.max(edgeGap, window.innerWidth - avatarSize - edgeGap);
@@ -173,7 +186,7 @@ export default function FloatingAvatarMode({
   const displayLatest = pendingConfirm?.reason || latestText || statusText || t('floatingAvatar.latestIdle');
   const speakerName = persona?.name || t('floatingAvatar.agentFallback');
   const cleanLatest = String(displayLatest || '').replace(/^Ai[:：]\s*/, '');
-  const shakeMessage = shakeState === 'speechless' ? t('floatingAvatar.shakeTooLong') : '';
+  const shakeMessage = shakeDialogue || (shakeState === 'speechless' ? t('floatingAvatar.shakeTooLong') : '');
   const cleanBubbleText = String(shakeMessage || bubbleText || '').replace(/^Ai[:：]\s*/, '').trim();
   const topBubbleVisible = compactWindowMode && cleanBubbleText && (!bubbleDismissed || shakeMessageVisible);
   const topBubbleStyle = {
@@ -202,23 +215,35 @@ export default function FloatingAvatarMode({
       shake.startedAt = now;
       shake.lastPoint = {x: clientX, y: clientY};
       shake.distance = 0;
-      shake.fired = false;
+      shake.previewFired = false;
+      shake.vomitFired = false;
       return;
     }
     const last = shake.lastPoint || {x: clientX, y: clientY};
     shake.distance += Math.abs(clientX - last.x) + Math.abs(clientY - last.y);
     shake.lastPoint = {x: clientX, y: clientY};
     const elapsed = now - shake.startedAt;
-    // 搖晃中即時改表情：先暈（sad），達門檻後想吐（speechless）。
-    if (shake.distance > 240) {
+    // 搖晃中即時改表情：先暈（sad），1.2 秒後抽問候池，3 秒後進嘔吐彩蛋。
+    if (!shake.previewFired && shake.distance > 240) {
       setShakeState((prev) => (prev === 'speechless' ? prev : 'sad'));
     }
-    if (!shake.fired && elapsed >= 4000 && shake.distance > 500) {
-      shake.fired = true;
-      setShakeState('speechless');
+    if (!shake.previewFired && elapsed >= shakePreviewDelayMs && shake.distance > shakePreviewDistance) {
+      const preview = randomShakePreview(shakeDialogueOptions);
+      shake.previewFired = true;
+      setShakeState(preview.expression || 'sad');
+      setShakeDialogue(preview.text || t('floatingAvatar.shakeTooLong'));
       setBubbleDismissed(false);
       setShakeMessageVisible(true);
-      onShakeTooLong?.();
+      onShakePreview?.(preview);
+    }
+    if (!shake.vomitFired && elapsed >= shakeVomitDelayMs && shake.distance > shakeVomitDistance) {
+      const dialogue = t('floatingAvatar.shakeTooLong');
+      shake.vomitFired = true;
+      setShakeState('speechless');
+      setShakeDialogue(dialogue);
+      setBubbleDismissed(false);
+      setShakeMessageVisible(true);
+      onShakeTooLong?.(dialogue);
     }
   }
 
@@ -226,6 +251,11 @@ export default function FloatingAvatarMode({
     if (event.button !== 0) return;
     if (guideVisible) setGuideVisible(false);
     onCompactDragStart?.();
+    if (shakeResetRef.current) {
+      window.clearTimeout(shakeResetRef.current);
+      shakeResetRef.current = null;
+    }
+    setShakeDialogue('');
     dragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -237,7 +267,7 @@ export default function FloatingAvatarMode({
       moved: false,
     };
     const shakePoint = compactWindowMode ? {x: event.screenX, y: event.screenY} : {x: event.clientX, y: event.clientY};
-    shakeRef.current = {startedAt: Date.now(), lastPoint: shakePoint, distance: 0, fired: false};
+    shakeRef.current = {startedAt: Date.now(), lastPoint: shakePoint, distance: 0, previewFired: false, vomitFired: false};
     event.currentTarget.setPointerCapture?.(event.pointerId);
   }
 
@@ -273,7 +303,8 @@ export default function FloatingAvatarMode({
     shakeResetRef.current = window.setTimeout(() => {
       setShakeState(null);
       setShakeMessageVisible(false);
-      shakeRef.current = {startedAt: 0, lastPoint: null, distance: 0, fired: false};
+      setShakeDialogue('');
+      shakeRef.current = {startedAt: 0, lastPoint: null, distance: 0, previewFired: false, vomitFired: false};
       shakeResetRef.current = null;
     }, 1200);
   }

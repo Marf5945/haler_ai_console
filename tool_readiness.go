@@ -299,6 +299,64 @@ func (a *App) maybeAskForToolReadiness(sessionID string, decision toolRoutingDec
 	}
 }
 
+// ---------------------------------------------------------------------------
+// 出境前『資料充分性』驗證（egress sufficiency pass）
+// ---------------------------------------------------------------------------
+// 設計：不枚舉主題、不查關鍵字表。對「即將送出網路的 query」做一次無狀態的
+// 自問自答——讓模型逐查詢判斷「答案是否取決於使用者尚未提供的關鍵 slot」。
+//   足夠 → OK；不足 → 提問ㄌ<一句具體問題>ㄌ待命。
+// 不足時呼叫端把 Next 翻成 提問，交既有 handleJudgeClarification（自帶 TTL +
+// 次數煞車），所以天氣缺地點、星座缺星座、股價缺標的全包，新主題零修改。
+// 失效保護：judge 為 nil 或呼叫出錯一律放行（fail-open），不因模型抖動擋住搜尋。
+
+// querySufficiencyCheckPrompt 組「充分性檢查」的無狀態提示。輸入只有使用者原句
+// 與即將出境的 query，不挾帶對話狀態，符合『模型無狀態、每次重新判斷』。
+func querySufficiencyCheckPrompt(userText, query string) string {
+	sep := actionchain.Separator
+	return strings.Join([]string{
+		"你是送出網路查詢前的『資料充分性』把關。只判斷一件事：這個查詢要得到對使用者有用的答案，是否取決於使用者『尚未提供』的關鍵資訊（例如地點、日期或時間、對象身分、標的、單位等）。",
+		"足夠回答 → 只輸出：OK",
+		"關鍵資訊不足 → 只輸出：提問" + sep + "<一句具體、好回答的問題>" + sep + "待命",
+		"規則：只問會改變結果的關鍵資訊；能直接查就輸出 OK，不要為了問而問；不要解釋、不要輸出多行。",
+		"使用者原句：" + strings.TrimSpace(userText),
+		"即將送出的查詢：" + strings.TrimSpace(query),
+	}, "\n")
+}
+
+// assessQuerySufficiency 跑出境充分性驗證。回 (問句, true) 代表資料不足、需反問；
+// 回 ("", false) 代表足夠或無法判斷（放行）。judge 是無狀態的一次性模型呼叫。
+func (a *App) assessQuerySufficiency(decision toolRoutingDecision, userText string, judge searchRerouteJudge, traceID string) (string, bool) {
+	if a == nil || judge == nil {
+		return "", false
+	}
+	query := strings.TrimSpace(decision.Target)
+	if query == "" {
+		return "", false
+	}
+	out, err := judge(querySufficiencyCheckPrompt(userText, query))
+	if err != nil {
+		// fail-open：模型出錯不擋搜尋，只記錄供 monitor 觀察。
+		debugtrace.Record("tool_readiness.sufficiency_error", traceID, map[string]interface{}{
+			"query": query,
+			"error": err.Error(),
+		})
+		return "", false
+	}
+	parsed := parseToolRoutingDecision(out)
+	question := strings.TrimSpace(parsed.Target)
+	insufficient := parsed.Action == "提問" && question != ""
+	debugtrace.Record("tool_readiness.sufficiency", traceID, map[string]interface{}{
+		"query":        query,
+		"raw":          strings.TrimSpace(out),
+		"insufficient": insufficient,
+		"question":     question,
+	})
+	if insufficient {
+		return question, true
+	}
+	return "", false
+}
+
 // assessToolReadiness 只在 judge 明確標記此工具動作 next=提問 時才產生問句；
 // 不再用關鍵字表臆測缺漏（移除了「預報→地點」這類誤判的根源）。
 func (a *App) assessToolReadiness(decision toolRoutingDecision, userText string) (toolReadinessQuestion, bool) {

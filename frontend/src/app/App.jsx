@@ -371,7 +371,7 @@ const taskProgressDebugEnabled = typeof window !== 'undefined'
     || window.localStorage?.getItem('task_progress_debug') === '1');
 
 const MAIN_WINDOW_MIN_SIZE = {width: 1180, height: 560};
-const FLOATING_AVATAR_SIZE = 160;
+const FLOATING_AVATAR_SIZE = 80;
 const FLOATING_AVATAR_INSET = 16;
 const FLOATING_AVATAR_WINDOW_SIZE = FLOATING_AVATAR_SIZE + FLOATING_AVATAR_INSET * 2;
 // 後台頭像單擊展開迷你框時，需要把頭像浮窗放大到能容納面板的尺寸。
@@ -7316,6 +7316,7 @@ function App() {
         statusRail: localizedStatusRail || prev.statusRail,
       };
     });
+    setSettingsState((prev) => normalizeSettingsState(prev));
   }, [_i18nLang]);
 
   function handleGlobalFileDragOver(event) {
@@ -7638,9 +7639,13 @@ function App() {
         onCancelInstall={() => setInstallCandidate(null)}
         draft={floatingAvatarDraft}
         onDraftChange={updateFloatingAvatarDraft}
-        onShakeTooLong={() => {
+        shakeDialogueOptions={getGreetingRotationOptions(personaGreetingVariant(floatingPersona))}
+        onShakePreview={(preview) => {
+          if (preview?.expression) setManualAvatarState(preview.expression);
+        }}
+        onShakeTooLong={(dialogue) => {
           setManualAvatarState('speechless');
-          setToolResult({toolId: 'scheduler', ok: false, message: t('floatingAvatar.shakeTooLong')});
+          setToolResult({toolId: 'scheduler', ok: false, message: dialogue || t('floatingAvatar.shakeTooLong')});
         }}
       />
       {/* v2.4: 首次啟動引導覆蓋層 */}
@@ -9827,16 +9832,71 @@ function normalizeLockedPersonas(personas = [], removedDefaultPersonaIds = []) {
   // "憂樂傻酷" is a reserved persona identity, not a reserved slot. Keep its
   // name stable while preserving whatever ordering the user chose, because the
   // app treats the first card as the current main persona.
-  const normalized = personas.map((persona) => (
-    persona.id === lockedPersonaId
-      ? {...persona, name: lockedPersonaName, identity: persona.identity || _t('persona.defaultIdentityA')}
-      : persona
-  ));
+  const normalized = personas.map((persona) => {
+    if (persona.id === lockedPersonaId) {
+      return {...persona, name: lockedPersonaName, identity: persona.identity || _t('persona.defaultIdentityA')};
+    }
+    return normalizeBuiltInPersonaCopy(persona);
+  });
   const lockedIndex = normalized.findIndex((persona) => persona.id === lockedPersonaId);
   if (lockedIndex < 0) {
     return appendMissingDefaultPersonas([fallbackSettings.personas[0], ...normalized], removedDefaultPersonaIds);
   }
   return appendMissingDefaultPersonas(normalized, removedDefaultPersonaIds);
+}
+
+const defaultPersonaCopy = {
+  'persona-d': {
+    name: () => _t('persona.defaultNameD'),
+    identity: () => _t('persona.defaultIdentityD'),
+    personality: () => _t('persona.defaultPersonalityD'),
+    legacyNames: ['人格 D', '規則警察', '警察桂澤', 'Rule Police', 'Officer Reggie Law', 'Agente Reglaz', 'Agente Regraldo', '木曽久巡査', '규식 순경', 'ผู้หมวดกฎเก่ง'],
+    legacyIdentities: [
+      '循規蹈矩、嚴格守序、看到違規就會說教的警察助手',
+      '循規蹈矩的警察助手；「桂澤」聽起來像規則，看到流程被跳過就會立刻吹哨。',
+      'A strict rule-following police assistant who lectures when rules are bent',
+      'Rules-first police assistant who lectures when rules are bent',
+    ],
+    legacyPersonalities: [
+      '重視規則、流程與安全，回答會先提醒限制與責任，語氣像警察一樣嚴肅但可靠。',
+      '把規則、流程與安全放第一，回答會先提醒限制、責任與風險；嚴肅但可靠，說教時也有一點冷面幽默。',
+      'Prioritizes rules, process, and safety. Replies first with constraints and responsibility, stern like a police officer but reliable.',
+    ],
+  },
+  'persona-e': {
+    name: () => _t('persona.defaultNameE'),
+    identity: () => _t('persona.defaultIdentityE'),
+    personality: () => _t('persona.defaultPersonalityE'),
+    legacyNames: ['東春巫女', 'Touharu Miko', 'Miko Touharu', '東春の巫女', '동춘 무녀', 'มิโกะโทฮารุ'],
+    legacyIdentities: [
+      '白髮馬尾、棕眼曬黑、直覺敏銳的巫女助手',
+      '白髮馬尾、棕眼曬黑、直覺敏銳的東春巫女助手',
+      'A tan white-ponytailed miko assistant with sharp intuition',
+      'Tan-skinned white-ponytailed miko assistant with sharp intuition',
+    ],
+    legacyPersonalities: [
+      '傲嬌、淘氣又直覺敏銳，嘴上不饒人，但能很快察覺問題不對勁。',
+      '傲嬌又淘氣，嘴上不饒人，但能很快察覺問題不對勁，像春雷一樣先提醒你。',
+      'Tsundere and mischievous, with quick instincts and a habit of noticing when something feels off.',
+      'Tsundere and mischievous, but highly intuitive and quick to sense when something is wrong.',
+    ],
+  },
+};
+
+function isLegacyDefaultCopy(value, legacyValues = []) {
+  const text = String(value || '').trim();
+  return text === '' || legacyValues.includes(text);
+}
+
+function normalizeBuiltInPersonaCopy(persona = {}) {
+  const copy = defaultPersonaCopy[persona.id];
+  if (!copy) return persona;
+  return {
+    ...persona,
+    name: isLegacyDefaultCopy(persona.name, copy.legacyNames) ? copy.name() : persona.name,
+    identity: isLegacyDefaultCopy(persona.identity, copy.legacyIdentities) ? copy.identity() : persona.identity,
+    personality: isLegacyDefaultCopy(persona.personality, copy.legacyPersonalities) ? copy.personality() : persona.personality,
+  };
 }
 
 function appendMissingDefaultPersonas(personas = [], removedDefaultPersonaIds = []) {

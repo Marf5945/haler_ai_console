@@ -130,6 +130,10 @@ TASKS*.md
 *DECISIONS*.md
 *Spec_Draft.md
 REFACTOR*.md
+ARCHITECTURE_*.md
+FONT_SPEC.md
+test_dialogues*.md
+_install_*/
 
 # === Python cache artifacts ===
 __pycache__/

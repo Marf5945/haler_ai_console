@@ -1,6 +1,7 @@
 import React from 'react';
 import MessageText from './MessageText';
 import { tForLanguage } from '../../locales/useI18n';
+import FloatingPreviewPopover from '../../app/components/FloatingPreviewPopover';
 
 export default function MessageRow({
   message,
@@ -31,25 +32,9 @@ export default function MessageRow({
     [message, previousMessage, tChat],
   );
 
-  // 詳情 popover：點卡片浮出「網址＋擷取內容」，Esc 或點外關閉。
+  // 詳情 popover：點卡片浮出「網址＋擷取內容」，關閉行為交給共用外殼。
   const [searchSummaryOpen, setSearchSummaryOpen] = React.useState(false);
   const searchSummaryRef = React.useRef(null);
-
-  React.useEffect(() => {
-    if (!searchSummaryOpen) return undefined;
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') setSearchSummaryOpen(false);
-    };
-    const onPointerDown = (event) => {
-      if (!searchSummaryRef.current?.contains(event.target)) setSearchSummaryOpen(false);
-    };
-    document.addEventListener('keydown', onKeyDown);
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      document.removeEventListener('pointerdown', onPointerDown);
-    };
-  }, [searchSummaryOpen]);
 
   function startSearchSummaryExport(event) {
     event?.stopPropagation?.();
@@ -99,12 +84,17 @@ export default function MessageRow({
             </span>
             <span className="search-summary-count">{searchSummary.countLabel}</span>
           </div>
-          {searchSummaryOpen && (
-            <div className="search-summary-popover" role="dialog" aria-label={tChat('chatSystem.searchDetails')}>
-              <strong className="search-summary-popover-title">{searchSummary.filename}</strong>
+          <FloatingPreviewPopover
+            open={searchSummaryOpen}
+            boundaryRef={searchSummaryRef}
+            className="search-summary-popover"
+            titleClassName="search-summary-popover-title"
+            title={searchSummary.filename}
+            ariaLabel={tChat('chatSystem.searchDetails')}
+            onClose={() => setSearchSummaryOpen(false)}
+          >
               <pre className="search-summary-md-preview">{searchSummary.markdown}</pre>
-            </div>
-          )}
+          </FloatingPreviewPopover>
         </div>
       ) : (
         <div className="message-text" data-message-id={domMessageId || `m_${index}`}>

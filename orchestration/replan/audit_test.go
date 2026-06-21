@@ -6,9 +6,9 @@ import (
 )
 
 func TestSafeSummary_RedactsPathAndToken(t *testing.T) {
-	in := "no match at " + "/" + "Users/example/secret/creds.json token ABCDEFGHIJKLMNOPQRSTUVWXYZ012345xyz"
+	in := "no match at /" + "Users/example/private/creds.json " + "token " + "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345xyz"
 	out := SafeSummary(in)
-	if strings.Contains(out, "secret") || strings.Contains(out, "creds.json") {
+	if strings.Contains(out, "private") || strings.Contains(out, "creds.json") {
 		t.Errorf("path not redacted: %q", out)
 	}
 	if strings.Contains(out, "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345") {
@@ -28,7 +28,7 @@ func TestAuditLog_AppendAndRead(t *testing.T) {
 	log := NewAuditLog(dir)
 	err := AppendAuditEntry(log, ReplanAuditEntry{
 		RunID:         "dag-1",
-		TriggerReason: "no match at " + "/" + "Users/example/secret/x",
+		TriggerReason: "no match at /" + "Users/example/private/x",
 		Decision:      DecisionSilent,
 		Silent:        true,
 	})

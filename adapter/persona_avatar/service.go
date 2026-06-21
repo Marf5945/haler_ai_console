@@ -72,13 +72,17 @@ func (s *Service) defaultConfig(personaID string) AvatarConfig {
 }
 
 // DefaultPixelPack keeps the built-in personas visually stable: A is the
-// wolfdog brand, B is the uncle, and C is the secretary.
+// wolfdog brand, B is the uncle, C is the secretary, D is rule police, and E is Touharu.
 func DefaultPixelPack(personaID string) string {
 	switch personaID {
 	case "persona-b":
 		return "uncle"
 	case "persona-c":
 		return "secretary"
+	case "persona-d":
+		return "police"
+	case "persona-e":
+		return "touharu"
 	default:
 		return "wolf"
 	}
@@ -86,7 +90,7 @@ func DefaultPixelPack(personaID string) string {
 
 func NormalizePixelPack(personaID, pack string) string {
 	switch pack {
-	case "wolf", "uncle", "secretary":
+	case "wolf", "uncle", "secretary", "police", "touharu":
 		return pack
 	default:
 		return DefaultPixelPack(personaID)

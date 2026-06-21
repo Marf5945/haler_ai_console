@@ -10,6 +10,7 @@ import {
 import {callWails} from '../../lib/callWails';
 import ToolFlowSectionLabel from './ToolFlowSectionLabel';
 import DragActionModal from './DragActionModal';
+import {openGoProgramSourcePreview} from './GoCodePreviewDock';
 
 const goProgramDagStepCatalog = [
   {
@@ -228,8 +229,13 @@ export default function GoProgramAuthoringCatalogList({showLabel = true}) {
                 <span>資料來源</span><strong>{summarizeGoProgramDataSources(selectedSources)}</strong>
               </div>
             </div>
-            <div className="tool-drag-actions" style={{gridTemplateColumns: 'repeat(2, minmax(0, 1fr))'}}>
+            <div className="tool-drag-actions" style={{gridTemplateColumns: 'repeat(3, minmax(0, 1fr))'}}>
               <button type="button" onClick={(event) => startNativeExport(event, selected)}>拖出</button>
+              <button
+                type="button"
+                disabled={!selected.attempt_count}
+                onClick={() => openGoProgramSourcePreview(selected.run_id)}
+              >查看程式碼</button>
               <button type="button" onClick={() => setDetail(null)}>關閉</button>
             </div>
           </section>

@@ -187,6 +187,8 @@ export function EnqueueSystemMark(arg1:string,arg2:string):Promise<void>;
 
 export function EnterDegradedMode(arg1:string):Promise<any>;
 
+export function EnterFloatingAvatarNative():Promise<void>;
+
 export function EscapeExternalTokens(arg1:string):Promise<string>;
 
 export function ExecuteNativeLearningReplayStep(arg1:string):Promise<any>;
@@ -196,6 +198,8 @@ export function ExecuteResolvedSkill(arg1:string,arg2:string):Promise<main.Skill
 export function ExecuteSkillMessage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<main.SkillExecutionDecision>;
 
 export function ExitDegradedMode():Promise<any>;
+
+export function ExitFloatingAvatarNative():Promise<void>;
 
 export function ExportDocumentToPath(arg1:string):Promise<string>;
 
@@ -264,6 +268,8 @@ export function GetDeviceTrustProfile(arg1:string):Promise<any>;
 export function GetEmbeddingConfig():Promise<settings.EmbeddingConfig>;
 
 export function GetGoProgramAuthoringDetail(arg1:string):Promise<main.GoProgramAuthoringDetail>;
+
+export function GetGoProgramAuthoringSourcePreview(arg1:string):Promise<main.GoProgramSourcePreview>;
 
 export function GetHighImpactDomains():Promise<Array<string>>;
 

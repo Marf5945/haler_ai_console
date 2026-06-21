@@ -52,7 +52,7 @@ export function defaultWebSearchProviderOptions() {
   ];
 }
 
-// Tool tab routing -------------------------------------------------------- 
+// Tool tab routing --------------------------------------------------------
 
 const toolTabById = {
   'external-link': 'external',
@@ -81,7 +81,7 @@ export function toolTabFor(tool = {}) {
   return 'package';
 }
 
-// DAG status label -------------------------------------------------------- 
+// DAG status label --------------------------------------------------------
 export function dagStatusLabel(status) {
   const labels = {
     starting: _t('dag.starting'),

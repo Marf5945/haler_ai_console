@@ -1,11 +1,14 @@
 import React from 'react';
 import {RegisterURLOccurrence} from '../../../wailsjs/go/main/App';
 import { tForLanguage } from '../../locales/useI18n';
+import {openGoProgramSourcePreview} from '../../app/components/GoCodePreviewDock';
 
 // SEC-06: 訊息內 URL 偵測（與後端 urlInTextRe 對齊）。
 const MESSAGE_URL_RE = /https?:\/\/[^\s'"<>）)】\]]+/g;
 const MEMORY_TAG_RE = /\[?([SD]-\d+)(?::[^\]]*)?\]?/g;
 const MEMORY_TAG_ONLY_RE = /^\[?([SD]-\d+)(?::[^\]]*)?\]?$/;
+const GO_PROGRAM_TOKEN_RE = /\[\[go-program:([^\]]+)\]\]/g;
+const GO_PROGRAM_TOKEN_ONLY_RE = /^\[\[go-program:([^\]]+)\]\]$/;
 const COLLAPSE_LINE_LIMIT = 3;
 const COLLAPSE_CHAR_LIMIT = 520;
 
@@ -72,15 +75,33 @@ export default function MessageText({text, kind, onInjectText, sessionId, chatLo
 }
 
 function renderRichText(text, {kind, onInjectText, tChat}) {
-  if (!new RegExp(MESSAGE_URL_RE.source).test(text) && !new RegExp(MEMORY_TAG_RE.source).test(text)) return <>{text}</>;
-  const tokenRe = new RegExp(`${MESSAGE_URL_RE.source}|${MEMORY_TAG_RE.source}`, 'g');
+  if (
+    !new RegExp(MESSAGE_URL_RE.source).test(text) &&
+    !new RegExp(MEMORY_TAG_RE.source).test(text) &&
+    !new RegExp(GO_PROGRAM_TOKEN_RE.source).test(text)
+  ) return <>{text}</>;
+  const tokenRe = new RegExp(`${GO_PROGRAM_TOKEN_RE.source}|${MESSAGE_URL_RE.source}|${MEMORY_TAG_RE.source}`, 'g');
   const nodes = [];
   let lastIndex = 0;
   for (const match of text.matchAll(tokenRe)) {
     if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
     const raw = match[0];
+    const runID = raw.match(GO_PROGRAM_TOKEN_ONLY_RE)?.[1];
     const tag = raw.match(MEMORY_TAG_ONLY_RE)?.[1];
-    if (tag) {
+    if (runID) {
+      nodes.push(
+        <span className="go-program-token" key={`go-program-${match.index}-${runID}`}>
+          <button
+            type="button"
+            className="go-program-token-btn"
+            onClick={(event) => {
+              event.stopPropagation();
+              openGoProgramSourcePreview(runID);
+            }}
+          >查看 Go 程式</button>
+        </span>
+      );
+    } else if (tag) {
       nodes.push(
         <span className="memory-tag-token" key={`mem-${match.index}-${tag}`}>
           <code>{raw}</code>

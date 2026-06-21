@@ -72,9 +72,11 @@ HaLer for AI Console 是一個本機優先的 AI 工作台，將多種 LLM 介�
 - **文件、引用與搜尋**：支援拖放匯入文件、建立本機文件庫、TF-IDF / Ollama embedding 檢索、Reference prompt context、URL provenance、local search 與可設定的 web search provider。
 - **內建資料工具**：提供 CSV / JSON / Office 文件讀寫能力，並包含零第三方依賴的 xlsx 產生路徑與電料 BOM 產出技能範例。
 - **Visual Learning**：包含螢幕/影像元素偵測、OCR、按鈕候選、元素字典、動作候選與 dry-run 信心計算；YOLOX 模型為選配，缺少時會回退到 OpenCV shape/text 偵測。
+- **多模態影像輔助**：支援聊天附圖、CLI adapter 圖片暫存直送，以及本地 vision organ 將影像整理成文字描述後再進入對話流程。
+- **Go 程式碼預覽**：Go Program Authoring 可在聊天入口與右側面板預覽候選程式，方便比對、審核與保存。
 - **Remote Bridge**：可設定 Telegram、Discord、LINE、Teams、QQ 或 custom webhook channel，支援遠端送出、審核回覆、分段 dispatch 與 audit。
 - **安全治理**：包含 OS-backed credential store、source trust allowlist、LLM context 過濾、Controlled Trust、draft sandbox、package import review、W3A media provenance 與模型污染風險檢查。
-- **個人化工作區**：支援 persona / avatar、主對話與 subagent 匯出、排程任務、Status Rail、語音設定與多語系 UI。
+- **個人化工作區**：支援 persona / avatar、主對話與 subagent 匯出、排程任務、Status Rail、語音設定、多語系 UI 與後台浮動頭像任務模式。
 
 ## Encoding Policy
 
@@ -103,9 +105,11 @@ HaLer for AI Console is a local-first AI workbench that brings LLM adapters, doc
 - **Documents, references, and search**: imports dropped documents, maintains a local document store, supports TF-IDF / Ollama embedding retrieval, builds reference prompt context, records URL provenance, and offers local search plus configurable web search providers.
 - **Built-in data tools**: includes CSV / JSON / Office document readers and writers, a zero-third-party xlsx generation path, and an electrical-material BOM skill example.
 - **Visual Learning**: provides screen/image element detection, OCR, button candidates, an element dictionary, action candidates, and dry-run confidence scoring; the optional YOLOX model falls back to OpenCV shape/text detection when unavailable.
+- **Multimodal image assistance**: supports chat image attachments, CLI adapter image staging, and a local vision organ that turns images into text context when needed.
+- **Go code preview**: Go Program Authoring can show candidate programs from the chat flow and the side dock for review before saving or execution.
 - **Remote Bridge**: configures Telegram, Discord, LINE, Teams, QQ, or custom webhook channels for remote submission, review replies, segmented dispatch, and audit trails.
 - **Safety and governance**: includes OS-backed credential storage, source-trust allowlists, LLM context filtering, Controlled Trust, draft sandboxing, package import review, W3A media provenance, and model-pollution risk checks.
-- **Personal workspace**: supports personas and avatars, main-chat and subagent export, scheduled jobs, Status Rail, voice settings, and multilingual UI.
+- **Personal workspace**: supports personas and avatars, main-chat and subagent export, scheduled jobs, Status Rail, voice settings, multilingual UI, and a floating avatar task mode.
 
 ## For Users
 

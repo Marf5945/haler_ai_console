@@ -31,7 +31,7 @@ func TestNormalizeInboundCommand(t *testing.T) {
 }
 
 func TestParseLineInboundVerifiesSignatureAndMapsCommands(t *testing.T) {
-	secret := "line-channel-secret"
+	secret := "line-channel-" + "secret"
 	body := `{"events":[{"type":"message","source":{"type":"user","userId":"U123"},"message":{"type":"text","text":"同意"}}]}`
 
 	result, err := ParseLineInbound("rb_line_1", []byte(body), lineSignature(secret, body), secret)

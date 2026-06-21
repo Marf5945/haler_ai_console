@@ -1042,6 +1042,68 @@ export namespace main {
 	        this.pending_skill_id = source["pending_skill_id"];
 	    }
 	}
+	export class GoProgramSourceFile {
+	    path: string;
+	    language: string;
+	    content?: string;
+	    size_bytes?: number;
+	    error?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new GoProgramSourceFile(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.language = source["language"];
+	        this.content = source["content"];
+	        this.size_bytes = source["size_bytes"];
+	        this.error = source["error"];
+	    }
+	}
+	export class GoProgramSourcePreview {
+	    run_id: string;
+	    program_id: string;
+	    program_name: string;
+	    status: string;
+	    attempt: number;
+	    attempt_hash?: string;
+	    files: GoProgramSourceFile[];
+
+	    static createFrom(source: any = {}) {
+	        return new GoProgramSourcePreview(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.run_id = source["run_id"];
+	        this.program_id = source["program_id"];
+	        this.program_name = source["program_name"];
+	        this.status = source["status"];
+	        this.attempt = source["attempt"];
+	        this.attempt_hash = source["attempt_hash"];
+	        this.files = this.convertValues(source["files"], GoProgramSourceFile);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class HookGeneReviewSummary {
 	    skill_id: string;
 	    complete_samples: number;
@@ -2424,6 +2486,7 @@ export namespace settings {
 	    controlSeal: controlseal.Settings;
 	    adapterModelChoices?: Record<string, string>;
 	    embeddingConfig?: EmbeddingConfig;
+	    removedDefaultPersonaIds?: string[];
 
 	    static createFrom(source: any = {}) {
 	        return new State(source);
@@ -2438,6 +2501,7 @@ export namespace settings {
 	        this.controlSeal = this.convertValues(source["controlSeal"], controlseal.Settings);
 	        this.adapterModelChoices = source["adapterModelChoices"];
 	        this.embeddingConfig = this.convertValues(source["embeddingConfig"], EmbeddingConfig);
+	        this.removedDefaultPersonaIds = source["removedDefaultPersonaIds"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

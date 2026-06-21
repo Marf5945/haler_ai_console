@@ -1750,10 +1750,42 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 		}
 	}
 
-	// CLI inline 讀圖是各 CLI 自家介面；先附上誠實提示讓圖片不被靜默吞掉，
-	// 待接該 CLI 的 image flag 時改 cliImageNotice / 此處編碼即可。
-	if notice := cliImageNotice(stagedImages); notice != "" {
-		userText += notice
+	// 本回合附圖（CLI 路徑）：CLI 大腦目前都還沒有「直送圖」介面，所以一律先讓
+	// 本地「視覺器官」（Qwen2.5-VL on Ollama）把圖轉成結構化中文描述再注入 prompt，
+	// 大腦是誰都能間接看圖。器官不可用（未 pull / 未啟動 / 逾時）才退回誠實提示，
+	// 圖片不被靜默吞掉。多模態 CLI 的原生直送圖為後續工作（見 brainIsMultimodal）。
+	if len(stagedImages) > 0 {
+		// 1) 多模態且支援「prompt 引用檔案路徑」的 CLI（claude / gemini）→ 直送圖：
+		//    把圖落地到隔離暫存資料夾、於 prompt 內引用，cleanup 由 defer 在 CLI 跑完後刪。
+		//    先確認大腦多模態，再落地，避免 stage 後不用而殘留暫存檔。
+		var directSuffix string
+		var directCleanup func()
+		directOK := false
+		if brainIsMultimodal(adapterID, modelOverride) {
+			directSuffix, directCleanup, directOK = stageCLIImagesIfSupported(adapterID, sessionID, stagedImages)
+		}
+		if directOK {
+			defer directCleanup()
+			userText += directSuffix
+			debugtrace.Record("go.SendCLIMessage.cli_image.direct", traceID, map[string]interface{}{
+				"adapter_id": adapterID,
+				"images":     len(stagedImages),
+			})
+		} else if desc, err := describeImages(a.ctx, userText, stagedImages); err == nil {
+			// 2) 其餘大腦（純文字 CLI / 不支援直送）→ 走本地視覺器官轉文字注入。
+			userText += visionOrganInjection(desc)
+			debugtrace.Record("go.SendCLIMessage.vision_organ.ok", traceID, map[string]interface{}{
+				"images":   len(stagedImages),
+				"desc_len": len(desc),
+			})
+		} else {
+			// 3) 器官也不可用 → 誠實提示，圖片不被靜默吞掉。
+			userText += cliImageNotice(stagedImages)
+			debugtrace.Record("go.SendCLIMessage.vision_organ.fallback", traceID, map[string]interface{}{
+				"images": len(stagedImages),
+				"error":  err.Error(),
+			})
+		}
 	}
 
 	// 從 adapter_registry 解析 CLI 的實際執行檔路徑。
@@ -2320,6 +2352,23 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 	client := urlsafe.NewSafeClient(urlsafe.PolicyForLLMEndpoint(cfg.ProviderID, cfg.BaseURL), "llm_chat", 45*time.Second)
 	// 本回合若有附圖（API 路徑）：消費暫存圖片，於 buildOpenAIRequestBody 內以 base64 內嵌，不落地。
 	stagedImages := takeSessionImages(sessionID)
+	// 多模態大腦直送圖（既有行為）；但純文字 API 模型會對 image_url 回 400，
+	// 因此先讓本地視覺器官把圖轉成文字注入 userText，再清空 stagedImages 走純文字請求。
+	if len(stagedImages) > 0 && !brainIsMultimodal(adapterID, model) {
+		if desc, derr := describeImages(ctx, userText, stagedImages); derr == nil {
+			userText += visionOrganInjection(desc)
+			debugtrace.Record("go.SendAPIMessage.vision_organ.ok", traceID, map[string]interface{}{
+				"images":   len(stagedImages),
+				"desc_len": len(desc),
+			})
+			stagedImages = nil
+		} else {
+			debugtrace.Record("go.SendAPIMessage.vision_organ.fallback", traceID, map[string]interface{}{
+				"images": len(stagedImages),
+				"error":  derr.Error(),
+			})
+		}
+	}
 	doRequest := func(prompt string) (*http.Response, error) {
 		body, err := buildOpenAIRequestBody(model, prompt, stagedImages)
 		if err != nil {
@@ -4292,8 +4341,8 @@ func (a *App) GetAvatarStateTrigger(taskStatus, riskLevel string) string {
 	return string(persona_avatar.GetStateTrigger(taskStatus, riskLevel))
 }
 
-// RenderPixelAvatar 渲染指定狀態的 pixel art 頭像 PNG。
-// 根據目前選擇的 pixel pack（wolf / uncle / secretary）渲染對應的頭像。
+// RenderPixelAvatar 渲染指定狀態的內建頭像 PNG。
+// 前端 bundled pack 優先使用靜態資源，這裡保留 Go renderer fallback。
 func (a *App) RenderPixelAvatar(state string, size int) ([]byte, error) {
 	pack := a.GetPixelAvatarPack()
 	return a.renderPixelAvatarPack(pack, state, size)
@@ -4301,7 +4350,7 @@ func (a *App) RenderPixelAvatar(state string, size int) ([]byte, error) {
 
 // RenderPixelAvatarPreview 渲染指定 pack 的預覽，不改變目前使用者選擇。
 func (a *App) RenderPixelAvatarPreview(pack string, state string, size int) ([]byte, error) {
-	if pack != "wolf" && pack != "uncle" && pack != "secretary" {
+	if pack != "wolf" && pack != "uncle" && pack != "secretary" && pack != "police" && pack != "touharu" {
 		return nil, fmt.Errorf("unknown pixel pack: %s", pack)
 	}
 	return a.renderPixelAvatarPack(pack, state, size)
@@ -4315,12 +4364,14 @@ func (a *App) renderPixelAvatarPack(pack string, state string, size int) ([]byte
 		return persona_avatar.RenderUnclePixelAvatar(trigger, size)
 	case "secretary":
 		return persona_avatar.RenderSecretaryPixelAvatar(trigger, size)
+	case "police", "touharu":
+		return nil, fmt.Errorf("%s avatar pack is bundled in the frontend", pack)
 	default:
 		return persona_avatar.RenderPixelAvatar(trigger, size)
 	}
 }
 
-// GetPixelAvatarPack 取得目前選擇的 pixel avatar 套件（wolf / uncle / secretary）。
+// GetPixelAvatarPack 取得目前選擇的 pixel avatar 套件。
 func (a *App) GetPixelAvatarPack() string {
 	packFile := filepath.Join(appDataRoot(), "data", "cache", "pixel_pack.txt")
 	data, err := os.ReadFile(packFile)
@@ -4329,16 +4380,16 @@ func (a *App) GetPixelAvatarPack() string {
 	}
 	pack := strings.TrimSpace(string(data))
 	switch pack {
-	case "uncle", "secretary":
+	case "uncle", "secretary", "police", "touharu":
 		return pack
 	default:
 		return "wolf"
 	}
 }
 
-// SetPixelAvatarPack 切換 pixel avatar 套件（wolf / uncle / secretary）。
+// SetPixelAvatarPack 切換 pixel avatar 套件。
 func (a *App) SetPixelAvatarPack(pack string) error {
-	if pack != "wolf" && pack != "uncle" && pack != "secretary" {
+	if pack != "wolf" && pack != "uncle" && pack != "secretary" && pack != "police" && pack != "touharu" {
 		return fmt.Errorf("unknown pixel pack: %s", pack)
 	}
 	cacheDir := filepath.Join(appDataRoot(), "data", "cache")
@@ -4358,7 +4409,9 @@ func (a *App) ListPixelAvatarPacks() []map[string]string {
 	return []map[string]string{
 		{"id": "wolf", "name": "狼犬獸人", "desc": "銀白毛色 · 琥珀金瞳 · 尖耳"},
 		{"id": "uncle", "name": "帥氣大叔", "desc": "黑短髮 · 淺藍灰瞳 · 金耳環"},
-		{"id": "secretary", "name": "可愛秘書", "desc": "巧克力棕髮 · 藍框眼鏡 · 紅蝴蝶結"},
+		{"id": "secretary", "name": "專業秘書", "desc": "白色制服 · 藍框眼鏡 · 青春挑染"},
+		{"id": "police", "name": "規則警察", "desc": "循規蹈矩 · 嚴格說教 · 抓違規"},
+		{"id": "touharu", "name": "東春巫女", "desc": "白髮馬尾 · 棕眼曬黑 · 淘氣算計"},
 	}
 }
 

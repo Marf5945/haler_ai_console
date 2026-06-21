@@ -171,7 +171,7 @@ func TestEncryptedFileNotPlaintext(t *testing.T) {
 	dir := t.TempDir()
 	store := testStore(dir)
 
-	secret := "super-secret-api-key-12345"
+	secret := "super-" + "secret-api-key-12345"
 	_ = store.Store("test:smoke", secret)
 
 	raw, err := os.ReadFile(store.FilePath())

@@ -64,7 +64,7 @@ func (a *App) routingReplyLanguageRule() string {
 	case responseLanguageKO:
 		return "回答內容請使用한국어"
 	default:
-		return "回答內容請使用繁體中文"
+		return "回答內容請使用台灣繁體中文，嚴禁簡體字與大陸用詞"
 	}
 }
 

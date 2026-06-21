@@ -4703,6 +4703,9 @@
     pointer-events: none;
     -webkit-user-drag: none;
     user-select: none;
+    /* Dissolve the flat bottom edge of bust artwork into the card background. */
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%);
   }
 
   .settings-persona-card strong {
@@ -4777,7 +4780,10 @@
   }
 
   .settings-avatar-preview img {
-    @apply h-full w-full object-cover;
+    @apply block h-full w-full object-cover;
+    /* Same soft bottom fade so the thumbnail bust doesn't cut off abruptly. */
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%);
   }
 
   .settings-avatar-preview span {

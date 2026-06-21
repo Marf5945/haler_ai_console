@@ -5,7 +5,7 @@
 ## 啟動
 
 ```bash
-cd ~/Desktop/yolo_adjust
+cd tools/yolo_adjust
 python3 yolo_adjust_app.py
 ```
 
@@ -28,7 +28,7 @@ python3 yolo_adjust_app.py
 ## 輸出位置
 
 ```text
-~/Desktop/yolo_adjust/dataset/
+tools/yolo_adjust/dataset/
   images/train/page_001.png
   labels/train/page_001.txt
   meta/page_001.dom_candidates.json

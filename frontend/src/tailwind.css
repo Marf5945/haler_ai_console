@@ -270,10 +270,6 @@
     transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
     transition-duration: var(--tw-duration, var(--default-transition-duration));
   }
-  .ease-in-out {
-    --tw-ease: var(--ease-in-out);
-    transition-timing-function: var(--ease-in-out);
-  }
 }
 @layer base {
   html, body, #root {
@@ -6363,6 +6359,8 @@
     pointer-events: none;
     -webkit-user-drag: none;
     user-select: none;
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%);
   }
   .settings-persona-card strong {
     position: absolute;
@@ -6540,9 +6538,12 @@
     cursor: default;
   }
   .settings-avatar-preview img {
+    display: block;
     height: 100%;
     width: 100%;
     object-fit: cover;
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%);
   }
   .settings-avatar-preview span {
     position: absolute;
@@ -12154,10 +12155,6 @@
   syntax: "*";
   inherits: false;
 }
-@property --tw-ease {
-  syntax: "*";
-  inherits: false;
-}
 @property --tw-shadow {
   syntax: "*";
   inherits: false;
@@ -12273,7 +12270,6 @@
       --tw-drop-shadow-color: initial;
       --tw-drop-shadow-alpha: 100%;
       --tw-drop-shadow-size: initial;
-      --tw-ease: initial;
       --tw-shadow: 0 0 #0000;
       --tw-shadow-color: initial;
       --tw-shadow-alpha: 100%;

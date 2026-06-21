@@ -21,10 +21,10 @@ import (
 const winAvatarWindowTitle = "HaLer AI Console"
 
 const (
-	gwlStyle  = ^uintptr(15) // -16
-	wsPopup   = uintptr(0x80000000)
-	wsVisible = uintptr(0x10000000)
-	wsOverlap = uintptr(0x00CF0000) // WS_OVERLAPPEDWINDOW
+	gwlStyle   = ^uintptr(15) // -16
+	wsPopup    = uintptr(0x80000000)
+	wsVisible  = uintptr(0x10000000)
+	wsOverlap  = uintptr(0x00CF0000) // WS_OVERLAPPEDWINDOW
 
 	hwndTopmost   = ^uintptr(0) // -1
 	hwndNoTopmost = ^uintptr(1) // -2
@@ -36,11 +36,11 @@ const (
 )
 
 var (
-	avatarUser32          = windows.NewLazySystemDLL("user32.dll")
-	procFindWindowW       = avatarUser32.NewProc("FindWindowW")
-	procGetWindowLongPtrW = avatarUser32.NewProc("GetWindowLongPtrW")
-	procSetWindowLongPtrW = avatarUser32.NewProc("SetWindowLongPtrW")
-	procSetWindowPos      = avatarUser32.NewProc("SetWindowPos")
+	avatarUser32             = windows.NewLazySystemDLL("user32.dll")
+	procFindWindowW          = avatarUser32.NewProc("FindWindowW")
+	procGetWindowLongPtrW    = avatarUser32.NewProc("GetWindowLongPtrW")
+	procSetWindowLongPtrW    = avatarUser32.NewProc("SetWindowLongPtrW")
+	procSetWindowPos         = avatarUser32.NewProc("SetWindowPos")
 )
 
 func winFindAvatarWindow() uintptr {

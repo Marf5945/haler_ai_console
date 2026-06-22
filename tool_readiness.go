@@ -292,10 +292,10 @@ func (a *App) maybeAskForToolReadiness(sessionID string, decision toolRoutingDec
 		"question":        question.Question,
 	})
 	return true, skill_step.CLIResponse{
-		Text:   question.Question,
-		Action: decision.Action,
-		Target: decision.Target,
-		Next:   actionchain.QuestionNext,
+		Text:   setQuestionFloatingCandidates(question.Question, traceID),
+		Action: "提問",
+		Target: question.Question,
+		Next:   actionchain.StandbyNext,
 	}
 }
 

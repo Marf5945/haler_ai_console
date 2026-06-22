@@ -4503,6 +4503,7 @@ function App() {
       console.log('[CLI_MONITOR] frontend raw resp -> normalized', {traceId, resp, cliResp});
       postDebugTrace('ui.inspector.after.SendTopInteractionMessage', traceId, {response: cliResp || null});
       console.log('[CLI_MONITOR] frontend cliInspectorLog.response write', {traceId, response: cliResp || null});
+      refreshReadinessGateState();
       setCliInspectorLog((prev) => ({
         ...(prev || {payload}),
         status: cliResp?.error ? 'error' : 'done',

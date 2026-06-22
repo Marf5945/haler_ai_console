@@ -11,6 +11,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
+	"github.com/wailsapp/wails/v2/pkg/options/windows"
 )
 
 //go:embed all:frontend/dist
@@ -65,6 +66,10 @@ func main() {
 			DisableWebViewDrop: true,
 		},
 		BackgroundColour: &options.RGBA{R: 5, G: 5, B: 5, A: 255},
+		Windows: &windows.Options{
+			WebviewIsTransparent: true,
+			WindowIsTranslucent:  true,
+		},
 		// 後台浮動頭像需要真透明：WebView 設為透明，避免 WKWebView 自身白底
 		// 蓋住前端的 transparent CSS。視窗外框/紅綠燈改由執行期 cgo 切換
 		// （floating_avatar_darwin.go），一般主控台維持正常有框視窗。
@@ -79,7 +84,7 @@ func main() {
 			UniqueId:               "com.aiconsole.singleinstance",
 			OnSecondInstanceLaunch: app.onSecondInstanceLaunch,
 		},
-		OnStartup:        app.startup,
+		OnStartup: app.startup,
 		// §30: 關閉視窗時攔截，讓前端顯示「存成 sub」對話框
 		OnBeforeClose: func(ctx context.Context) (prevent bool) {
 			return app.beforeClose(ctx)

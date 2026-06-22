@@ -43,6 +43,7 @@ var projectDirs = []string{
 	"runtime/temp_sessions",
 	"runtime/action_results",
 	"runtime/crash_recovery",
+	"runtime/codeindex",
 	// 控制信任
 	"controlled_trust",
 	"controlled_trust/draft_sandbox_runs",

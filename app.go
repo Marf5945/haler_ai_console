@@ -44,6 +44,7 @@ import (
 	"ui_console/internal/urlsafe"
 	"ui_console/internal/voice"
 	"ui_console/orchestration/cli_manager"
+	codeindexsvc "ui_console/orchestration/codeindex"
 	"ui_console/orchestration/dag"
 	"ui_console/orchestration/skill_step"
 	"ui_console/orchestration/stop_recovery"
@@ -158,6 +159,7 @@ type App struct {
 
 	// v3.6.1 LLM Context Governance（§11）— 雙層掃描
 	// 無需 service 實例，全部為純函式（llm_context 套件）
+	codeIndexService *codeindexsvc.Service
 
 	// v3.6.1 Memory Pipeline（§18）— 三級記憶管線
 	memoryPipeline *memory.Pipeline
@@ -338,7 +340,8 @@ func NewApp() *App {
 		credentialStore: sharedSecretStore,
 
 		// v3.6.1 Memory Pipeline（§18）
-		memoryPipeline: memory.NewPipeline(hookRoot),
+		codeIndexService: codeindexsvc.NewService(cwd, hookRoot),
+		memoryPipeline:   memory.NewPipeline(hookRoot),
 
 		// v3.6.1 DAG Scheduler（§19）
 		dagScheduler:    dag.NewScheduler(hookRoot),
@@ -593,6 +596,14 @@ func (a *App) startup(ctx context.Context) {
 
 	// TASK 31: 啟動時為引用文件建立缺少的向量索引
 	go a.ensureReferenceVectorIndexes()
+
+	// Build a source code index in the background so Go code retrieval is ready
+	// before the user asks for focused repository context.
+	go func() {
+		if _, err := a.codeIndexService.Rebuild(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: code index rebuild failed: %v\n", err)
+		}
+	}()
 
 	// v3.6.1: 啟動時掃描過期暫存檔（§7.5 ScanAndCleanExpired，30 天）
 	go func() {

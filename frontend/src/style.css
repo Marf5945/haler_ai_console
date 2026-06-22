@@ -6028,6 +6028,69 @@
   margin: 3px 0;
 }
 
+.code-index-toolbar {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) repeat(3, auto);
+  gap: 8px;
+  align-items: center;
+}
+
+.code-index-toolbar input {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.code-index-toolbar button {
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.code-index-toolbar button:disabled {
+  opacity: 0.55;
+}
+
+.code-index-status {
+  display: block;
+  margin-top: 8px;
+  opacity: 0.72;
+}
+
+.code-index-results {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.code-index-results li {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.code-index-results span,
+.code-index-results small {
+  overflow-wrap: anywhere;
+  opacity: 0.72;
+}
+
+@media (max-width: 720px) {
+  .code-index-toolbar {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ---------------------------------------------------------------------------
  * I-3: Draft Sandbox Stop Dialog & Trusted Session Expired Dialog
  * --------------------------------------------------------------------------- */
@@ -9911,6 +9974,12 @@
   color: #ffcf77;
   background: transparent;
   font-weight: 800;
+}
+
+.floating-avatar-top-bubble.floating-avatar-side-bubble {
+  min-height: 64px;
+  align-content: start;
+  justify-items: start;
 }
 
 .floating-avatar-left-tip,

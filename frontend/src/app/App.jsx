@@ -161,6 +161,9 @@ import {
   DisableCredentialMigration,
   RenderPixelAvatarPreview,
   // ── v3.6 LLM Context + Memory 接線 ──
+  RebuildCodeIndex,
+  SearchCodeSections,
+  BuildCodeContext,
   BuildLLMContext,
   EscapeExternalTokens,
   ValidateMemoryItem,
@@ -300,6 +303,8 @@ import {
   WindowSetMinSize,
   WindowSetPosition,
   WindowSetSize,
+  WindowShow,
+  WindowUnminimise,
 } from '../../wailsjs/runtime/runtime';
 
 import DocumentReviewCard from '../components/DocumentReviewCard';
@@ -1078,8 +1083,13 @@ function makeComposerPendingMessage(traceId, text = composerPendingInitialText) 
 }
 
 function stripComposerPendingMarker(message) {
-  const markerIndex = String(message || '').indexOf(composerPendingMarker);
-  return markerIndex >= 0 ? message.slice(0, markerIndex) : message;
+  let text = String(message || '');
+  const markerIndex = text.indexOf(composerPendingMarker);
+  if (markerIndex >= 0) {
+    text = text.slice(0, markerIndex);
+  }
+  // Defensive cleanup for any pending trace suffix that accidentally reaches UI.
+  return text.replace(/\s*pending:[A-Za-z0-9_-]+$/g, '');
 }
 
 function replaceComposerPendingMessage(messages, traceId, replacement) {
@@ -1752,6 +1762,13 @@ function App() {
       y: Math.max(12, window.innerHeight - FLOATING_AVATAR_WINDOW_SIZE - 16),
     };
   });
+  const floatingAvatarModeRef = useRef(floatingAvatarMode);
+  const floatingAvatarCompactWindowRef = useRef(floatingAvatarCompactWindow);
+  const floatingAvatarPositionRef = useRef(floatingAvatarPosition);
+  const floatingAvatarTransitionRef = useRef(false);
+  floatingAvatarModeRef.current = floatingAvatarMode;
+  floatingAvatarCompactWindowRef.current = floatingAvatarCompactWindow;
+  floatingAvatarPositionRef.current = floatingAvatarPosition;
 
   useEffect(() => {
     if (floatingAvatarCompactWindow) return;
@@ -2515,7 +2532,13 @@ function App() {
       }
     });
     // Phase G：關閉前後端 emit 此事件 → 顯示後台頭像選擇。
-    const offSchedulerBgPrompt = EventsOn('scheduler:background_prompt', () => {
+    const offSchedulerBgPrompt = EventsOn('scheduler:background_prompt', async () => {
+      if (floatingAvatarCompactWindowRef.current || floatingAvatarWindowRef.current?.restore) {
+        await restoreFloatingAvatarWindow();
+        floatingAvatarModeRef.current = false;
+        setFloatingAvatarMode(false);
+        setManualAvatarState('');
+      }
       setSchedulerBgPrompt(true);
     });
     // H/I：高風險/付費 API 需確認 → 後端 emit，前端跳確認卡。
@@ -7344,13 +7367,19 @@ function App() {
   }
 
   async function enterFloatingAvatarMode() {
+    if (floatingAvatarTransitionRef.current) return;
+    floatingAvatarTransitionRef.current = true;
     try {
       const [windowSize, windowPosition] = await Promise.all([
         WindowGetSize(),
         WindowGetPosition(),
       ]);
-      const avatarX = Number(floatingAvatarPosition?.x ?? Math.max(12, window.innerWidth - FLOATING_AVATAR_WINDOW_SIZE));
-      const avatarY = Number(floatingAvatarPosition?.y ?? Math.max(12, window.innerHeight - FLOATING_AVATAR_WINDOW_SIZE - 16));
+      const avatarPosition = floatingAvatarPositionRef.current || floatingAvatarPosition || {
+        x: Math.max(12, window.innerWidth - FLOATING_AVATAR_WINDOW_SIZE),
+        y: Math.max(12, window.innerHeight - FLOATING_AVATAR_WINDOW_SIZE - 16),
+      };
+      const avatarX = Number(avatarPosition?.x ?? Math.max(12, window.innerWidth - FLOATING_AVATAR_WINDOW_SIZE));
+      const avatarY = Number(avatarPosition?.y ?? Math.max(12, window.innerHeight - FLOATING_AVATAR_WINDOW_SIZE - 16));
       const compactX = Math.round((windowPosition?.x ?? 0) + avatarX - FLOATING_AVATAR_INSET);
       const compactY = Math.round((windowPosition?.y ?? 0) + avatarY - FLOATING_AVATAR_INSET);
       floatingAvatarWindowRef.current = {
@@ -7361,6 +7390,8 @@ function App() {
         },
         compactPosition: {x: compactX, y: compactY},
       };
+      WindowUnminimise();
+      WindowShow();
       WindowSetMinSize(FLOATING_AVATAR_WINDOW_SIZE, FLOATING_AVATAR_WINDOW_SIZE);
       WindowSetBackgroundColour(0, 0, 0, 0);
       WindowSetAlwaysOnTop(true);
@@ -7368,12 +7399,19 @@ function App() {
       WindowSetPosition(compactX, compactY);
       // 切成原生無框透明置頂浮窗（macOS 真實作；其他平台 no-op）。
       await callWails(() => EnterFloatingAvatarNative()).catch((e) => console.warn('EnterFloatingAvatarNative failed', e));
-      setFloatingAvatarPosition({x: FLOATING_AVATAR_INSET, y: FLOATING_AVATAR_INSET});
+      const compactAvatarPosition = {x: FLOATING_AVATAR_INSET, y: FLOATING_AVATAR_INSET};
+      floatingAvatarPositionRef.current = compactAvatarPosition;
+      setFloatingAvatarPosition(compactAvatarPosition);
+      floatingAvatarCompactWindowRef.current = true;
       setFloatingAvatarCompactWindow(true);
     } catch (error) {
       console.warn('floating avatar compact window failed', error);
+      floatingAvatarCompactWindowRef.current = false;
       setFloatingAvatarCompactWindow(false);
+    } finally {
+      floatingAvatarTransitionRef.current = false;
     }
+    floatingAvatarModeRef.current = true;
     setFloatingAvatarMode(true);
     setSchedulerBgPrompt(false);
     setManualAvatarState('happy');
@@ -7381,14 +7419,19 @@ function App() {
   }
 
   async function restoreFloatingAvatarWindow() {
-    if (!floatingAvatarCompactWindow) return;
+    if (floatingAvatarTransitionRef.current) return;
     const restore = floatingAvatarWindowRef.current?.restore;
+    const wasCompact = floatingAvatarCompactWindowRef.current || Boolean(restore);
+    if (!wasCompact) return;
+    floatingAvatarTransitionRef.current = true;
     // 先在頭像浮窗內播放「飛回」動畫，再真正放大視窗，避免縮放當下硬切。
     setFloatingAvatarFlyingBack(true);
     await new Promise((resolve) => window.setTimeout(resolve, 240));
     try {
       // 還原一般有框、不透明視窗。
       await callWails(() => ExitFloatingAvatarNative()).catch((e) => console.warn('ExitFloatingAvatarNative failed', e));
+      WindowUnminimise();
+      WindowShow();
       WindowSetAlwaysOnTop(false);
       WindowSetBackgroundColour(5, 5, 5, 255);
       WindowSetMinSize(MAIN_WINDOW_MIN_SIZE.width, MAIN_WINDOW_MIN_SIZE.height);
@@ -7400,21 +7443,26 @@ function App() {
       }
     } catch (error) {
       console.warn('floating avatar restore window failed', error);
+    } finally {
+      floatingAvatarTransitionRef.current = false;
     }
+    floatingAvatarCompactWindowRef.current = false;
     setFloatingAvatarCompactWindow(false);
     setFloatingAvatarFlyingBack(false);
+    floatingAvatarDragWindowRef.current = null;
     floatingAvatarWindowRef.current = {restore: null, compactPosition: null};
-    setFloatingAvatarPosition(
-      restore?.avatarPosition
-        || {
-          x: Math.max(12, window.innerWidth - FLOATING_AVATAR_WINDOW_SIZE),
-          y: Math.max(12, window.innerHeight - FLOATING_AVATAR_WINDOW_SIZE - 16),
-        },
-    );
+    const restoredAvatarPosition = restore?.avatarPosition
+      || {
+        x: Math.max(12, window.innerWidth - FLOATING_AVATAR_WINDOW_SIZE),
+        y: Math.max(12, window.innerHeight - FLOATING_AVATAR_WINDOW_SIZE - 16),
+      };
+    floatingAvatarPositionRef.current = restoredAvatarPosition;
+    setFloatingAvatarPosition(restoredAvatarPosition);
   }
 
   async function restoreFromFloatingAvatar(target = 'auto') {
     await restoreFloatingAvatarWindow();
+    floatingAvatarModeRef.current = false;
     setFloatingAvatarMode(false);
     setManualAvatarState('');
     if (target === 'settings') {
@@ -7435,10 +7483,23 @@ function App() {
     });
   }
 
+  async function closeAfterBackgroundAvatarExit() {
+    await restoreFloatingAvatarWindow();
+    floatingAvatarModeRef.current = false;
+    setFloatingAvatarMode(false);
+    setManualAvatarState('');
+    try {
+      await callWails(() => ResolveSchedulerBackgroundPrompt(false));
+    } catch {
+      // 停用背景喚醒失敗時仍嘗試完整關閉，避免留下殘留浮窗/圖示。
+    }
+    await callWails(() => ConfirmClose(false, ''));
+  }
+
   // 單擊頭像展開迷你框時，把浮窗放大到面板尺寸；關閉時縮回頭像尺寸。
   // 視窗會貼著頭像展開，並自動避開螢幕右/下邊緣，頭像螢幕位置維持不變。
   async function setCompactAvatarExpanded(open) {
-    if (!floatingAvatarCompactWindow) return;
+    if (!floatingAvatarCompactWindowRef.current) return;
     const ref = floatingAvatarWindowRef.current;
     if (!ref) return;
     try {
@@ -7472,7 +7533,9 @@ function App() {
         WindowSetSize(expandedW, expandedH);
         WindowSetPosition(Math.round(newX), Math.round(newY));
         ref.compactPosition = {x: Math.round(newX), y: Math.round(newY)};
-        setFloatingAvatarPosition({x: Math.round(avatarLocalX), y: Math.round(avatarLocalY)});
+        const expandedAvatarPosition = {x: Math.round(avatarLocalX), y: Math.round(avatarLocalY)};
+        floatingAvatarPositionRef.current = expandedAvatarPosition;
+        setFloatingAvatarPosition(expandedAvatarPosition);
       } else {
         if (!ref.expanded) return;
         const {avatarScreenX, avatarScreenY} = ref.expanded;
@@ -7482,7 +7545,9 @@ function App() {
         WindowSetPosition(newX, newY);
         ref.compactPosition = {x: newX, y: newY};
         ref.expanded = null;
-        setFloatingAvatarPosition({x: FLOATING_AVATAR_INSET, y: FLOATING_AVATAR_INSET});
+        const compactAvatarPosition = {x: FLOATING_AVATAR_INSET, y: FLOATING_AVATAR_INSET};
+        floatingAvatarPositionRef.current = compactAvatarPosition;
+        setFloatingAvatarPosition(compactAvatarPosition);
       }
     } catch (e) {
       console.warn('setCompactAvatarExpanded failed', e);
@@ -7490,6 +7555,7 @@ function App() {
   }
 
   function updateFloatingAvatarPosition(nextPosition) {
+    floatingAvatarPositionRef.current = nextPosition;
     setFloatingAvatarPosition(nextPosition);
   }
 
@@ -7570,20 +7636,20 @@ function App() {
   }
 
   const floatingAdapter = resolveActiveAdapter();
-  const floatingStatusText = pendingTaskReview?.title
+  const floatingStatusText = stripComposerPendingMarker(pendingTaskReview?.title
     || schedulerConfirm?.title
     || toolResult?.message
     || state.statusRail?.text
     || state.greeting
-    || '';
-  const floatingLatestText = messages[messages.length - 1] || state.greeting || '';
+    || '');
+  const floatingLatestText = stripComposerPendingMarker(messages[messages.length - 1] || state.greeting || '');
   // 只在「需要主動提醒」時才浮出上方泡泡（待確認/排程確認）。
   // 進後台、一般狀態、問候語都不浮泡泡，維持乾淨頭像；人格名稱/回覆改由點開迷你框顯示。
-  const floatingBubbleText = pendingTaskReview?.reason
+  const floatingBubbleText = stripComposerPendingMarker(pendingTaskReview?.reason
     || pendingTaskReview?.title
     || schedulerConfirm?.reason
     || schedulerConfirm?.title
-    || '';
+    || '');
 
   return (
     <div
@@ -7613,9 +7679,11 @@ function App() {
         flyingBack={floatingAvatarFlyingBack}
         onRestore={() => restoreFromFloatingAvatar('auto')}
         onQuit={async () => {
-          await restoreFloatingAvatarWindow();
-          try { await callWails(() => ResolveSchedulerBackgroundPrompt(false)); } catch { /* 停用 best-effort */ }
-          Quit();
+          try {
+            await closeAfterBackgroundAvatarExit();
+          } catch (error) {
+            setToolResult({toolId: 'scheduler', ok: false, message: t('subagent.closeFail', { error: error?.message || error })});
+          }
         }}
         onOpenSettings={() => restoreFromFloatingAvatar('settings')}
         onDropFiles={handleFloatingAvatarDrop}
@@ -8028,6 +8096,9 @@ function App() {
             onVoiceDebugClear={clearVoiceDebug}
             onSaveBrowserPref={saveBrowserPreference}
             onPreviewStyleDiff={previewStyleDiff}
+            onCodeIndexRebuild={() => callWails(RebuildCodeIndex)}
+            onCodeIndexSearch={(query, limit) => callWails(() => SearchCodeSections(query, limit))}
+            onCodeIndexBuildContext={(query, highImpact) => callWails(() => BuildCodeContext(query, highImpact))}
             avatarConfigs={avatarConfigs}
             avatarExpression={avatarExpression}
             avatarModeNotice={avatarModeNotice}
@@ -8765,10 +8836,13 @@ function App() {
                 disabled={schedulerBgBusy}
                 onClick={async () => {
                   setSchedulerBgBusy(true);
-                  try { await callWails(() => ResolveSchedulerBackgroundPrompt(false)); } catch { /* 停用 best-effort */ } finally {
+                  try {
+                    await closeAfterBackgroundAvatarExit();
+                  } catch (error) {
+                    setToolResult({toolId: 'session-close', ok: false, message: t('subagent.closeFail', { error: error?.message || error })});
+                  } finally {
                     setSchedulerBgBusy(false);
                     setSchedulerBgPrompt(false);
-                    Quit();
                   }
                 }}
               >{t('floatingAvatar.closeDirectly')}</button>

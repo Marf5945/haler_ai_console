@@ -2,13 +2,27 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 
 const defaultAvatarSize = 64;
 const edgeGap = 12;
-const shakePreviewDelayMs = 1200;
-const shakePreviewDistance = 80;
-const shakeVomitDelayMs = 3000;
-const shakeVomitDistance = 500;
+const shakePreviewDelayMs = 2600;
+const shakeVomitDelayMs = 4500;
+const shakeAxisThreshold = 14;
+const shakeReversalDistance = 18;
+const shakePreviewScore = 150;
+const shakeVomitScore = 320;
+const shakePreviewReversals = 2;
+const shakeVomitReversals = 5;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function sanitizeFloatingAvatarText(value) {
+  let text = String(value || '');
+  const pendingMarkerIndex = text.indexOf('\u2063pending:');
+  if (pendingMarkerIndex >= 0) {
+    text = text.slice(0, pendingMarkerIndex);
+  }
+  text = text.replace(/\s*pending:[A-Za-z0-9_-]+$/g, '');
+  return text.replace(/^Ai[:：]\s*/, '').trim();
 }
 
 function candidateText(candidate) {
@@ -30,6 +44,16 @@ function randomShakePreview(options = []) {
   const pool = (options || []).filter((item) => String(item?.text || '').trim());
   if (pool.length === 0) return {text: '', expression: 'sad'};
   return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function dominantShakeVector(dx, dy) {
+  const absX = Math.abs(dx);
+  const absY = Math.abs(dy);
+  if (absX < shakeAxisThreshold && absY < shakeAxisThreshold) return null;
+  if (absX >= absY) {
+    return {axis: 'x', direction: dx >= 0 ? 1 : -1, magnitude: absX};
+  }
+  return {axis: 'y', direction: dy >= 0 ? 1 : -1, magnitude: absY};
 }
 
 // 後台迷你框：自然語言排程的輕量偵測，送出前在泡泡裡先確認一次。
@@ -89,6 +113,7 @@ export default function FloatingAvatarMode({
   const [dropActive, setDropActive] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [guideVisible, setGuideVisible] = useState(true);
+  const [dragActive, setDragActive] = useState(false);
   const [shakeState, setShakeState] = useState(null);
   const [shakeMessageVisible, setShakeMessageVisible] = useState(false);
   const [shakeDialogue, setShakeDialogue] = useState('');
@@ -99,7 +124,15 @@ export default function FloatingAvatarMode({
   const dragRef = useRef(null);
   const clickTimerRef = useRef(null);
   const shakeResetRef = useRef(null);
-  const shakeRef = useRef({startedAt: 0, lastPoint: null, distance: 0, previewFired: false, vomitFired: false});
+  const shakeRef = useRef({
+    startedAt: 0,
+    lastPoint: null,
+    score: 0,
+    reversalCount: 0,
+    lastVector: null,
+    previewFired: false,
+    vomitFired: false,
+  });
 
   const clampedPosition = useMemo(() => {
     const maxX = Math.max(edgeGap, window.innerWidth - avatarSize - edgeGap);
@@ -111,11 +144,11 @@ export default function FloatingAvatarMode({
   }, [position?.x, position?.y]);
 
   useEffect(() => {
-    if (!active) return undefined;
+    if (!active || compactWindowMode) return undefined;
     const onResize = () => onPositionChange?.(clampedPosition);
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, [active, clampedPosition, onPositionChange]);
+  }, [active, clampedPosition, compactWindowMode, onPositionChange]);
 
   useEffect(() => {
     if (!contextOpen) return undefined;
@@ -132,9 +165,9 @@ export default function FloatingAvatarMode({
   useEffect(() => {
     if (!compactWindowMode) return undefined;
     const hasTopBubble = (Boolean(String(bubbleText || '').trim()) && !bubbleDismissed) || shakeMessageVisible;
-    onCompactExpandChange?.(panelOpen || contextOpen || hasTopBubble || Boolean(installCandidate));
+    onCompactExpandChange?.(!dragActive && (panelOpen || contextOpen || hasTopBubble || Boolean(installCandidate)));
     return undefined;
-  }, [compactWindowMode, panelOpen, contextOpen, bubbleText, bubbleDismissed, shakeMessageVisible, installCandidate]);
+  }, [compactWindowMode, panelOpen, contextOpen, bubbleText, bubbleDismissed, shakeMessageVisible, installCandidate, dragActive]);
 
   useEffect(() => () => {
     if (clickTimerRef.current) window.clearTimeout(clickTimerRef.current);
@@ -180,18 +213,36 @@ export default function FloatingAvatarMode({
     top: compactStackTop,
   };
   // compact 模式左側提示：放在頭像左邊（相對 root 為負 left），寬度依左側可用空間。
-  const compactTipWidth = clamp(clampedPosition.x - edgeGap - 8, 80, 224);
-  const compactTipStyle = {left: -(compactTipWidth + 8), top: 0, width: compactTipWidth};
+  const compactTipPreferredWidth = 220;
+  const compactTipGap = 12;
+  const compactTipOnLeft = clampedPosition.x >= compactTipPreferredWidth + edgeGap + compactTipGap;
+  const compactTipWidth = compactTipOnLeft
+    ? compactTipPreferredWidth
+    : clamp(window.innerWidth - clampedPosition.x - avatarSize - compactTipGap - edgeGap, 180, 240);
+  const compactTipStyle = compactTipOnLeft
+    ? {left: -(compactTipWidth + compactTipGap), top: 0, width: compactTipWidth}
+    : {left: avatarSize + compactTipGap, top: 0, width: compactTipWidth};
   const displayStatus = pendingConfirm?.title || statusTitle || t('floatingAvatar.statusIdle');
   const displayLatest = pendingConfirm?.reason || latestText || statusText || t('floatingAvatar.latestIdle');
+  const safeDisplayLatest = sanitizeFloatingAvatarText(displayLatest);
+  const safeCleanLatest = safeDisplayLatest;
   const speakerName = persona?.name || t('floatingAvatar.agentFallback');
-  const cleanLatest = String(displayLatest || '').replace(/^Ai[:：]\s*/, '');
   const shakeMessage = shakeDialogue || (shakeState === 'speechless' ? t('floatingAvatar.shakeTooLong') : '');
-  const cleanBubbleText = String(shakeMessage || bubbleText || '').replace(/^Ai[:：]\s*/, '').trim();
-  const topBubbleVisible = compactWindowMode && cleanBubbleText && (!bubbleDismissed || shakeMessageVisible);
+  const safeCleanBubbleText = sanitizeFloatingAvatarText(shakeMessage || bubbleText || '');
+  const topBubbleVisible = compactWindowMode && safeCleanBubbleText && (!bubbleDismissed || shakeMessageVisible);
+  const compactBubbleWidth = Math.min(306, Math.max(180, window.innerWidth - edgeGap * 2));
+  const compactBubbleGap = 16;
+  const compactBubbleOnRight = clampedPosition.x <= window.innerWidth - (compactBubbleWidth + avatarSize + edgeGap * 2);
   const topBubbleStyle = {
-    left: clamp(clampedPosition.x - 124, edgeGap, Math.max(edgeGap, window.innerWidth - 318)),
-    top: clamp(clampedPosition.y - 92, edgeGap, Math.max(edgeGap, window.innerHeight - 92)),
+    left: clamp(
+      compactBubbleOnRight
+        ? clampedPosition.x + avatarSize + compactBubbleGap
+        : clampedPosition.x - compactBubbleWidth - compactBubbleGap,
+      edgeGap,
+      Math.max(edgeGap, window.innerWidth - compactBubbleWidth - edgeGap),
+    ),
+    top: clamp(clampedPosition.y - 6, edgeGap, Math.max(edgeGap, window.innerHeight - 136)),
+    width: compactBubbleWidth,
   };
   const expressionClass = shakeState
     ? `floating-avatar-${shakeState}`
@@ -214,20 +265,43 @@ export default function FloatingAvatarMode({
     if (!shake.startedAt) {
       shake.startedAt = now;
       shake.lastPoint = {x: clientX, y: clientY};
-      shake.distance = 0;
+      shake.score = 0;
+      shake.reversalCount = 0;
+      shake.lastVector = null;
       shake.previewFired = false;
       shake.vomitFired = false;
       return;
     }
     const last = shake.lastPoint || {x: clientX, y: clientY};
-    shake.distance += Math.abs(clientX - last.x) + Math.abs(clientY - last.y);
+    const dx = clientX - last.x;
+    const dy = clientY - last.y;
     shake.lastPoint = {x: clientX, y: clientY};
     const elapsed = now - shake.startedAt;
+    const vector = dominantShakeVector(dx, dy);
+    if (vector) {
+      const lastVector = shake.lastVector;
+      if (
+        lastVector
+        && lastVector.axis === vector.axis
+        && lastVector.direction !== vector.direction
+        && lastVector.magnitude >= shakeReversalDistance
+        && vector.magnitude >= shakeReversalDistance
+      ) {
+        shake.reversalCount += 1;
+        shake.score += Math.min(lastVector.magnitude + vector.magnitude, 120);
+      }
+      shake.lastVector = vector;
+    }
     // 搖晃中即時改表情：先暈（sad），1.2 秒後抽問候池，3 秒後進嘔吐彩蛋。
-    if (!shake.previewFired && shake.distance > 240) {
+    if (!shake.previewFired && shake.reversalCount >= 1 && shake.score >= 90) {
       setShakeState((prev) => (prev === 'speechless' ? prev : 'sad'));
     }
-    if (!shake.previewFired && elapsed >= shakePreviewDelayMs && shake.distance > shakePreviewDistance) {
+    if (
+      !shake.previewFired
+      && elapsed >= shakePreviewDelayMs
+      && shake.reversalCount >= shakePreviewReversals
+      && shake.score >= shakePreviewScore
+    ) {
       const preview = randomShakePreview(shakeDialogueOptions);
       shake.previewFired = true;
       setShakeState(preview.expression || 'sad');
@@ -236,7 +310,12 @@ export default function FloatingAvatarMode({
       setShakeMessageVisible(true);
       onShakePreview?.(preview);
     }
-    if (!shake.vomitFired && elapsed >= shakeVomitDelayMs && shake.distance > shakeVomitDistance) {
+    if (
+      !shake.vomitFired
+      && elapsed >= shakeVomitDelayMs
+      && shake.reversalCount >= shakeVomitReversals
+      && shake.score >= shakeVomitScore
+    ) {
       const dialogue = t('floatingAvatar.shakeTooLong');
       shake.vomitFired = true;
       setShakeState('speechless');
@@ -250,6 +329,7 @@ export default function FloatingAvatarMode({
   function startDrag(event) {
     if (event.button !== 0) return;
     if (guideVisible) setGuideVisible(false);
+    setDragActive(true);
     onCompactDragStart?.();
     if (shakeResetRef.current) {
       window.clearTimeout(shakeResetRef.current);
@@ -267,7 +347,15 @@ export default function FloatingAvatarMode({
       moved: false,
     };
     const shakePoint = compactWindowMode ? {x: event.screenX, y: event.screenY} : {x: event.clientX, y: event.clientY};
-    shakeRef.current = {startedAt: Date.now(), lastPoint: shakePoint, distance: 0, previewFired: false, vomitFired: false};
+    shakeRef.current = {
+      startedAt: Date.now(),
+      lastPoint: shakePoint,
+      score: 0,
+      reversalCount: 0,
+      lastVector: null,
+      previewFired: false,
+      vomitFired: false,
+    };
     event.currentTarget.setPointerCapture?.(event.pointerId);
   }
 
@@ -299,12 +387,21 @@ export default function FloatingAvatarMode({
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.currentTarget.releasePointerCapture?.(event.pointerId);
     window.setTimeout(() => { dragRef.current = null; }, 0);
+    setDragActive(false);
     if (shakeResetRef.current) window.clearTimeout(shakeResetRef.current);
     shakeResetRef.current = window.setTimeout(() => {
       setShakeState(null);
       setShakeMessageVisible(false);
       setShakeDialogue('');
-      shakeRef.current = {startedAt: 0, lastPoint: null, distance: 0, previewFired: false, vomitFired: false};
+      shakeRef.current = {
+        startedAt: 0,
+        lastPoint: null,
+        score: 0,
+        reversalCount: 0,
+        lastVector: null,
+        previewFired: false,
+        vomitFired: false,
+      };
       shakeResetRef.current = null;
     }, 1200);
   }
@@ -350,10 +447,10 @@ export default function FloatingAvatarMode({
   return (
     <div className="floating-avatar-stage" aria-label={t('floatingAvatar.stageLabel')}>
       {topBubbleVisible && (
-        <aside className="floating-avatar-top-bubble" style={topBubbleStyle}>
+        <aside className="floating-avatar-top-bubble floating-avatar-side-bubble" style={topBubbleStyle}>
           <strong>{speakerName}</strong>
-          <span>{expanded ? cleanBubbleText : truncateStatus(cleanBubbleText, 72)}</span>
-          {cleanBubbleText.length > 72 && (
+          <span>{expanded ? safeCleanBubbleText : truncateStatus(safeCleanBubbleText, 72)}</span>
+          {safeCleanBubbleText.length > 72 && (
             <button type="button" onClick={() => setExpanded((value) => !value)}>
               {expanded ? t('floatingAvatar.less') : t('floatingAvatar.more')}
             </button>
@@ -406,8 +503,8 @@ export default function FloatingAvatarMode({
         {!compactWindowMode && pendingConfirm && !reminderPaused && (
         <aside className="floating-avatar-right-status" style={{left: rightTipLeft - clampedPosition.x, top: 1}}>
           <strong>{displayStatus}</strong>
-          <span>{expanded ? displayLatest : truncateStatus(displayLatest)}</span>
-          {String(displayLatest || '').length > 42 && (
+          <span>{expanded ? safeDisplayLatest : truncateStatus(safeDisplayLatest)}</span>
+          {String(safeDisplayLatest || '').length > 42 && (
             <button type="button" onClick={() => setExpanded((value) => !value)}>
               {expanded ? t('floatingAvatar.less') : t('floatingAvatar.more')}
             </button>
@@ -565,7 +662,7 @@ export default function FloatingAvatarMode({
           </header>
           <div className="floating-avatar-mini-status">
             {pendingConfirm && <strong>{displayStatus}</strong>}
-            <p><strong>{speakerName}：</strong>{expanded ? cleanLatest : truncateStatus(cleanLatest, 86)}</p>
+            <p><strong>{speakerName}：</strong>{expanded ? safeCleanLatest : truncateStatus(safeCleanLatest, 86)}</p>
           </div>
           <form
             onSubmit={(event) => {

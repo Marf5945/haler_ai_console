@@ -1,5 +1,6 @@
 import useI18n from '../../locales/useI18n';
 import BrowserSettingsSection from './BrowserSettingsSection';
+import CodeIndexSettingsSection from './CodeIndexSettingsSection';
 import ControlledTrustSettings from './ControlledTrustSettings';
 import SkillContextSettingsSection from './SkillContextSettingsSection';
 import StateTokenLegend from './StateTokenLegend';
@@ -15,6 +16,7 @@ export default function SettingsWorkspace(props) {
     onSummaryModelChange, onSummaryModelRescan, voiceState, voiceInstallBusy,
     onVoiceSettingsChange, onVoiceSettingsRefresh, onVoiceModelInstall, onVoiceModelRemove,
     onVoiceDebugClear, onSaveBrowserPref, onPreviewStyleDiff,
+    onCodeIndexRebuild, onCodeIndexSearch, onCodeIndexBuildContext,
     ...personaProps
   } = props;
 
@@ -53,6 +55,11 @@ export default function SettingsWorkspace(props) {
       />
       <StateTokenLegend />
       <SkillContextSettingsSection />
+      <CodeIndexSettingsSection
+        onRebuild={onCodeIndexRebuild}
+        onSearch={onCodeIndexSearch}
+        onBuildContext={onCodeIndexBuildContext}
+      />
     </main>
   );
 }

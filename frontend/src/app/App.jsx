@@ -6880,7 +6880,6 @@ function App() {
     setWebSearchSetup({
       providerId,
       apiKey: '',
-      cx: '',
       options,
     });
     setWebSearchSetupError('');
@@ -6893,7 +6892,7 @@ function App() {
       const next = await callWails(() => SaveWebSearchConfig(
         webSearchSetup.providerId || 'tavily',
         webSearchSetup.apiKey || '',
-        webSearchSetup.cx || '',
+        '',
       ));
       setWebSearchConfig(next || null);
       setWebSearchSetup(null);

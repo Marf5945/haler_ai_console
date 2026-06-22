@@ -18,9 +18,10 @@ import (
 )
 
 const (
-	ProviderTavily    = "tavily"
-	ProviderGoogleCSE = "google_cse"
-	ProviderBrave     = "brave"
+	ProviderTavily  = "tavily"
+	ProviderBrave   = "brave"
+	ProviderExa     = "exa"
+	ProviderSerpAPI = "serpapi"
 
 	DefaultLimit     = 5
 	maxLimit         = 8
@@ -39,18 +40,23 @@ var (
 )
 
 type ProviderOption struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	Fields         []string `json:"fields"`
-	DocsURL        string   `json:"docs_url"`
-	FreeTierHint   string   `json:"free_tier_hint,omitempty"`
-	PreferredOrder int      `json:"preferred_order,omitempty"`
+	ID                string   `json:"id"`
+	Name              string   `json:"name"`
+	Fields            []string `json:"fields"`
+	DocsURL           string   `json:"docs_url"`
+	FreeTierHint      string   `json:"free_tier_hint,omitempty"`
+	BestFor           string   `json:"best_for,omitempty"`
+	SetupGuide        []string `json:"setup_guide,omitempty"`
+	UsageHint         string   `json:"usage_hint,omitempty"`
+	APIKeyPlaceholder string   `json:"api_key_placeholder,omitempty"`
+	PreferredOrder    int      `json:"preferred_order,omitempty"`
 }
 
 type ProviderConfig struct {
 	ProviderID string `json:"provider_id"`
 	APIKey     string `json:"-"`
 	CX         string `json:"-"`
+	Locale     string `json:"-"`
 }
 
 type ConfigPublic struct {
@@ -63,8 +69,9 @@ type ConfigPublic struct {
 }
 
 type SearchRequest struct {
-	Query string `json:"query"`
-	Limit int    `json:"limit,omitempty"`
+	Query    string `json:"query"`
+	Limit    int    `json:"limit,omitempty"`
+	UILocale string `json:"ui_locale,omitempty"`
 }
 
 type SearchOutcome struct {
@@ -101,28 +108,52 @@ func NewServiceWithClient(client *http.Client) *Service {
 func ProviderOptions() []ProviderOption {
 	return []ProviderOption{
 		{
-			ID:             ProviderTavily,
-			Name:           "Tavily",
-			Fields:         []string{"api_key"},
-			DocsURL:        "https://docs.tavily.com/documentation/api-reference/endpoint/search",
-			FreeTierHint:   "AI-agent friendly search; free credits are available from Tavily.",
-			PreferredOrder: 1,
+			ID:                ProviderTavily,
+			Name:              "Tavily",
+			Fields:            []string{"api_key"},
+			DocsURL:           "https://docs.tavily.com/documentation/api-reference/endpoint/search",
+			FreeTierHint:      "AI 研究，含免費額度",
+			BestFor:           "AI 助理、研究整理、文件搜尋",
+			SetupGuide:        []string{"在 Tavily 建立 API key。", "把 API key 貼到下方欄位。", "按下儲存後即可開始網路搜尋。"},
+			UsageHint:         "例如：網路搜尋 OpenAI API 最新文件",
+			APIKeyPlaceholder: "tvly-...",
+			PreferredOrder:    1,
 		},
 		{
-			ID:             ProviderGoogleCSE,
-			Name:           "Google Custom Search JSON API",
-			Fields:         []string{"api_key", "cx"},
-			DocsURL:        "https://developers.google.com/custom-search/v1/reference/rest/v1/cse/list",
-			FreeTierHint:   "Requires an API key and Programmable Search Engine ID.",
-			PreferredOrder: 2,
+			ID:                ProviderExa,
+			Name:              "Exa",
+			Fields:            []string{"api_key"},
+			DocsURL:           "https://exa.ai/docs/reference/search",
+			FreeTierHint:      "研究文檔，20k/月免費",
+			BestFor:           "技術文件、文章、公司資料、研究型搜尋",
+			SetupGuide:        []string{"到 Exa dashboard 產生 API key。", "把 API key 貼到下方欄位。", "按下儲存後即可開始網路搜尋。"},
+			UsageHint:         "例如：網路搜尋 最新 LLM 論文",
+			APIKeyPlaceholder: "Exa API key",
+			PreferredOrder:    2,
 		},
 		{
-			ID:             ProviderBrave,
-			Name:           "Brave Search API",
-			Fields:         []string{"api_key"},
-			DocsURL:        "https://api-dashboard.search.brave.com/documentation/guides/authentication",
-			FreeTierHint:   "Requires a Brave Search API subscription token.",
-			PreferredOrder: 3,
+			ID:                ProviderSerpAPI,
+			Name:              "SerpApi",
+			Fields:            []string{"api_key"},
+			DocsURL:           "https://serpapi.com/search-api",
+			FreeTierHint:      "Google 結果，250/月免費",
+			BestFor:           "想拿 Google 風格搜尋結果資料",
+			SetupGuide:        []string{"到 SerpApi 產生 private API key。", "把 API key 貼到下方欄位。", "按下儲存後即可開始網路搜尋。"},
+			UsageHint:         "例如：網路搜尋 台北 天氣",
+			APIKeyPlaceholder: "SerpApi API key",
+			PreferredOrder:    3,
+		},
+		{
+			ID:                ProviderBrave,
+			Name:              "Brave",
+			Fields:            []string{"api_key"},
+			DocsURL:           "https://api-dashboard.search.brave.com/documentation/guides/authentication",
+			FreeTierHint:      "一般網頁，需 API token",
+			BestFor:           "通用網頁搜尋與一般資訊查找",
+			SetupGuide:        []string{"在 Brave Search API 建立 subscription token。", "把 token 貼到下方欄位。", "按下儲存後即可開始網路搜尋。"},
+			UsageHint:         "例如：網路搜尋 AI agent search API",
+			APIKeyPlaceholder: "Brave subscription token",
+			PreferredOrder:    4,
 		},
 	}
 }
@@ -149,10 +180,12 @@ func NormalizeProviderID(providerID string) string {
 	switch strings.ToLower(strings.TrimSpace(providerID)) {
 	case ProviderTavily, "tavily_search":
 		return ProviderTavily
-	case ProviderGoogleCSE, "google", "google_custom_search":
-		return ProviderGoogleCSE
 	case ProviderBrave, "brave_search":
 		return ProviderBrave
+	case ProviderExa, "exa_search":
+		return ProviderExa
+	case ProviderSerpAPI, "serp_api":
+		return ProviderSerpAPI
 	default:
 		return strings.ToLower(strings.TrimSpace(providerID))
 	}
@@ -173,14 +206,17 @@ func (s *Service) Search(ctx context.Context, req SearchRequest, cfg ProviderCon
 	switch cfg.ProviderID {
 	case ProviderTavily:
 		outcome, err = s.searchTavily(ctx, req.Query, limit, cfg)
-	case ProviderGoogleCSE:
-		outcome, err = s.searchGoogleCSE(ctx, req.Query, limit, cfg)
 	case ProviderBrave:
 		outcome, err = s.searchBrave(ctx, req.Query, limit, cfg)
+	case ProviderExa:
+		outcome, err = s.searchExa(ctx, req.Query, limit, cfg)
+	case ProviderSerpAPI:
+		outcome, err = s.searchSerpAPI(ctx, req.Query, limit, cfg)
 	default:
 		return SearchOutcome{}, ErrProviderMissing
 	}
 	if err == nil {
+		rankByLocalePreference(req.UILocale, outcome.Results)
 		// 依查詢語言加權：繁中→台灣(.tw/gov.tw)，英文→美/英(gov/edu/ac.uk)；清單外仍保留在後當備援。
 		rankByAuthority(req.Query, outcome.Results)
 	}
@@ -236,6 +272,126 @@ func rankByAuthority(query string, results []SearchResult) {
 	})
 }
 
+func rankByLocalePreference(locale string, results []SearchResult) {
+	if localePreferenceFamily(locale) == "" || len(results) < 2 {
+		return
+	}
+	sort.SliceStable(results, func(i, j int) bool {
+		left := resultMatchesLocale(locale, results[i])
+		right := resultMatchesLocale(locale, results[j])
+		if left == right {
+			return false
+		}
+		return left && !right
+	})
+}
+
+func localePreferenceFamily(locale string) string {
+	value := strings.ToLower(strings.TrimSpace(locale))
+	switch {
+	case strings.HasPrefix(value, "zh"):
+		return "zh"
+	case strings.HasPrefix(value, "ja"):
+		return "ja"
+	case strings.HasPrefix(value, "en"):
+		return "en"
+	default:
+		return ""
+	}
+}
+
+func resultMatchesLocale(locale string, result SearchResult) bool {
+	text := strings.TrimSpace(result.Title + "\n" + result.Snippet)
+	switch localePreferenceFamily(locale) {
+	case "zh":
+		return containsHan(text)
+	case "ja":
+		return containsJapanese(text)
+	case "en":
+		return mostlyASCII(text)
+	default:
+		return false
+	}
+}
+
+func containsHan(text string) bool {
+	for _, r := range text {
+		if r >= 0x4E00 && r <= 0x9FFF {
+			return true
+		}
+	}
+	return false
+}
+
+func containsJapanese(text string) bool {
+	for _, r := range text {
+		if (r >= 0x3040 && r <= 0x309F) || (r >= 0x30A0 && r <= 0x30FF) {
+			return true
+		}
+	}
+	return false
+}
+
+func mostlyASCII(text string) bool {
+	ascii := 0
+	printable := 0
+	for _, r := range text {
+		if r <= 32 {
+			continue
+		}
+		printable++
+		if r <= 0x7F {
+			ascii++
+		}
+	}
+	return printable > 0 && ascii*100/printable >= 80
+}
+
+func applyLanguageHeaders(httpReq *http.Request, locale string) {
+	if value := acceptLanguageValue(locale); value != "" {
+		httpReq.Header.Set("Accept-Language", value)
+	}
+}
+
+func acceptLanguageValue(locale string) string {
+	switch localePreferenceFamily(locale) {
+	case "zh":
+		return "zh-TW,zh-Hant;q=0.95,zh;q=0.9,en;q=0.6"
+	case "ja":
+		return "ja-JP,ja;q=0.95,en;q=0.6"
+	case "en":
+		return "en-US,en;q=0.9"
+	default:
+		return ""
+	}
+}
+
+func serpHL(locale string) string {
+	switch localePreferenceFamily(locale) {
+	case "zh":
+		return "zh-tw"
+	case "ja":
+		return "ja"
+	case "en":
+		return "en"
+	default:
+		return ""
+	}
+}
+
+func serpGL(locale string) string {
+	switch localePreferenceFamily(locale) {
+	case "zh":
+		return "tw"
+	case "ja":
+		return "jp"
+	case "en":
+		return "us"
+	default:
+		return ""
+	}
+}
+
 func (s *Service) searchTavily(ctx context.Context, query string, limit int, cfg ProviderConfig) (SearchOutcome, error) {
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return SearchOutcome{}, ErrCredentialMissing
@@ -256,6 +412,7 @@ func (s *Service) searchTavily(ctx context.Context, query string, limit int, cfg
 	httpReq.Header.Set("Authorization", "Bearer "+strings.TrimSpace(cfg.APIKey))
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("User-Agent", "AI-Console-WebSearch/1.0")
+	applyLanguageHeaders(httpReq, cfg.Locale)
 	raw, err := s.doJSON(httpReq)
 	if err != nil {
 		return SearchOutcome{}, err
@@ -283,49 +440,6 @@ func (s *Service) searchTavily(ctx context.Context, query string, limit int, cfg
 	return outcomeOrNoResults(query, ProviderTavily, ProviderName(ProviderTavily), results)
 }
 
-func (s *Service) searchGoogleCSE(ctx context.Context, query string, limit int, cfg ProviderConfig) (SearchOutcome, error) {
-	if strings.TrimSpace(cfg.APIKey) == "" || strings.TrimSpace(cfg.CX) == "" {
-		return SearchOutcome{}, ErrCredentialMissing
-	}
-	u, _ := url.Parse("https://customsearch.googleapis.com/customsearch/v1")
-	q := u.Query()
-	q.Set("key", strings.TrimSpace(cfg.APIKey))
-	q.Set("cx", strings.TrimSpace(cfg.CX))
-	q.Set("q", query)
-	q.Set("num", fmt.Sprintf("%d", minInt(limit, 10)))
-	u.RawQuery = q.Encode()
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return SearchOutcome{}, err
-	}
-	httpReq.Header.Set("User-Agent", "AI-Console-WebSearch/1.0")
-	raw, err := s.doJSON(httpReq)
-	if err != nil {
-		return SearchOutcome{}, err
-	}
-	var payload struct {
-		Items []struct {
-			Title       string `json:"title"`
-			Link        string `json:"link"`
-			Snippet     string `json:"snippet"`
-			DisplayLink string `json:"displayLink"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return SearchOutcome{}, fmt.Errorf("websearch: decode google response: %w", err)
-	}
-	var results []SearchResult
-	for _, item := range payload.Items {
-		results = appendResult(results, SearchResult{
-			Title:   item.Title,
-			URL:     item.Link,
-			Snippet: item.Snippet,
-			Source:  item.DisplayLink,
-		}, limit)
-	}
-	return outcomeOrNoResults(query, ProviderGoogleCSE, ProviderName(ProviderGoogleCSE), results)
-}
-
 func (s *Service) searchBrave(ctx context.Context, query string, limit int, cfg ProviderConfig) (SearchOutcome, error) {
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return SearchOutcome{}, ErrCredentialMissing
@@ -342,6 +456,7 @@ func (s *Service) searchBrave(ctx context.Context, query string, limit int, cfg 
 	httpReq.Header.Set("Accept", "application/json")
 	httpReq.Header.Set("X-Subscription-Token", strings.TrimSpace(cfg.APIKey))
 	httpReq.Header.Set("User-Agent", "AI-Console-WebSearch/1.0")
+	applyLanguageHeaders(httpReq, cfg.Locale)
 	raw, err := s.doJSON(httpReq)
 	if err != nil {
 		return SearchOutcome{}, err
@@ -371,6 +486,110 @@ func (s *Service) searchBrave(ctx context.Context, query string, limit int, cfg 
 		}, limit)
 	}
 	return outcomeOrNoResults(query, ProviderBrave, ProviderName(ProviderBrave), results)
+}
+
+func (s *Service) searchExa(ctx context.Context, query string, limit int, cfg ProviderConfig) (SearchOutcome, error) {
+	if strings.TrimSpace(cfg.APIKey) == "" {
+		return SearchOutcome{}, ErrCredentialMissing
+	}
+	body, err := json.Marshal(map[string]interface{}{
+		"query":      query,
+		"numResults": limit,
+		"contents": map[string]bool{
+			"highlights": true,
+			"text":       true,
+		},
+	})
+	if err != nil {
+		return SearchOutcome{}, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.exa.ai/search", bytes.NewReader(body))
+	if err != nil {
+		return SearchOutcome{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("User-Agent", "AI-Console-WebSearch/1.0")
+	httpReq.Header.Set("x-api-key", strings.TrimSpace(cfg.APIKey))
+	applyLanguageHeaders(httpReq, cfg.Locale)
+	raw, err := s.doJSON(httpReq)
+	if err != nil {
+		return SearchOutcome{}, err
+	}
+	var payload struct {
+		Results []struct {
+			Title      string   `json:"title"`
+			URL        string   `json:"url"`
+			Text       string   `json:"text"`
+			Summary    string   `json:"summary"`
+			Highlights []string `json:"highlights"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return SearchOutcome{}, fmt.Errorf("websearch: decode exa response: %w", err)
+	}
+	var results []SearchResult
+	for _, item := range payload.Results {
+		results = appendResult(results, SearchResult{
+			Title:   item.Title,
+			URL:     item.URL,
+			Snippet: firstNonEmpty(strings.Join(item.Highlights, " "), item.Summary, item.Text),
+		}, limit)
+	}
+	return outcomeOrNoResults(query, ProviderExa, ProviderName(ProviderExa), results)
+}
+
+func (s *Service) searchSerpAPI(ctx context.Context, query string, limit int, cfg ProviderConfig) (SearchOutcome, error) {
+	if strings.TrimSpace(cfg.APIKey) == "" {
+		return SearchOutcome{}, ErrCredentialMissing
+	}
+	u, _ := url.Parse("https://serpapi.com/search.json")
+	q := u.Query()
+	q.Set("engine", "google")
+	q.Set("q", query)
+	q.Set("api_key", strings.TrimSpace(cfg.APIKey))
+	q.Set("output", "json")
+	if hl := serpHL(cfg.Locale); hl != "" {
+		q.Set("hl", hl)
+	}
+	if gl := serpGL(cfg.Locale); gl != "" {
+		q.Set("gl", gl)
+	}
+	u.RawQuery = q.Encode()
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return SearchOutcome{}, err
+	}
+	httpReq.Header.Set("User-Agent", "AI-Console-WebSearch/1.0")
+	applyLanguageHeaders(httpReq, cfg.Locale)
+	raw, err := s.doJSON(httpReq)
+	if err != nil {
+		return SearchOutcome{}, err
+	}
+	var payload struct {
+		Error          string `json:"error"`
+		OrganicResults []struct {
+			Title         string `json:"title"`
+			Link          string `json:"link"`
+			Snippet       string `json:"snippet"`
+			DisplayedLink string `json:"displayed_link"`
+		} `json:"organic_results"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return SearchOutcome{}, fmt.Errorf("websearch: decode serpapi response: %w", err)
+	}
+	if strings.TrimSpace(payload.Error) != "" {
+		return SearchOutcome{}, fmt.Errorf("websearch: serpapi error: %s", strings.TrimSpace(payload.Error))
+	}
+	var results []SearchResult
+	for _, item := range payload.OrganicResults {
+		results = appendResult(results, SearchResult{
+			Title:   item.Title,
+			URL:     item.Link,
+			Snippet: item.Snippet,
+			Source:  item.DisplayedLink,
+		}, limit)
+	}
+	return outcomeOrNoResults(query, ProviderSerpAPI, ProviderName(ProviderSerpAPI), results)
 }
 
 func (s *Service) doJSON(req *http.Request) ([]byte, error) {
@@ -422,7 +641,7 @@ func EmptyQueryMessage() string {
 }
 
 func MissingConfigMessage() string {
-	return "Web search is not configured yet. Choose Tavily, Google Custom Search JSON API, or Brave Search API and enter the required API fields."
+	return "Web search is not configured yet. Choose Tavily, Exa, SerpApi, or Brave and enter the API key."
 }
 
 func ParseUserQuery(text string) (SearchRequest, bool) {
@@ -602,11 +821,4 @@ func hostOf(rawURL string) string {
 		return ""
 	}
 	return u.Hostname()
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

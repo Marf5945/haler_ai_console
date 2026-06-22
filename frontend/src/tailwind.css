@@ -5389,6 +5389,204 @@
       color: color-mix(in oklab, var(--color-white) 46%, transparent);
     }
   }
+  .web-search-setup-modal {
+    display: grid;
+    gap: calc(var(--spacing) * 4);
+  }
+  .web-search-setup-header {
+    display: grid;
+    gap: calc(var(--spacing) * 1);
+  }
+  .web-search-setup-header h4 {
+    margin: calc(var(--spacing) * 0);
+    font-size: 20px;
+    --tw-font-weight: var(--font-weight-black);
+    font-weight: var(--font-weight-black);
+    --tw-tracking: 0.02em;
+    letter-spacing: 0.02em;
+    color: var(--color-white);
+  }
+  .web-search-setup-eyebrow {
+    font-size: 10px;
+    --tw-font-weight: var(--font-weight-black);
+    font-weight: var(--font-weight-black);
+    --tw-tracking: 0.18em;
+    letter-spacing: 0.18em;
+    color: #ffba55;
+    text-transform: uppercase;
+  }
+  .web-search-setup-subtitle {
+    margin: calc(var(--spacing) * 0);
+    max-width: 46ch;
+    --tw-leading: 1.55;
+    line-height: 1.55;
+    color: color-mix(in srgb, #fff 56%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      color: color-mix(in oklab, var(--color-white) 56%, transparent);
+    }
+  }
+  .web-search-provider-grid {
+    display: grid;
+    gap: calc(var(--spacing) * 2);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .web-search-provider-card {
+    display: grid;
+    min-height: 72px;
+    align-content: flex-start;
+    gap: calc(var(--spacing) * 1);
+    border-radius: 8px;
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: color-mix(in srgb, #fff 12%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-white) 12%, transparent);
+    }
+    padding-inline: calc(var(--spacing) * 3);
+    padding-block: calc(var(--spacing) * 3);
+    text-align: left;
+    background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015));
+    transition: border-color .14s ease, transform .14s ease, box-shadow .14s ease, background .14s ease;
+  }
+  .web-search-provider-card:hover {
+    border-color: rgba(255, 186, 85, 0.42);
+    transform: translateY(-1px);
+    box-shadow: 0 10px 24px rgba(0,0,0,.22);
+  }
+  .web-search-provider-card strong {
+    font-size: 15px;
+    --tw-font-weight: var(--font-weight-black);
+    font-weight: var(--font-weight-black);
+    color: var(--color-white);
+  }
+  .web-search-provider-card small {
+    font-size: 11px;
+    --tw-leading: 1.45;
+    line-height: 1.45;
+    --tw-font-weight: var(--font-weight-bold);
+    font-weight: var(--font-weight-bold);
+    color: color-mix(in srgb, #fff 58%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      color: color-mix(in oklab, var(--color-white) 58%, transparent);
+    }
+  }
+  .web-search-provider-active {
+    border-color: rgba(255, 186, 85, 0.7);
+    background: linear-gradient(180deg, rgba(122,66,13,.45), rgba(58,29,5,.35));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(255,186,85,.12);
+  }
+  .web-search-provider-detail {
+    border-radius: 8px;
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: color-mix(in srgb, #fff 10%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-white) 10%, transparent);
+    }
+    padding-inline: calc(var(--spacing) * 3);
+    padding-block: calc(var(--spacing) * 3);
+    background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.015));
+  }
+  .web-search-provider-detail-head {
+    display: grid;
+    gap: calc(var(--spacing) * 2);
+  }
+  .web-search-provider-detail-head strong {
+    font-size: 14px;
+    --tw-font-weight: var(--font-weight-black);
+    font-weight: var(--font-weight-black);
+    color: var(--color-white);
+  }
+  .web-search-provider-detail-head small {
+    margin-top: calc(var(--spacing) * 1);
+    display: block;
+    font-size: 11px;
+    --tw-font-weight: var(--font-weight-bold);
+    font-weight: var(--font-weight-bold);
+    color: color-mix(in srgb, #fff 56%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      color: color-mix(in oklab, var(--color-white) 56%, transparent);
+    }
+  }
+  .web-search-provider-bestfor {
+    display: inline-flex;
+    width: fit-content;
+    border-radius: calc(infinity * 1px);
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: color-mix(in oklab, #ffba55 22%, transparent);
+    background-color: color-mix(in oklab, #ffba55 10%, transparent);
+    padding-inline: calc(var(--spacing) * 2.5);
+    padding-block: calc(var(--spacing) * 1);
+    font-size: 10px;
+    --tw-font-weight: var(--font-weight-black);
+    font-weight: var(--font-weight-black);
+    color: #ffd690;
+  }
+  .web-search-setup-guide {
+    border-radius: 8px;
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: color-mix(in srgb, #fff 10%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-white) 10%, transparent);
+    }
+    padding-inline: calc(var(--spacing) * 3);
+    padding-block: calc(var(--spacing) * 3);
+    --tw-leading: 1.55;
+    line-height: 1.55;
+    background: rgba(255,255,255,.03);
+  }
+  .web-search-setup-guide strong {
+    font-size: 12px;
+    color: color-mix(in srgb, #fff 76%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      color: color-mix(in oklab, var(--color-white) 76%, transparent);
+    }
+  }
+  .web-search-setup-guide ol {
+    margin-block: calc(var(--spacing) * 2);
+    padding-left: calc(var(--spacing) * 4);
+  }
+  .web-search-setup-guide li + li {
+    margin-top: calc(var(--spacing) * 1);
+  }
+  .web-search-setup-example {
+    margin-top: calc(var(--spacing) * 2);
+    border-radius: 6px;
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: color-mix(in srgb, #fff 8%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-white) 8%, transparent);
+    }
+    background-color: color-mix(in srgb, #000 22%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-black) 22%, transparent);
+    }
+    padding-inline: calc(var(--spacing) * 2.5);
+    padding-block: calc(var(--spacing) * 2);
+    color: color-mix(in srgb, #fff 58%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      color: color-mix(in oklab, var(--color-white) 58%, transparent);
+    }
+  }
+  .web-search-setup-status {
+    display: block;
+    border-radius: 6px;
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: color-mix(in oklab, #7fe7dc 20%, transparent);
+    background-color: color-mix(in oklab, #7fe7dc 8%, transparent);
+    padding-inline: calc(var(--spacing) * 3);
+    padding-block: calc(var(--spacing) * 2);
+    color: #bff8f1;
+  }
+  @media (max-width: 560px) {
+    .web-search-provider-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
   .reference-link-cancel {
     margin-top: calc(var(--spacing) * 3);
     width: 100%;

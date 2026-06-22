@@ -19,6 +19,7 @@ const (
 	webSearchProviderRef = "web_search:provider"
 	webSearchAPIKeyRef   = "web_search:%s:api_key"
 	webSearchCXRef       = "web_search:%s:cx"
+	legacyGoogleProvider = "google_cse"
 )
 
 // GetWebSearchConfig returns only non-secret search configuration state.
@@ -38,12 +39,8 @@ func (a *App) SaveWebSearchConfig(providerID, apiKey, cx string) (interface{}, e
 		return nil, fmt.Errorf("credential store is not available")
 	}
 	apiKey = strings.TrimSpace(apiKey)
-	cx = strings.TrimSpace(cx)
 	if apiKey == "" {
 		return nil, fmt.Errorf("API key is required")
-	}
-	if providerID == websearch.ProviderGoogleCSE && cx == "" {
-		return nil, fmt.Errorf("Google Custom Search Engine ID (cx) is required")
 	}
 	if err := a.secretStore.Store(webSearchProviderRef, providerID); err != nil {
 		return nil, err
@@ -51,11 +48,9 @@ func (a *App) SaveWebSearchConfig(providerID, apiKey, cx string) (interface{}, e
 	if err := a.secretStore.Store(fmt.Sprintf(webSearchAPIKeyRef, providerID), apiKey); err != nil {
 		return nil, err
 	}
-	if providerID == websearch.ProviderGoogleCSE {
-		if err := a.secretStore.Store(fmt.Sprintf(webSearchCXRef, providerID), cx); err != nil {
-			return nil, err
-		}
-	}
+	_ = a.secretStore.Delete(fmt.Sprintf(webSearchCXRef, providerID))
+	_ = a.secretStore.Delete(fmt.Sprintf(webSearchAPIKeyRef, legacyGoogleProvider))
+	_ = a.secretStore.Delete(fmt.Sprintf(webSearchCXRef, legacyGoogleProvider))
 	return frontendDTO(a.webSearchConfigPublic()), nil
 }
 
@@ -69,6 +64,8 @@ func (a *App) ClearWebSearchConfig() (interface{}, error) {
 		_ = a.secretStore.Delete(fmt.Sprintf(webSearchAPIKeyRef, option.ID))
 		_ = a.secretStore.Delete(fmt.Sprintf(webSearchCXRef, option.ID))
 	}
+	_ = a.secretStore.Delete(fmt.Sprintf(webSearchAPIKeyRef, legacyGoogleProvider))
+	_ = a.secretStore.Delete(fmt.Sprintf(webSearchCXRef, legacyGoogleProvider))
 	return frontendDTO(a.webSearchConfigPublic()), nil
 }
 
@@ -94,7 +91,11 @@ func (a *App) SearchWebConfirmed(maskedQuery string, limit int) (interface{}, er
 }
 
 func (a *App) searchWebDirect(query string, limit int) (interface{}, error) {
-	req := websearch.SearchRequest{Query: query, Limit: limit}
+	req := websearch.SearchRequest{
+		Query:    query,
+		Limit:    limit,
+		UILocale: a.currentWebSearchLocale(),
+	}
 	cfg, err := a.loadWebSearchProviderConfig()
 	if err != nil {
 		a.emitWebSearchConfigRequired()
@@ -150,11 +151,15 @@ func (a *App) executeWebSearch(req websearch.SearchRequest, traceID string) skil
 		debugtrace.Record("web_search.egress_redacted", traceID, map[string]interface{}{"count": len(records)})
 		req.Query = masked
 	}
+	if strings.TrimSpace(req.UILocale) == "" {
+		req.UILocale = a.currentWebSearchLocale()
+	}
 	a.pushActionStatus("網路", req.Query) // status rail：正在用網路搜尋「…」…
 	defer a.clearActionStatus()         // 完成/錯誤都收回 idle，避免頂部停在「正在用網路搜尋…」
 	debugtrace.Record("web_search.enter", traceID, map[string]interface{}{
-		"query": req.Query,
-		"limit": req.Limit,
+		"query":  req.Query,
+		"limit":  req.Limit,
+		"locale": req.UILocale,
 	})
 	cfg, cfgErr := a.loadWebSearchProviderConfig()
 	if cfgErr != nil {
@@ -230,19 +235,18 @@ func (a *App) loadWebSearchProviderConfig() (websearch.ProviderConfig, error) {
 		return websearch.ProviderConfig{}, websearch.ErrProviderMissing
 	}
 	providerID = websearch.NormalizeProviderID(providerID)
-	cfg := websearch.ProviderConfig{ProviderID: providerID}
+	if len(websearch.RequiredFields(providerID)) == 0 {
+		return websearch.ProviderConfig{}, websearch.ErrProviderMissing
+	}
+	cfg := websearch.ProviderConfig{
+		ProviderID: providerID,
+		Locale:     a.currentWebSearchLocale(),
+	}
 	apiKey, err := a.secretStore.Load(fmt.Sprintf(webSearchAPIKeyRef, providerID))
 	if err != nil || strings.TrimSpace(apiKey) == "" {
 		return websearch.ProviderConfig{}, websearch.ErrCredentialMissing
 	}
 	cfg.APIKey = apiKey
-	if providerID == websearch.ProviderGoogleCSE {
-		cx, err := a.secretStore.Load(fmt.Sprintf(webSearchCXRef, providerID))
-		if err != nil || strings.TrimSpace(cx) == "" {
-			return websearch.ProviderConfig{}, websearch.ErrCredentialMissing
-		}
-		cfg.CX = cx
-	}
 	return cfg, nil
 }
 
@@ -266,6 +270,30 @@ func (a *App) currentWebSearchProviderID() string {
 		return ""
 	}
 	return websearch.NormalizeProviderID(providerID)
+}
+
+func (a *App) currentWebSearchLocale() string {
+	return webSearchLocaleFromPanel(a.currentPanelLanguage())
+}
+
+func webSearchLocaleFromPanel(panelLanguage string) string {
+	value := strings.ToLower(strings.TrimSpace(panelLanguage))
+	switch {
+	case strings.Contains(value, "英文") || strings.Contains(value, "english") || strings.HasPrefix(value, "en"):
+		return "en"
+	case strings.Contains(value, "日文") || strings.Contains(value, "日本") || strings.HasPrefix(value, "ja"):
+		return "ja"
+	case strings.Contains(value, "葡") || strings.Contains(value, "portugu") || strings.HasPrefix(value, "pt"):
+		return "pt-PT"
+	case strings.Contains(value, "西班牙") || strings.Contains(value, "españ") || strings.HasPrefix(value, "es"):
+		return "es"
+	case strings.Contains(value, "泰") || strings.HasPrefix(value, "th"):
+		return "th"
+	case strings.Contains(value, "繁") || strings.Contains(value, "簡") || strings.Contains(value, "中文") || strings.HasPrefix(value, "zh"):
+		return "zh-TW"
+	default:
+		return "zh-TW"
+	}
 }
 
 func missingWebSearchFields(providerID string) []string {

@@ -24,7 +24,7 @@ const (
 	defaultMaxFileSize     = 16 * 1024 * 1024
 	defaultMaxFiles        = 2000
 	defaultMaxBytesScanned = 32 * 1024 * 1024
-	defaultCacheTTL        = 60 * time.Second
+	defaultCacheTTL        = 15 * time.Minute
 	maxSnippetRunes        = 100
 	maxResponseRunes       = 3600
 )

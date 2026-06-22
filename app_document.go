@@ -272,7 +272,15 @@ func (a *App) ensureReferenceVectorIndexes() {
 }
 
 func (a *App) indexReferenceFileIfNeeded(filePath, vecDir string, vec builtin.Vectorizer) error {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return err
+	}
 	if !builtin.IsSearchableFormat(filePath) {
+		return nil
+	}
+	indexPath := filepath.Join(vecDir, filepath.Base(filePath)+".json")
+	if referenceIndexStampMatches(indexPath, info) {
 		return nil
 	}
 	content, err := builtin.ExtractSearchableText(filePath)
@@ -280,16 +288,19 @@ func (a *App) indexReferenceFileIfNeeded(filePath, vecDir string, vec builtin.Ve
 		return err
 	}
 	contentHash := sha256Hex64(content)
-	indexPath := filepath.Join(vecDir, filepath.Base(filePath)+".json")
 	if data, rerr := os.ReadFile(indexPath); rerr == nil {
 		var existing builtin.DocumentVectorIndex
 		if json.Unmarshal(data, &existing) == nil {
 			if !builtin.IndexNeedsRebuild(existing, vec, contentHash) {
+				_ = writeReferenceIndexStamp(indexPath, info)
 				return nil
 			}
 		}
 	}
-	return builtin.BuildAndSaveVectorIndexToDir(vecDir, filepath.Base(filePath), content, vec)
+	if err := builtin.BuildAndSaveVectorIndexToDir(vecDir, filepath.Base(filePath), content, vec); err != nil {
+		return err
+	}
+	return writeReferenceIndexStamp(indexPath, info)
 }
 
 // sha256Hex64 — local helper mirroring builtin.sha256Hex（不匯出避免循環）。

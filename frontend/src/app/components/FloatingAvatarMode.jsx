@@ -82,6 +82,7 @@ export default function FloatingAvatarMode({
   compactWindowMode = false,
   onCompactDragStart,
   onCompactDrag,
+  onCompactDragEnd,
   onCompactExpandChange,
   flyingBack = false,
   activePersonaId = '',
@@ -133,7 +134,6 @@ export default function FloatingAvatarMode({
     previewFired: false,
     vomitFired: false,
   });
-
   const clampedPosition = useMemo(() => {
     const maxX = Math.max(edgeGap, window.innerWidth - avatarSize - edgeGap);
     const maxY = Math.max(edgeGap, window.innerHeight - avatarSize - edgeGap);
@@ -328,6 +328,7 @@ export default function FloatingAvatarMode({
 
   function startDrag(event) {
     if (event.button !== 0) return;
+    event.preventDefault();
     if (guideVisible) setGuideVisible(false);
     setDragActive(true);
     onCompactDragStart?.();
@@ -362,6 +363,7 @@ export default function FloatingAvatarMode({
   function moveDrag(event) {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
     const pointerX = compactWindowMode ? event.screenX : event.clientX;
     const pointerY = compactWindowMode ? event.screenY : event.clientY;
     const startX = compactWindowMode ? drag.startScreenX : drag.startX;
@@ -370,6 +372,7 @@ export default function FloatingAvatarMode({
     const dy = pointerY - startY;
     if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
     if (compactWindowMode) {
+      onCompactDrag?.(dx, dy);
       updateDragShake(pointerX, pointerY);
       return;
     }
@@ -388,6 +391,9 @@ export default function FloatingAvatarMode({
     event.currentTarget.releasePointerCapture?.(event.pointerId);
     window.setTimeout(() => { dragRef.current = null; }, 0);
     setDragActive(false);
+    if (compactWindowMode && drag.moved) {
+      onCompactDragEnd?.();
+    }
     if (shakeResetRef.current) window.clearTimeout(shakeResetRef.current);
     shakeResetRef.current = window.setTimeout(() => {
       setShakeState(null);

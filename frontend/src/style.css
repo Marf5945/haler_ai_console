@@ -9898,10 +9898,6 @@
   cursor: grabbing;
 }
 
-.floating-avatar-compact-root .floating-avatar-button {
-  --wails-draggable: drag;
-}
-
 .floating-avatar-button img {
   width: 100%;
   height: 100%;

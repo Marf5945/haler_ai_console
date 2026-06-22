@@ -296,6 +296,7 @@ import {
   Quit,
   ClipboardGetText,
   ClipboardSetText,
+  ScreenGetAll,
   WindowGetPosition,
   WindowGetSize,
   WindowSetAlwaysOnTop,
@@ -382,6 +383,13 @@ const FLOATING_AVATAR_WINDOW_SIZE = FLOATING_AVATAR_SIZE + FLOATING_AVATAR_INSET
 // 後台頭像單擊展開迷你框時，需要把頭像浮窗放大到能容納面板的尺寸。
 const FLOATING_AVATAR_PANEL_W = 720;
 const FLOATING_AVATAR_PANEL_H = 540;
+
+function firstFiniteNumber(...values) {
+  for (const value of values) {
+    if (Number.isFinite(value)) return Number(value);
+  }
+  return null;
+}
 
 const fallbackState = {
   /* i18n: fallbackState */ greeting: _t('greeting.hello'),
@@ -1752,6 +1760,7 @@ function App() {
   const [floatingReminderPause, setFloatingReminderPause] = useState({mode: '', until: 0});
   const floatingAvatarWindowRef = useRef({restore: null, compactPosition: null});
   const floatingAvatarDragWindowRef = useRef(null);
+  const floatingAvatarLastCompactPositionRef = useRef(null);
   const [floatingAvatarPosition, setFloatingAvatarPosition] = useState(() => {
     try {
       const saved = JSON.parse(window.localStorage.getItem('floating_avatar_position') || 'null');
@@ -7390,6 +7399,7 @@ function App() {
         },
         compactPosition: {x: compactX, y: compactY},
       };
+      rememberFloatingAvatarCompactPosition({x: compactX, y: compactY});
       WindowUnminimise();
       WindowShow();
       WindowSetMinSize(FLOATING_AVATAR_WINDOW_SIZE, FLOATING_AVATAR_WINDOW_SIZE);
@@ -7424,6 +7434,20 @@ function App() {
     const wasCompact = floatingAvatarCompactWindowRef.current || Boolean(restore);
     if (!wasCompact) return;
     floatingAvatarTransitionRef.current = true;
+    const expandedState = floatingAvatarWindowRef.current?.expanded;
+    const compactLivePosition = await WindowGetPosition().catch(() => null);
+    if (!expandedState && Number.isFinite(compactLivePosition?.x) && Number.isFinite(compactLivePosition?.y)) {
+      rememberFloatingAvatarCompactPosition(compactLivePosition);
+      floatingAvatarWindowRef.current = {
+        ...floatingAvatarWindowRef.current,
+        compactPosition: {
+          x: Math.round(compactLivePosition.x),
+          y: Math.round(compactLivePosition.y),
+        },
+      };
+    } else if (Number.isFinite(floatingAvatarWindowRef.current?.compactPosition?.x) && Number.isFinite(floatingAvatarWindowRef.current?.compactPosition?.y)) {
+      rememberFloatingAvatarCompactPosition(floatingAvatarWindowRef.current.compactPosition);
+    }
     // 先在頭像浮窗內播放「飛回」動畫，再真正放大視窗，避免縮放當下硬切。
     setFloatingAvatarFlyingBack(true);
     await new Promise((resolve) => window.setTimeout(resolve, 240));
@@ -7511,28 +7535,38 @@ function App() {
           ? {x: Math.round(livePosition.x), y: Math.round(livePosition.y)}
           : ref.compactPosition || {x: 0, y: 0};
         ref.compactPosition = origin;
+        rememberFloatingAvatarCompactPosition(origin);
         const avatarScreenX = origin.x + FLOATING_AVATAR_INSET;
         const avatarScreenY = origin.y + FLOATING_AVATAR_INSET;
-        const sw = window.screen?.availWidth || window.innerWidth || 1440;
-        const sh = window.screen?.availHeight || window.innerHeight || 900;
+        const screens = await ScreenGetAll().catch(() => []);
+        const currentScreen = (screens || []).find((item) => item?.isCurrent) || (screens || []).find((item) => item?.isPrimary) || null;
         // 視窗展開後保留上方回覆泡泡、左側提示、右側迷你框與下方選項，
         // 並讓頭像螢幕位置在展開前後維持不變（不會跳）。
         const LEFT_ROOM = 236;
         const TOP_ROOM = 118;
-        const expandedW = Math.min(FLOATING_AVATAR_PANEL_W, sw);
-        const expandedH = Math.min(FLOATING_AVATAR_PANEL_H, sh);
+        const screenLeft = firstFiniteNumber(window.screen?.availLeft, window.screen?.left);
+        const screenTop = firstFiniteNumber(window.screen?.availTop, window.screen?.top);
+        const screenWidth = firstFiniteNumber(window.screen?.availWidth, currentScreen?.width, window.innerWidth) || FLOATING_AVATAR_PANEL_W;
+        const screenHeight = firstFiniteNumber(window.screen?.availHeight, currentScreen?.height, window.innerHeight) || FLOATING_AVATAR_PANEL_H;
+        const expandedW = Math.min(FLOATING_AVATAR_PANEL_W, screenWidth);
+        const expandedH = Math.min(FLOATING_AVATAR_PANEL_H, screenHeight);
         let newX = avatarScreenX - LEFT_ROOM;
         let newY = avatarScreenY - TOP_ROOM;
-        if (newX < 0) newX = 0;
-        if (newX + expandedW > sw) newX = Math.max(0, sw - expandedW);
-        if (newY + expandedH > sh) newY = Math.max(0, sh - expandedH);
-        if (newY < 0) newY = 0;
+        if (Number.isFinite(screenLeft)) {
+          const minX = screenLeft;
+          const maxX = screenLeft + screenWidth - expandedW;
+          newX = Math.max(Math.min(newX, Math.max(minX, maxX)), Math.min(minX, maxX));
+        }
+        if (Number.isFinite(screenTop)) {
+          const minY = screenTop;
+          const maxY = screenTop + screenHeight - expandedH;
+          newY = Math.max(Math.min(newY, Math.max(minY, maxY)), Math.min(minY, maxY));
+        }
         const avatarLocalX = avatarScreenX - newX;
         const avatarLocalY = avatarScreenY - newY;
         ref.expanded = {avatarScreenX, avatarScreenY};
         WindowSetSize(expandedW, expandedH);
         WindowSetPosition(Math.round(newX), Math.round(newY));
-        ref.compactPosition = {x: Math.round(newX), y: Math.round(newY)};
         const expandedAvatarPosition = {x: Math.round(avatarLocalX), y: Math.round(avatarLocalY)};
         floatingAvatarPositionRef.current = expandedAvatarPosition;
         setFloatingAvatarPosition(expandedAvatarPosition);
@@ -7559,6 +7593,14 @@ function App() {
     setFloatingAvatarPosition(nextPosition);
   }
 
+  function rememberFloatingAvatarCompactPosition(nextPosition) {
+    if (!Number.isFinite(nextPosition?.x) || !Number.isFinite(nextPosition?.y)) return;
+    floatingAvatarLastCompactPositionRef.current = {
+      x: Math.round(nextPosition.x),
+      y: Math.round(nextPosition.y),
+    };
+  }
+
   function beginCompactFloatingAvatarDrag() {
     floatingAvatarDragWindowRef.current = floatingAvatarWindowRef.current?.compactPosition || null;
   }
@@ -7571,7 +7613,19 @@ function App() {
       ...floatingAvatarWindowRef.current,
       compactPosition: next,
     };
+    rememberFloatingAvatarCompactPosition(next);
     WindowSetPosition(next.x, next.y);
+  }
+
+  async function syncCompactFloatingAvatarWindowPosition() {
+    const livePosition = await WindowGetPosition().catch(() => null);
+    if (!Number.isFinite(livePosition?.x) || !Number.isFinite(livePosition?.y)) return;
+    const next = {x: Math.round(livePosition.x), y: Math.round(livePosition.y)};
+    floatingAvatarWindowRef.current = {
+      ...floatingAvatarWindowRef.current,
+      compactPosition: next,
+    };
+    rememberFloatingAvatarCompactPosition(next);
   }
 
   function updateFloatingAvatarDraft(value) {
@@ -7675,6 +7729,7 @@ function App() {
         compactWindowMode={floatingAvatarCompactWindow}
         onCompactDragStart={beginCompactFloatingAvatarDrag}
         onCompactDrag={moveCompactFloatingAvatarWindow}
+        onCompactDragEnd={syncCompactFloatingAvatarWindowPosition}
         onCompactExpandChange={setCompactAvatarExpanded}
         flyingBack={floatingAvatarFlyingBack}
         onRestore={() => restoreFromFloatingAvatar('auto')}

@@ -1,0 +1,198 @@
+<svg width="512" height="512" viewBox="0 0 680 680" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>側面狼犬獸人頭像 app icon</title>
+<desc>線條描邊風格的狼犬獸人側面頭像，深藍與銀白配色，神秘深邃的半閉眼神，面朝左方</desc>
+<defs>
+<style>
+.outline-main { fill: none; stroke: #1a2a5e; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.outline-detail { fill: none; stroke: #1a2a5e; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.outline-fine { fill: none; stroke: #1a2a5e; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+.outline-hair { fill: none; stroke: #2a3d7a; stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; }
+.fill-accent { fill: #c0cde8; stroke: none; }
+.fill-eye { fill: #1a2a5e; }
+.fill-highlight { fill: #e8edf8; stroke: none; }
+</style>
+</defs>
+
+<!-- Ear - pointed, tall -->
+<path class="outline-main" d="
+  M 340 120
+  L 300 60
+  L 270 80
+  Q 280 110, 310 140
+"/>
+<!-- Inner ear detail -->
+<path class="outline-fine" d="
+  M 325 115
+  L 303 72
+  L 285 88
+  Q 292 108, 312 130
+"/>
+<path class="fill-accent" d="
+  M 325 115
+  L 303 72
+  L 285 88
+  Q 292 108, 312 130
+  Z
+" opacity="0.4"/>
+
+<!-- Second ear hint (behind) -->
+<path class="outline-fine" d="
+  M 370 125
+  L 355 70
+  L 340 82
+" opacity="0.5"/>
+
+<!-- Head top / skull -->
+<path class="outline-main" d="
+  M 270 80
+  Q 280 110, 310 140
+  Q 260 160, 230 200
+  Q 200 240, 190 280
+"/>
+
+<!-- Back of head flowing to neck -->
+<path class="outline-main" d="
+  M 340 120
+  Q 380 140, 400 180
+  Q 420 220, 430 270
+  Q 435 310, 430 350
+  Q 425 400, 410 440
+  Q 395 480, 370 520
+  Q 350 550, 340 580
+"/>
+
+<!-- Forehead to snout bridge -->
+<path class="outline-main" d="
+  M 230 200
+  Q 210 230, 195 260
+  Q 180 280, 160 310
+  Q 145 335, 130 350
+  Q 115 365, 100 375
+"/>
+
+<!-- Snout / nose area -->
+<path class="outline-main" d="
+  M 100 375
+  Q 90 380, 88 390
+  Q 86 400, 95 408
+  Q 105 415, 115 412
+"/>
+
+<!-- Nose detail -->
+<ellipse class="fill-eye" cx="95" cy="393" rx="8" ry="6"/>
+<path class="fill-highlight" d="M 90 390 Q 93 387, 97 389 Q 95 391, 90 390 Z" opacity="0.6"/>
+
+<!-- Lower jaw -->
+<path class="outline-main" d="
+  M 115 412
+  Q 130 418, 150 415
+  Q 175 410, 200 400
+  Q 230 385, 255 370
+"/>
+
+<!-- Mouth line -->
+<path class="outline-detail" d="
+  M 105 405
+  Q 130 400, 155 398
+  Q 180 395, 200 390
+"/>
+
+<!-- Chin to throat to chest -->
+<path class="outline-main" d="
+  M 255 370
+  Q 275 360, 290 370
+  Q 310 385, 320 410
+  Q 335 450, 340 490
+  Q 342 530, 340 580
+"/>
+
+<!-- Eye - half-closed, mysterious -->
+<path class="fill-accent" d="
+  M 195 285
+  Q 210 275, 230 278
+  Q 245 280, 250 290
+  Q 245 296, 230 298
+  Q 210 300, 195 295
+  Z
+" opacity="0.5"/>
+<!-- Eye outline -->
+<path class="outline-detail" d="
+  M 195 290
+  Q 210 278, 230 280
+  Q 248 283, 252 292
+"/>
+<path class="outline-detail" d="
+  M 195 290
+  Q 210 298, 230 298
+  Q 248 296, 252 292
+"/>
+<!-- Pupil - narrow slit for mystery -->
+<ellipse class="fill-eye" cx="228" cy="290" rx="5" ry="7"/>
+<!-- Eye glint -->
+<circle class="fill-highlight" cx="225" cy="287" r="2"/>
+
+<!-- Brow ridge -->
+<path class="outline-detail" d="
+  M 185 275
+  Q 200 265, 225 265
+  Q 245 266, 258 275
+"/>
+
+<!-- Fur texture lines on forehead -->
+<path class="outline-hair" d="M 250 230 Q 240 245, 235 260"/>
+<path class="outline-hair" d="M 265 220 Q 255 238, 248 255"/>
+<path class="outline-hair" d="M 225 235 Q 218 250, 215 265"/>
+
+<!-- Cheek fur lines -->
+<path class="outline-hair" d="M 260 310 Q 250 325, 245 340"/>
+<path class="outline-hair" d="M 275 305 Q 268 322, 262 338"/>
+<path class="outline-hair" d="M 245 318 Q 238 332, 232 348"/>
+
+<!-- Mane / neck fur - flowing lines -->
+<path class="outline-hair" d="M 390 200 Q 400 230, 405 265"/>
+<path class="outline-hair" d="M 380 210 Q 392 245, 398 280"/>
+<path class="outline-hair" d="M 410 260 Q 415 290, 418 320"/>
+<path class="outline-hair" d="M 400 280 Q 408 310, 412 340"/>
+<path class="outline-hair" d="M 420 310 Q 422 340, 420 370"/>
+<path class="outline-hair" d="M 405 350 Q 400 380, 395 410"/>
+<path class="outline-hair" d="M 395 390 Q 385 420, 375 450"/>
+
+<!-- Throat fur lines -->
+<path class="outline-hair" d="M 300 390 Q 310 420, 318 450"/>
+<path class="outline-hair" d="M 315 405 Q 322 430, 328 460"/>
+<path class="outline-hair" d="M 285 380 Q 295 405, 305 435"/>
+
+<!-- Snout fur detail -->
+<path class="outline-hair" d="M 170 340 Q 160 350, 148 360"/>
+<path class="outline-hair" d="M 185 335 Q 172 348, 162 358"/>
+<path class="outline-hair" d="M 155 360 Q 140 370, 125 378"/>
+
+<!-- Whisker dots -->
+<circle class="fill-eye" cx="140" cy="385" r="1.5"/>
+<circle class="fill-eye" cx="148" cy="392" r="1.5"/>
+<circle class="fill-eye" cx="155" cy="399" r="1.5"/>
+<circle class="fill-eye" cx="135" cy="395" r="1.5"/>
+
+<!-- Jaw muscle line -->
+<path class="outline-fine" d="
+  M 255 340
+  Q 270 350, 275 365
+"/>
+
+<!-- Collar / shoulder hint -->
+<path class="outline-detail" d="
+  M 340 580
+  Q 320 590, 290 595
+  Q 260 598, 230 595
+"/>
+<path class="outline-detail" d="
+  M 340 580
+  Q 360 588, 390 592
+  Q 420 595, 450 590
+"/>
+
+<!-- Shoulder fur accent lines -->
+<path class="outline-hair" d="M 300 570 Q 290 580, 275 588"/>
+<path class="outline-hair" d="M 360 565 Q 375 575, 390 582"/>
+
+</svg>

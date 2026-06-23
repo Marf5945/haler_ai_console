@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="憂樂傻酷 avatar">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#1c1e2a"/>
+      <stop offset=".54" stop-color="#0e1016"/>
+      <stop offset="1" stop-color="#050508"/>
+    </linearGradient>
+    <linearGradient id="fur" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#d0d8e0"/>
+      <stop offset=".55" stop-color="#a0aab4"/>
+      <stop offset="1" stop-color="#606a74"/>
+    </linearGradient>
+    <linearGradient id="ear-inner" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#263452"/>
+      <stop offset="1" stop-color="#1a2840"/>
+    </linearGradient>
+    <linearGradient id="muzzle" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#e6ebf2"/>
+      <stop offset="1" stop-color="#d0d6de"/>
+    </linearGradient>
+    <radialGradient id="amber-glow" cx="50%" cy="38%" r="55%">
+      <stop offset="0" stop-color="#aab9d2" stop-opacity=".3"/>
+      <stop offset="1" stop-color="#aab9d2" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- 背景 -->
+  <rect width="512" height="512" rx="58" fill="url(#bg)"/>
+  <rect x="24" y="24" width="464" height="464" rx="44" fill="none" stroke="#aab9d2" stroke-opacity=".5" stroke-width="8"/>
+  <!-- 左尖耳 -->
+  <path d="M155 135 115 55l75 40z" fill="url(#fur)"/>
+  <path d="M162 128 135 78l48 26z" fill="url(#ear-inner)"/>
+  <!-- 右尖耳 -->
+  <path d="M357 135l40-80-75 40z" fill="url(#fur)"/>
+  <path d="M350 128l27-50-48 26z" fill="url(#ear-inner)"/>
+  <!-- 左耳環 -->
+  <circle cx="108" cy="100" r="10" fill="none" stroke="#aab9d2" stroke-width="5"/>
+  <circle cx="108" cy="108" r="4" fill="#aab9d2"/>
+  <!-- 頭部主體 -->
+  <path d="M139 210c0-78 48-135 117-135s117 57 117 135c0 67-44 122-117 122s-117-55-117-122z" fill="url(#fur)"/>
+  <!-- 額頭白紋 -->
+  <path d="M215 84c16-14 66-14 82 0l-41 120z" fill="#e6ebf2" opacity=".5"/>
+  <!-- 口吻部（淺銀白區域） -->
+  <path d="M211 240c14-10 76-10 90 0l-45 56z" fill="url(#muzzle)"/>
+  <!-- 鼻頭 -->
+  <ellipse cx="256" cy="248" rx="16" ry="10" fill="#18162a"/>
+  <!-- 壞笑嘴巴（右邊上揚的不對稱弧線） -->
+  <path d="M218 286c10 6 24 10 38 6 14-4 30-14 40-6" fill="none" stroke="#322e3a" stroke-width="10" stroke-linecap="round"/>
+  <!-- 左尖牙 -->
+  <path d="M220 284l-4 14 8-2z" fill="#e6ebf2"/>
+  <!-- 右尖牙 -->
+  <path d="M294 280l4 14-8-2z" fill="#e6ebf2"/>
+  <!-- 眼睛（琥珀色，帶壓眉） -->
+  <path d="M175 195c16-14 42-14 58 0" fill="none" stroke="#1c1e2a" stroke-width="9" stroke-linecap="round" opacity=".85"/>
+  <path d="M279 195c16-14 42-14 58 0" fill="none" stroke="#1c1e2a" stroke-width="9" stroke-linecap="round" opacity=".85"/>
+  <circle cx="214" cy="218" r="13" fill="#e4aa32"/>
+  <circle cx="214" cy="216" r="5" fill="#1c1e2a"/>
+  <circle cx="298" cy="218" r="13" fill="#e4aa32"/>
+  <circle cx="298" cy="216" r="5" fill="#1c1e2a"/>
+  <!-- 身體 / 衣領 -->
+  <path d="M124 415c16-74 67-120 132-120s116 46 132 120v37H124z" fill="#1c1e2a"/>
+  <path d="M168 452c17-42 45-70 88-70s71 28 88 70z" fill="#2a3452" opacity=".7"/>
+  <!-- 領口銀線 -->
+  <path d="M164 360c36 28 148 28 184 0" fill="none" stroke="#aab9d2" stroke-width="4" stroke-linecap="round" opacity=".6"/>
+  <!-- 氛圍光 -->
+  <rect width="512" height="512" rx="58" fill="url(#amber-glow)"/>
+</svg>

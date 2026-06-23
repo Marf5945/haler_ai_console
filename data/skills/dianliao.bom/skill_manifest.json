@@ -1,0 +1,55 @@
+{
+  "schema_version": "skill_manifest.v1",
+  "skill_id": "dianliao.bom",
+  "display_name": "產出電料Bom",
+  "version": "1.0.0",
+  "description_doc": "README.md",
+  "source": {
+    "source_type": "folder_scan",
+    "original_path_hash": ""
+  },
+  "tags": {
+    "purpose_tag": ["transform", "lookup"],
+    "action_tag": ["產生", "輸出", "建立", "BOM", "電料BOM"],
+    "domain_tag": ["電料", "電控", "BOM", "料號", "品名", "電控箱"],
+    "risk_tag": ["medium"]
+  },
+  "permissions": {
+    "network": "none",
+    "filesystem": "workspace_write",
+    "execution": "none"
+  },
+  "resources": {
+    "examples": [],
+    "programs": ["build_bom"],
+    "cli_md": ["usage"]
+  },
+  "routing": {
+    "action_patterns": [
+      "產生電料BOM",
+      "輸出電料BOM",
+      "建立電控BOM",
+      "做一份電料BOM",
+      "幫我整理電料BOM"
+    ],
+    "target_aliases": ["電料BOM", "BOM", "電控BOM", "電料", "料號", "品名", "電控箱"],
+    "minimum_auto_score": 0.82
+  },
+  "lifecycle": {
+    "status": "enabled",
+    "visible_in_toolbar": true,
+    "route_as_candidate": true,
+    "auto_execute": false,
+    "user_confirmed": true
+  },
+  "expected_chain": {
+    "schema": "skill_chain.v1",
+    "max_steps": 16,
+    "steps": [
+      { "action": "確認", "target": "是否輸出電料BOM", "code": "ㄇ", "requirement": "OP" },
+      { "action": "詢問", "target": "機台名稱/日期/數量等必填欄位", "code": "ㄇ", "requirement": "OP" },
+      { "action": "查詢", "target": "電料編碼紀錄(Materials)", "code": "ㄔ", "requirement": "RE" },
+      { "action": "產生", "target": "電料BOM.xlsx", "code": "ㄖ", "requirement": "OP" }
+    ]
+  }
+}

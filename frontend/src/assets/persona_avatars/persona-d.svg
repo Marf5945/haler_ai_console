@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Persona D avatar">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#0b1b26"/>
+      <stop offset="1" stop-color="#030607"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="34%" r="60%">
+      <stop offset="0" stop-color="#52c9f2" stop-opacity=".6"/>
+      <stop offset="1" stop-color="#52c9f2" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="58" fill="url(#bg)"/>
+  <rect x="24" y="24" width="464" height="464" rx="44" fill="none" stroke="#52c9f2" stroke-opacity=".72" stroke-width="8"/>
+  <path d="M256 92l140 140-140 140-140-140z" fill="#52c9f2"/>
+  <path d="M256 150l82 82-82 82-82-82z" fill="#08121a"/>
+  <circle cx="229" cy="232" r="9" fill="#52c9f2"/>
+  <circle cx="283" cy="232" r="9" fill="#52c9f2"/>
+  <path d="M226 268c20 15 40 15 60 0" fill="none" stroke="#52c9f2" stroke-width="12" stroke-linecap="round"/>
+  <rect width="512" height="512" fill="url(#glow)"/>
+</svg>

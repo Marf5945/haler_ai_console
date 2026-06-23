@@ -1,0 +1,204 @@
+// ============================================================
+// i18n 核心模組 — 基於 Zustand，零額外依賴
+// 支援語系：zh-TW（預設）、en、ja、pt-PT、es、th（尚未建立時自動 fallback）
+// ============================================================
+
+import { create } from 'zustand';
+
+// ----------------------------------------------------------
+// 靜態匯入翻譯檔（確保被打包工具收錄）
+// ----------------------------------------------------------
+import zhTW from './zh-TW.json';
+import en from './en.json';
+import ja from './ja.json';
+import ptPT from './pt-PT.json';
+import es from './es.json';
+import th from './th.json';
+import ko from './ko.json';
+
+// ----------------------------------------------------------
+// 語系對照表
+// ----------------------------------------------------------
+const TRANSLATION_MAP = {
+  'zh-TW': zhTW,
+  en,
+  ja,
+  'pt-PT': ptPT,
+  es,
+  th,
+  ko,
+};
+
+// ----------------------------------------------------------
+// RTL 語系清單（保留給未來阿拉伯語等右至左語言使用）
+// ----------------------------------------------------------
+const RTL_LANGUAGES = ['ar', 'he', 'fa', 'ur'];
+
+// ----------------------------------------------------------
+// 工具函式：從 localStorage 讀取目前語系，預設 zh-TW
+// ----------------------------------------------------------
+export function getCurrentLanguage() {
+  try {
+    return localStorage.getItem('i18n_language') || 'zh-TW';
+  } catch {
+    return 'zh-TW';
+  }
+}
+
+// ----------------------------------------------------------
+// 工具函式：解析點記法路徑，如 'greeting.pool.0'
+// ----------------------------------------------------------
+function resolveDotKey(obj, key) {
+  if (!obj || typeof obj !== 'object') return undefined;
+  return key.split('.').reduce((acc, segment) => {
+    if (acc === undefined || acc === null) return undefined;
+    return acc[segment];
+  }, obj);
+}
+
+// ----------------------------------------------------------
+// 工具函式：將 {variable} 佔位符替換為 params 中對應的值
+// ----------------------------------------------------------
+function interpolate(template, params) {
+  if (!params || typeof template !== 'string') return template;
+  return template.replace(/\{(\w+)\}/g, (_, key) =>
+    Object.prototype.hasOwnProperty.call(params, key) ? params[key] : `{${key}}`
+  );
+}
+
+// ----------------------------------------------------------
+// 核心翻譯解析（可在 React 元件外部直接使用）
+// ----------------------------------------------------------
+function resolveTranslation(translations, fallback, language, key, params) {
+  /* 先從目前語系查找 */
+  let value = resolveDotKey(translations, key);
+
+  /* 找不到則 fallback 至 zh-TW */
+  if (value === undefined) {
+    value = resolveDotKey(fallback, key);
+    if (value === undefined && import.meta.env.DEV) {
+      console.warn(`[i18n] 找不到翻譯 key："${key}"（語系：${language}）`);
+    }
+  }
+
+  /* 仍找不到則回傳 key 本身，方便除錯 */
+  if (value === undefined) return key;
+
+  return interpolate(String(value), params);
+}
+
+// ----------------------------------------------------------
+// 模組初始化：讀取語系設定
+// ----------------------------------------------------------
+const _initialLanguage = getCurrentLanguage();
+const _initialTranslations = TRANSLATION_MAP[_initialLanguage] ?? {};
+
+function applyDocumentLanguage(lang) {
+  if (typeof document === 'undefined') return;
+  document.documentElement.lang = lang;
+  document.documentElement.dir = RTL_LANGUAGES.includes(lang) ? 'rtl' : 'ltr';
+}
+
+// ----------------------------------------------------------
+// Zustand Store
+// ----------------------------------------------------------
+const useI18n = create((set, get) => ({
+  language: _initialLanguage,
+  translations: _initialTranslations,
+  fallback: zhTW,
+
+  /* t(key, params?)：翻譯查找 + 插值 */
+  t: (key, params) => {
+    const { translations, fallback, language } = get();
+    return resolveTranslation(translations, fallback, language, key, params);
+  },
+
+  /* setLanguage(lang)：切換語系，不重載 UI */
+  setLanguage: (lang) => {
+    try { localStorage.setItem('i18n_language', lang); } catch {}
+    set({
+      language: lang,
+      translations: TRANSLATION_MAP[lang] ?? {},
+    });
+    applyDocumentLanguage(lang);
+  },
+
+  /* getDirection()：文字方向（預留 RTL） */
+  getDirection: () => {
+    return RTL_LANGUAGES.includes(get().language) ? 'rtl' : 'ltr';
+  },
+}));
+
+// ----------------------------------------------------------
+// 收集所有語系的女性稱呼關鍵字（聯集，去重、轉小寫）
+// 用途：掃描人格名稱/身分判斷是否切換女性語氣池
+// ----------------------------------------------------------
+export function getAllFemaleKeywords() {
+  const set = new Set();
+  for (const tr of Object.values(TRANSLATION_MAP)) {
+    const arr = tr && tr.greeting && tr.greeting.femaleKeywords;
+    if (Array.isArray(arr)) {
+      arr.forEach((w) => {
+        const s = String(w).trim().toLowerCase();
+        if (s) set.add(s);
+      });
+    }
+  }
+  return [...set];
+}
+
+// ----------------------------------------------------------
+// 收集所有語系的「獸人/野性」關鍵字（聯集）
+// 用途：掃描人格名稱/身分判斷是否切換野性（本汪）語氣池
+// ----------------------------------------------------------
+export function getAllBeastKeywords() {
+  const set = new Set();
+  for (const tr of Object.values(TRANSLATION_MAP)) {
+    const arr = tr && tr.greeting && tr.greeting.beastKeywords;
+    if (Array.isArray(arr)) {
+      arr.forEach((w) => {
+        const s = String(w).trim().toLowerCase();
+        if (s) set.add(s);
+      });
+    }
+  }
+  return [...set];
+}
+
+// ----------------------------------------------------------
+// 由所有語系的問候字串建立「文字→i18n key」反查表
+// 涵蓋 greeting.hello / greeting.pool.N / greeting.poolFem.N
+// 供切換語系時把已顯示的問候語重新在地化
+// ----------------------------------------------------------
+export function buildGreetingTextKeyMap() {
+  const map = {};
+  for (const tr of Object.values(TRANSLATION_MAP)) {
+    const g = tr && tr.greeting;
+    if (!g) continue;
+    if (typeof g.hello === 'string' && g.hello.trim()) map[g.hello] = 'greeting.hello';
+    ['pool', 'poolFem', 'poolWild'].forEach((poolKey) => {
+      const arr = g[poolKey];
+      if (Array.isArray(arr)) {
+        arr.forEach((txt, i) => {
+          if (typeof txt === 'string' && txt.trim()) map[txt] = `greeting.${poolKey}.${i}`;
+        });
+      }
+    });
+  }
+  return map;
+}
+
+// ----------------------------------------------------------
+// 獨立 t 函式：React 元件外使用
+// ----------------------------------------------------------
+export function t(key, params) {
+  const { translations, fallback, language } = useI18n.getState();
+  return resolveTranslation(translations, fallback, language, key, params);
+}
+
+export function tForLanguage(language, key, params) {
+  const locale = TRANSLATION_MAP[language] ? language : 'zh-TW';
+  return resolveTranslation(TRANSLATION_MAP[locale] ?? {}, zhTW, locale, key, params);
+}
+
+export default useI18n;

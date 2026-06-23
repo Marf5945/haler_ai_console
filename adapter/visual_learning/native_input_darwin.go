@@ -1,0 +1,1798 @@
+//go:build darwin
+
+package visual_learning
+
+// macOS 原生點擊錄製器（對齊 Windows 版 native_input_windows.go 的契約）。
+//
+// 機制：Quartz CGEventTap 在 session 層級「監聽」全域滑鼠放開事件
+//   （kCGEventLeftMouseUp / kCGEventRightMouseUp，listen-only 不攔截），
+//   每次放開就用 CGWindowList 解析游標下最前面的外部視窗，組成
+//   NativeClickEvent 交給 onClick。這讓使用者在 app 外部視窗的點擊
+//   也能進入 learning trace。
+//
+// 權限（缺一不可，缺哪個都會給明確錯誤訊息）：
+//   - 輔助使用 Accessibility：CGEventPost 回放點擊、AX 視窗 raise。
+//   - 輸入監控 Input Monitoring：listen-only CGEventTap（macOS 10.15+）。
+//     注意：只請求 Accessibility 不會帶出輸入監控授權，必須另外呼叫
+//     CGRequestListenEventAccess()。
+//   - 螢幕錄製 Screen Recording：CaptureWindow 視覺重定位 +
+//     CGWindowList 的 kCGWindowName。缺權限時 replay 退回原始螢幕座標。
+//
+// 座標空間：CGEventTap / CGWindowList bounds 都是「point」；
+//   截圖（SCK / CGWindowListCreateImage）是「pixel」（Retina 為 2x）。
+//   WindowCapture.Scale 記錄 pixels-per-point，所有 anchor 計算統一在
+//   capture pixel 空間，回放執行點再除以 Scale 還原為 point。
+//
+// 截圖：macOS 14+ 優先走 ScreenCaptureKit（screencapture_darwin.m），
+//   舊系統 fallback 到 dlsym 的 CGWindowListCreateImage（14+ 已棄用）。
+//
+// 執行緒：event tap 掛在某條 OS thread 的 CFRunLoop 上，故 Start() 內
+//   以 runtime.LockOSThread() 鎖住一條 goroutine 跑 CFRunLoopRun()，
+//   Stop() 由另一條 goroutine 呼叫 CFRunLoopStop() 喚醒結束。
+
+/*
+#cgo CFLAGS: -x objective-c
+#cgo LDFLAGS: -framework ApplicationServices -framework AppKit -framework CoreFoundation -framework CoreGraphics -framework Foundation
+
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+#include <unistd.h>
+#include <math.h>
+#include <dlfcn.h>
+#include <dispatch/dispatch.h>
+#include <ApplicationServices/ApplicationServices.h>
+#import <AppKit/AppKit.h>
+#include <CoreFoundation/CoreFoundation.h>
+#include "screencapture_darwin.h"
+
+// Go 端匯出的回呼（cgo 產生對應 C symbol）。
+extern void goNativeClickCallback(double x, double y, int button, int clickCount, uintptr_t handle);
+extern void goNativeKeyboardCallback(int keyCode, uint64_t flags, const uint16_t *chars, int length, uintptr_t handle);
+
+typedef struct {
+    CFMachPortRef      tap;
+    CFRunLoopSourceRef source;
+    CFRunLoopRef       runloop;
+} NativeTap;
+
+// 單一錄製器假設：保存 tap 供 timeout 後重新啟用。
+@class AIConsoleWolfCursorView;
+static CFMachPortRef gTap = NULL;
+static NSWindow *gAgentCursorWindow = nil;
+static AIConsoleWolfCursorView *gAgentCursorView = nil;
+static uint64_t gAgentCursorGeneration = 0;
+static double gAgentCursorLastX = 0;
+static double gAgentCursorLastY = 0;
+static int gAgentCursorHasLast = 0;
+
+@interface AIConsoleWolfCursorView : NSView
+{
+    NSMutableArray *trailPoints;
+    NSPoint cursorPoint;
+    BOOL hasCursor;
+}
+- (void)showAtPoint:(NSPoint)point;
+- (void)hideCursor;
+@end
+
+@implementation AIConsoleWolfCursorView
+- (instancetype)initWithFrame:(NSRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) {
+        trailPoints = [[NSMutableArray alloc] init];
+        cursorPoint = NSMakePoint(0, 0);
+        hasCursor = NO;
+    }
+    return self;
+}
+
+- (BOOL)isFlipped { return YES; }
+
+- (void)showAtPoint:(NSPoint)point {
+    cursorPoint = point;
+    hasCursor = YES;
+    [trailPoints addObject:[NSValue valueWithPoint:point]];
+    while ([trailPoints count] > 9) {
+        [trailPoints removeObjectAtIndex:0];
+    }
+    [self setNeedsDisplay:YES];
+}
+
+- (void)hideCursor {
+    hasCursor = NO;
+    [trailPoints removeAllObjects];
+    [self setNeedsDisplay:YES];
+}
+
+- (void)drawRect:(NSRect)dirtyRect {
+    [[NSColor clearColor] setFill];
+    NSRectFill(dirtyRect);
+
+    NSUInteger count = [trailPoints count];
+    if (count > 1) {
+        for (NSUInteger i = 1; i < count; i++) {
+            NSPoint from = [[trailPoints objectAtIndex:i - 1] pointValue];
+            NSPoint to = [[trailPoints objectAtIndex:i] pointValue];
+            CGFloat alpha = 0.12 + 0.38 * ((CGFloat)i / (CGFloat)count);
+            NSBezierPath *segment = [NSBezierPath bezierPath];
+            [segment moveToPoint:from];
+            [segment lineToPoint:to];
+            [segment setLineWidth:1.2];
+            [[NSColor colorWithCalibratedWhite:0.92 alpha:alpha] setStroke];
+            [segment stroke];
+
+            NSBezierPath *dot = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(from.x - 1.5, from.y - 1.5, 3, 3)];
+            [[NSColor colorWithCalibratedWhite:0.92 alpha:alpha] setFill];
+            [dot fill];
+        }
+    }
+    if (!hasCursor) return;
+
+    CGFloat size = 30.0;
+    CGFloat left = cursorPoint.x - size / 2.0;
+    CGFloat top = cursorPoint.y - size / 2.0;
+    NSColor *ink = [NSColor colorWithCalibratedWhite:0.09 alpha:0.92];
+    NSColor *paper = [NSColor colorWithCalibratedWhite:0.92 alpha:0.96];
+    NSColor *soft = [NSColor colorWithCalibratedWhite:0.72 alpha:0.34];
+
+    NSBezierPath *shadow = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(left + 6, top + 23, 18, 4)];
+    [[NSColor colorWithCalibratedWhite:0 alpha:0.22] setFill];
+    [shadow fill];
+
+    NSBezierPath *head = [NSBezierPath bezierPath];
+    [head moveToPoint:NSMakePoint(left + 6, top + 10)];
+    [head lineToPoint:NSMakePoint(left + 10, top + 3)];
+    [head lineToPoint:NSMakePoint(left + 13, top + 8)];
+    [head curveToPoint:NSMakePoint(left + 17, top + 8) controlPoint1:NSMakePoint(left + 14, top + 6.5) controlPoint2:NSMakePoint(left + 16, top + 6.5)];
+    [head lineToPoint:NSMakePoint(left + 20, top + 3)];
+    [head lineToPoint:NSMakePoint(left + 24, top + 10)];
+    [head curveToPoint:NSMakePoint(left + 21, top + 19) controlPoint1:NSMakePoint(left + 25, top + 15) controlPoint2:NSMakePoint(left + 24, top + 18)];
+    [head curveToPoint:NSMakePoint(left + 15, top + 24) controlPoint1:NSMakePoint(left + 19, top + 21) controlPoint2:NSMakePoint(left + 17, top + 22)];
+    [head curveToPoint:NSMakePoint(left + 9, top + 19) controlPoint1:NSMakePoint(left + 12, top + 22) controlPoint2:NSMakePoint(left + 10, top + 21)];
+    [head curveToPoint:NSMakePoint(left + 6, top + 10) controlPoint1:NSMakePoint(left + 6, top + 18) controlPoint2:NSMakePoint(left + 5, top + 14)];
+    [head closePath];
+    [paper setFill];
+    [head fill];
+    [ink setStroke];
+    [head setLineWidth:1.2];
+    [head stroke];
+
+    NSBezierPath *muzzle = [NSBezierPath bezierPathWithRoundedRect:NSMakeRect(left + 11, top + 16, 8, 6) xRadius:4 yRadius:3];
+    [soft setFill];
+    [muzzle fill];
+
+    [ink setFill];
+    [NSBezierPath fillRect:NSMakeRect(left + 11, top + 12, 2.2, 1.6)];
+    [NSBezierPath fillRect:NSMakeRect(left + 17, top + 12, 2.2, 1.6)];
+    NSBezierPath *nose = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(left + 13.5, top + 18, 3, 2.4)];
+    [nose fill];
+
+    NSBezierPath *target = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(cursorPoint.x - 3, cursorPoint.y - 3, 6, 6)];
+    [target setLineWidth:1.0];
+    [ink setStroke];
+    [target stroke];
+}
+@end
+
+static CGEventRef nativeTapCallback(CGEventTapProxy proxy, CGEventType type,
+                                    CGEventRef event, void *refcon) {
+    if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
+        if (gTap) CGEventTapEnable(gTap, true); // 被系統停用後自動恢復
+        return event;
+    }
+    if (type == kCGEventKeyDown) {
+        UniChar chars[16];
+        UniCharCount actual = 0;
+        CGEventKeyboardGetUnicodeString(event, 16, &actual, chars);
+        int keyCode = (int)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+        uint64_t flags = (uint64_t)CGEventGetFlags(event);
+        goNativeKeyboardCallback(keyCode, flags, (const uint16_t *)chars, (int)actual, (uintptr_t)refcon);
+        return event;
+    }
+    int button = 0; // 0 = left, 1 = right
+    if (type == kCGEventRightMouseUp) button = 1;
+    CGPoint loc = CGEventGetLocation(event);
+    int clickCount = (int)CGEventGetIntegerValueField(event, kCGMouseEventClickState);
+    goNativeClickCallback((double)loc.x, (double)loc.y, button, clickCount, (uintptr_t)refcon);
+    return event; // listen-only：原樣放行，不影響使用者操作
+}
+
+// ── 權限 ────────────────────────────────────────────────────────────
+
+// 檢查 Accessibility 授權，不彈出系統提示。回 1=已信任。
+static int nativeCheckAccessibility(void) {
+    return AXIsProcessTrusted() ? 1 : 0;
+}
+
+// 主動請求 Accessibility 授權（未授權時跳出系統提示）。回 1=已信任。
+static int nativeRequestAccessibility(void) {
+    CFStringRef keys[1]  = { kAXTrustedCheckOptionPrompt };
+    CFBooleanRef vals[1] = { kCFBooleanTrue };
+    CFDictionaryRef opts = CFDictionaryCreate(kCFAllocatorDefault,
+        (const void **)keys, (const void **)vals, 1,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    Boolean trusted = AXIsProcessTrustedWithOptions(opts);
+    CFRelease(opts);
+    return trusted ? 1 : 0;
+}
+
+// 輸入監控（listen-only event tap 所需，10.15+）。回 1=已授權。
+static int nativePreflightListenAccess(void) {
+    if (@available(macOS 10.15, *)) {
+        return CGPreflightListenEventAccess() ? 1 : 0;
+    }
+    return 1;
+}
+
+static int nativeRequestListenAccess(void) {
+    if (@available(macOS 10.15, *)) {
+        return CGRequestListenEventAccess() ? 1 : 0;
+    }
+    return 1;
+}
+
+// 螢幕錄製（截圖 / kCGWindowName 所需，11.0+ 公開 API）。回 1=已授權。
+static int nativePreflightScreenCapture(void) {
+    if (@available(macOS 11.0, *)) {
+        return CGPreflightScreenCaptureAccess() ? 1 : 0;
+    }
+    return 1;
+}
+
+static int nativeRequestScreenCapture(void) {
+    if (@available(macOS 11.0, *)) {
+        return CGRequestScreenCaptureAccess() ? 1 : 0;
+    }
+    return 1;
+}
+
+// ── event tap 生命週期 ──────────────────────────────────────────────
+
+// 在「目前這條 thread」的 run loop 上建立並啟用 tap。
+// 成功回 NativeTap*（malloc），失敗回 NULL（通常是缺權限）。非阻塞。
+static NativeTap *nativeTapSetup(uintptr_t handle) {
+    CGEventMask mask = CGEventMaskBit(kCGEventLeftMouseUp) |
+                       CGEventMaskBit(kCGEventRightMouseUp) |
+                       CGEventMaskBit(kCGEventKeyDown);
+    CFMachPortRef tap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
+                                         kCGEventTapOptionListenOnly, mask,
+                                         nativeTapCallback, (void *)handle);
+    if (!tap) return NULL;
+
+    NativeTap *nt = (NativeTap *)calloc(1, sizeof(NativeTap));
+    nt->tap = tap;
+    nt->source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0);
+    nt->runloop = CFRunLoopGetCurrent();
+    CFRetain(nt->runloop);
+    CFRunLoopAddSource(nt->runloop, nt->source, kCFRunLoopCommonModes);
+    CGEventTapEnable(tap, true);
+    gTap = tap;
+    return nt;
+}
+
+// 阻塞跑目前 thread 的 run loop，直到 nativeTapStop 被呼叫。
+static void nativeTapRunLoop(void) { CFRunLoopRun(); }
+
+// 由另一條 thread 安全呼叫：請 run loop 停止並喚醒。
+static void nativeTapStop(NativeTap *nt) {
+    if (nt && nt->runloop) {
+        CFRunLoopStop(nt->runloop);
+        CFRunLoopWakeUp(nt->runloop);
+    }
+}
+
+static void nativeTapTeardown(NativeTap *nt) {
+    if (!nt) return;
+    if (nt->tap) CGEventTapEnable(nt->tap, false);
+    if (gTap == nt->tap) gTap = NULL;
+    if (nt->source) {
+        if (nt->runloop) CFRunLoopRemoveSource(nt->runloop, nt->source, kCFRunLoopCommonModes);
+        CFRelease(nt->source);
+    }
+    if (nt->tap) CFRelease(nt->tap);
+    if (nt->runloop) CFRelease(nt->runloop);
+    free(nt);
+}
+
+// ── 視窗解析 ────────────────────────────────────────────────────────
+
+typedef struct {
+    int    found;
+    int    pid;
+    long   windowNumber;
+    double x, y, w, h;
+    char   owner[256];
+    char   title[256];
+} WinInfo;
+
+static void nativeFillWinInfoFromDict(CFDictionaryRef d, WinInfo *out) {
+    CFDictionaryRef boundsDict = (CFDictionaryRef)CFDictionaryGetValue(d, kCGWindowBounds);
+    if (boundsDict) {
+        CGRect r;
+        if (CGRectMakeWithDictionaryRepresentation(boundsDict, &r)) {
+            out->x = r.origin.x; out->y = r.origin.y;
+            out->w = r.size.width; out->h = r.size.height;
+        }
+    }
+    CFNumberRef num = (CFNumberRef)CFDictionaryGetValue(d, kCGWindowNumber);
+    if (num) { long wn = 0; CFNumberGetValue(num, kCFNumberLongType, &wn); out->windowNumber = wn; }
+    CFNumberRef pidRef = (CFNumberRef)CFDictionaryGetValue(d, kCGWindowOwnerPID);
+    if (pidRef) { int pid = 0; CFNumberGetValue(pidRef, kCFNumberIntType, &pid); out->pid = pid; }
+    CFStringRef owner = (CFStringRef)CFDictionaryGetValue(d, kCGWindowOwnerName);
+    if (owner) CFStringGetCString(owner, out->owner, sizeof(out->owner), kCFStringEncodingUTF8);
+    CFStringRef title = (CFStringRef)CFDictionaryGetValue(d, kCGWindowName); // 需「螢幕錄製」權限才有值
+    if (title) CFStringGetCString(title, out->title, sizeof(out->title), kCFStringEncodingUTF8);
+}
+
+static int nativeWindowInfoByNumber(long windowNumber, WinInfo *out) {
+    memset(out, 0, sizeof(WinInfo));
+    CFArrayRef list = CGWindowListCopyWindowInfo(
+        kCGWindowListOptionIncludingWindow,
+        (CGWindowID)windowNumber);
+    if (!list) return 0;
+    CFIndex count = CFArrayGetCount(list);
+    if (count <= 0) {
+        CFRelease(list);
+        return 0;
+    }
+    CFDictionaryRef d = (CFDictionaryRef)CFArrayGetValueAtIndex(list, 0);
+    out->found = 1;
+    out->windowNumber = windowNumber;
+    nativeFillWinInfoFromDict(d, out);
+    CFRelease(list);
+    return 1;
+}
+
+// 找游標下最前面且 bounds 含點的視窗資訊。第一輪偏好 layer 0
+//（一般視窗）；第二輪允許 Dock、選單列、浮層等非 layer-0 surface，
+// 讓學習模式能記錄 Dock/taskbar-like icon 點擊，再交給 screen-region
+// capture + OpenCV 輔助定位。
+static void nativeWindowAtPoint(double px, double py, WinInfo *out) {
+    memset(out, 0, sizeof(WinInfo));
+    CFArrayRef list = CGWindowListCopyWindowInfo(
+        kCGWindowListOptionOnScreenOnly,
+        kCGNullWindowID);
+    if (!list) return;
+    CFIndex count = CFArrayGetCount(list); // 前到後（z-order）
+    for (int pass = 0; pass < 2 && out->found == 0; pass++) {
+        for (CFIndex i = 0; i < count; i++) {
+            CFDictionaryRef d = (CFDictionaryRef)CFArrayGetValueAtIndex(list, i);
+
+            int layer = 0;
+            CFNumberRef layerRef = (CFNumberRef)CFDictionaryGetValue(d, kCGWindowLayer);
+            if (layerRef) CFNumberGetValue(layerRef, kCFNumberIntType, &layer);
+            if (pass == 0 && layer != 0) continue;
+            if (pass == 1 && layer == 0) continue;
+
+            CFDictionaryRef boundsDict = (CFDictionaryRef)CFDictionaryGetValue(d, kCGWindowBounds);
+            if (!boundsDict) continue;
+            CGRect r;
+            if (!CGRectMakeWithDictionaryRepresentation(boundsDict, &r)) continue;
+            if (px < r.origin.x || py < r.origin.y ||
+                px > r.origin.x + r.size.width || py > r.origin.y + r.size.height) continue;
+
+            out->found = 1;
+            nativeFillWinInfoFromDict(d, out);
+            break;
+        }
+    }
+    CFRelease(list);
+}
+
+// 以 process(owner) 名稱 + 視窗標題重新尋找視窗（錄到的 windowNumber 在目標
+// app 重開後就失效，盲點舊座標前先試著找回正確視窗）。
+// 評分：owner 相符必要；標題完全相符 > 前綴/包含 > 同 owner 第一個（最前面）。
+static void nativeFindWindowByOwnerTitle(const char *ownerWanted, const char *titleWanted, WinInfo *out) {
+    memset(out, 0, sizeof(WinInfo));
+    if (!ownerWanted || !ownerWanted[0]) return;
+    CFArrayRef list = CGWindowListCopyWindowInfo(
+        kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+        kCGNullWindowID);
+    if (!list) return;
+    CFIndex count = CFArrayGetCount(list);
+    int bestScore = 0;
+    for (CFIndex i = 0; i < count; i++) {
+        CFDictionaryRef d = (CFDictionaryRef)CFArrayGetValueAtIndex(list, i);
+        int layer = 0;
+        CFNumberRef layerRef = (CFNumberRef)CFDictionaryGetValue(d, kCGWindowLayer);
+        if (layerRef) CFNumberGetValue(layerRef, kCFNumberIntType, &layer);
+        if (layer != 0) continue;
+
+        WinInfo cur;
+        memset(&cur, 0, sizeof(cur));
+        nativeFillWinInfoFromDict(d, &cur);
+        if (cur.w <= 1 || cur.h <= 1) continue;
+        if (strcasecmp(cur.owner, ownerWanted) != 0) continue;
+
+        int score = 1; // owner 相符
+        if (titleWanted && titleWanted[0] && cur.title[0]) {
+            if (strcasecmp(cur.title, titleWanted) == 0) {
+                score = 4;
+            } else if (strcasestr(cur.title, titleWanted) || strcasestr(titleWanted, cur.title)) {
+                score = 3;
+            }
+        }
+        if (score > bestScore) {
+            bestScore = score;
+            cur.found = 1;
+            *out = cur;
+            if (score >= 4) break;
+        }
+    }
+    CFRelease(list);
+}
+
+// 最前面的 layer-0 視窗（用來驗證 activation 是否成功）。
+static void nativeFrontmostWindow(WinInfo *out) {
+    memset(out, 0, sizeof(WinInfo));
+    CFArrayRef list = CGWindowListCopyWindowInfo(
+        kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+        kCGNullWindowID);
+    if (!list) return;
+    CFIndex count = CFArrayGetCount(list);
+    for (CFIndex i = 0; i < count; i++) {
+        CFDictionaryRef d = (CFDictionaryRef)CFArrayGetValueAtIndex(list, i);
+        int layer = 0;
+        CFNumberRef layerRef = (CFNumberRef)CFDictionaryGetValue(d, kCGWindowLayer);
+        if (layerRef) CFNumberGetValue(layerRef, kCFNumberIntType, &layer);
+        if (layer != 0) continue;
+        out->found = 1;
+        nativeFillWinInfoFromDict(d, out);
+        break;
+    }
+    CFRelease(list);
+}
+
+// ── 視窗 activation（回放前把目標帶到前景；Windows 版的 SetForegroundWindow 對齊）──
+
+// 以 AX API 把 pid 的 app 設為 frontmost，並 raise 與錄製視窗最匹配的視窗。
+// 需要 Accessibility 授權。回 1=有嘗試（app element 建立成功），0=失敗。
+static int nativeActivateWindow(int pid, double wx, double wy, double ww, double wh, const char *title) {
+    if (pid <= 0) return 0;
+    AXUIElementRef app = AXUIElementCreateApplication((pid_t)pid);
+    if (!app) return 0;
+
+    AXUIElementSetAttributeValue(app, kAXFrontmostAttribute, kCFBooleanTrue);
+
+    CFArrayRef windows = NULL;
+    if (AXUIElementCopyAttributeValue(app, kAXWindowsAttribute, (CFTypeRef *)&windows) == kAXErrorSuccess && windows) {
+        CFIndex count = CFArrayGetCount(windows);
+        AXUIElementRef best = NULL;
+        int bestScore = 0;
+        for (CFIndex i = 0; i < count; i++) {
+            AXUIElementRef win = (AXUIElementRef)CFArrayGetValueAtIndex(windows, i);
+            int score = 1;
+            // 標題比對
+            if (title && title[0]) {
+                CFTypeRef t = NULL;
+                if (AXUIElementCopyAttributeValue(win, kAXTitleAttribute, &t) == kAXErrorSuccess && t) {
+                    if (CFGetTypeID(t) == CFStringGetTypeID()) {
+                        char buf[256] = {0};
+                        if (CFStringGetCString((CFStringRef)t, buf, sizeof(buf), kCFStringEncodingUTF8)) {
+                            if (strcasecmp(buf, title) == 0) score = 4;
+                            else if (buf[0] && (strcasestr(buf, title) || strcasestr(title, buf))) score = 3;
+                        }
+                    }
+                    CFRelease(t);
+                }
+            }
+            // 幾何比對（位置/尺寸接近錄到的視窗 → 加分）
+            if (score < 4 && ww > 0 && wh > 0) {
+                CFTypeRef posRef = NULL, sizeRef = NULL;
+                CGPoint pos = CGPointZero;
+                CGSize size = CGSizeZero;
+                int haveGeom = 0;
+                if (AXUIElementCopyAttributeValue(win, kAXPositionAttribute, &posRef) == kAXErrorSuccess && posRef) {
+                    if (AXValueGetValue((AXValueRef)posRef, kAXValueTypeCGPoint, &pos)) haveGeom++;
+                    CFRelease(posRef);
+                }
+                if (AXUIElementCopyAttributeValue(win, kAXSizeAttribute, &sizeRef) == kAXErrorSuccess && sizeRef) {
+                    if (AXValueGetValue((AXValueRef)sizeRef, kAXValueTypeCGSize, &size)) haveGeom++;
+                    CFRelease(sizeRef);
+                }
+                if (haveGeom == 2 &&
+                    pos.x > wx - 8 && pos.x < wx + 8 &&
+                    pos.y > wy - 8 && pos.y < wy + 8 &&
+                    size.width > ww - 8 && size.width < ww + 8 &&
+                    size.height > wh - 8 && size.height < wh + 8) {
+                    score = score > 2 ? score : 2;
+                }
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                best = win;
+                if (score >= 4) break;
+            }
+        }
+        if (best) {
+            AXUIElementSetAttributeValue(best, kAXMainAttribute, kCFBooleanTrue);
+            AXUIElementPerformAction(best, kAXRaiseAction);
+        }
+        CFRelease(windows);
+    }
+    CFRelease(app);
+    return 1;
+}
+
+// ── 螢幕 / 滑鼠 ─────────────────────────────────────────────────────
+
+static void nativeMainDisplaySize(int *w, int *h) {
+    CGDirectDisplayID d = CGMainDisplayID();
+    *w = (int)CGDisplayPixelsWide(d);
+    *h = (int)CGDisplayPixelsHigh(d);
+}
+
+static void nativePostMouseMove(double x, double y) {
+    CGPoint p = CGPointMake(x, y);
+    CGEventRef e = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved, p, kCGMouseButtonLeft);
+    if (!e) return;
+    CGEventPost(kCGHIDEventTap, e);
+    CFRelease(e);
+}
+
+static int nativeCurrentMouseLocation(double *x, double *y) {
+    CGEventRef e = CGEventCreate(NULL);
+    if (!e) return 0;
+    CGPoint p = CGEventGetLocation(e);
+    CFRelease(e);
+    *x = p.x;
+    *y = p.y;
+    return 1;
+}
+
+static CGFloat nativeCocoaYForPoint(double y) {
+    NSScreen *screen = [NSScreen mainScreen];
+    if (screen == nil) return (CGFloat)y;
+    return NSMaxY([screen frame]) - (CGFloat)y;
+}
+
+static NSPoint nativeAgentCursorLocalPoint(double x, double y) {
+    NSScreen *screen = [NSScreen mainScreen];
+    NSRect frame = screen ? [screen frame] : NSMakeRect(0, 0, 0, 0);
+    return NSMakePoint((CGFloat)x - frame.origin.x, (CGFloat)y);
+}
+
+static void nativeShowAgentCursor(double x, double y) {
+    gAgentCursorGeneration++;
+    uint64_t generation = gAgentCursorGeneration;
+    double startX = x - 28;
+    double startY = y + 18;
+    if (gAgentCursorHasLast) {
+        startX = gAgentCursorLastX;
+        startY = gAgentCursorLastY;
+    } else {
+        nativeCurrentMouseLocation(&startX, &startY);
+    }
+    gAgentCursorLastX = x;
+    gAgentCursorLastY = y;
+    gAgentCursorHasLast = 1;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @autoreleasepool {
+            NSScreen *screen = [NSScreen mainScreen];
+            NSRect frame = screen ? [screen frame] : NSMakeRect(0, 0, 80, 80);
+            if (gAgentCursorWindow == nil) {
+                gAgentCursorWindow = [[NSWindow alloc] initWithContentRect:frame
+                                                                  styleMask:NSWindowStyleMaskBorderless
+                                                                    backing:NSBackingStoreBuffered
+                                                                      defer:NO];
+                [gAgentCursorWindow setOpaque:NO];
+                [gAgentCursorWindow setBackgroundColor:[NSColor clearColor]];
+                [gAgentCursorWindow setIgnoresMouseEvents:YES];
+                [gAgentCursorWindow setHasShadow:NO];
+                [gAgentCursorWindow setLevel:NSScreenSaverWindowLevel + 1];
+                [gAgentCursorWindow setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces |
+                                                         NSWindowCollectionBehaviorFullScreenAuxiliary |
+                                                         NSWindowCollectionBehaviorStationary];
+                gAgentCursorView = [[AIConsoleWolfCursorView alloc] initWithFrame:NSMakeRect(0, 0, frame.size.width, frame.size.height)];
+                [gAgentCursorWindow setContentView:gAgentCursorView];
+            } else if (screen) {
+                [gAgentCursorWindow setFrame:frame display:NO];
+                [gAgentCursorView setFrame:NSMakeRect(0, 0, frame.size.width, frame.size.height)];
+            }
+            [gAgentCursorWindow orderFrontRegardless];
+            const int frames = 10;
+            for (int i = 1; i <= frames; i++) {
+                double ratio = (double)i / (double)frames;
+                double eased = 1.0 - pow(1.0 - ratio, 3.0);
+                double frameX = startX + (x - startX) * eased;
+                double frameY = startY + (y - startY) * eased;
+                int64_t delay = (int64_t)(i * 22) * NSEC_PER_MSEC;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delay), dispatch_get_main_queue(), ^{
+                    if (generation == gAgentCursorGeneration && gAgentCursorWindow != nil) {
+                        [gAgentCursorView showAtPoint:nativeAgentCursorLocalPoint(frameX, frameY)];
+                        [gAgentCursorWindow orderFrontRegardless];
+                    }
+                });
+            }
+
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                if (generation == gAgentCursorGeneration && gAgentCursorWindow != nil) {
+                    [gAgentCursorView hideCursor];
+                    [gAgentCursorWindow orderOut:nil];
+                }
+            });
+        }
+    });
+}
+
+static void nativeHideAgentCursor(void) {
+    gAgentCursorGeneration++;
+    gAgentCursorHasLast = 0;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (gAgentCursorWindow != nil) {
+            [gAgentCursorView hideCursor];
+            [gAgentCursorWindow orderOut:nil];
+        }
+    });
+}
+
+// 點擊（clicks=1 單擊、2 雙擊）。雙擊必須在每個 down/up 事件設
+// kCGMouseEventClickState，否則目標 app 只會看到兩次單擊。
+static int nativePostMouseClick(double x, double y, int rightButton, int clicks) {
+    if (clicks < 1) clicks = 1;
+    if (clicks > 3) clicks = 3;
+    CGPoint p = CGPointMake(x, y);
+    CGMouseButton button = rightButton ? kCGMouseButtonRight : kCGMouseButtonLeft;
+    CGEventType downType = rightButton ? kCGEventRightMouseDown : kCGEventLeftMouseDown;
+    CGEventType upType = rightButton ? kCGEventRightMouseUp : kCGEventLeftMouseUp;
+
+    for (int c = 1; c <= clicks; c++) {
+        CGEventRef down = CGEventCreateMouseEvent(NULL, downType, p, button);
+        CGEventRef up = CGEventCreateMouseEvent(NULL, upType, p, button);
+        if (!down || !up) {
+            if (down) CFRelease(down);
+            if (up) CFRelease(up);
+            return 0;
+        }
+        CGEventSetIntegerValueField(down, kCGMouseEventClickState, c);
+        CGEventSetIntegerValueField(up, kCGMouseEventClickState, c);
+        CGEventPost(kCGHIDEventTap, down);
+        CFRelease(down);
+        usleep(85000);
+        CGEventPost(kCGHIDEventTap, up);
+        CFRelease(up);
+        if (c < clicks) usleep(60000); // 雙擊間隔需小於系統 double-click 門檻
+    }
+    return 1;
+}
+
+static int nativePostShortcutV(void) {
+    CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
+    CGEventRef down = CGEventCreateKeyboardEvent(source, (CGKeyCode)9, true);
+    CGEventRef up = CGEventCreateKeyboardEvent(source, (CGKeyCode)9, false);
+    if (!down || !up) {
+        if (down) CFRelease(down);
+        if (up) CFRelease(up);
+        if (source) CFRelease(source);
+        return 0;
+    }
+    CGEventSetFlags(down, kCGEventFlagMaskCommand);
+    CGEventSetFlags(up, kCGEventFlagMaskCommand);
+    CGEventPost(kCGHIDEventTap, down);
+    usleep(30000);
+    CGEventPost(kCGHIDEventTap, up);
+    CFRelease(down);
+    CFRelease(up);
+    if (source) CFRelease(source);
+    return 1;
+}
+
+static int nativePostVirtualKeyCode(int keyCode, uint64_t flags) {
+    CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
+    CGEventRef down = CGEventCreateKeyboardEvent(source, (CGKeyCode)keyCode, true);
+    CGEventRef up = CGEventCreateKeyboardEvent(source, (CGKeyCode)keyCode, false);
+    if (!down || !up) {
+        if (down) CFRelease(down);
+        if (up) CFRelease(up);
+        if (source) CFRelease(source);
+        return 0;
+    }
+    CGEventSetFlags(down, (CGEventFlags)flags);
+    CGEventSetFlags(up, (CGEventFlags)flags);
+    CGEventPost(kCGHIDEventTap, down);
+    usleep(30000);
+    CGEventPost(kCGHIDEventTap, up);
+    CFRelease(down);
+    CFRelease(up);
+    if (source) CFRelease(source);
+    return 1;
+}
+
+static int nativePostUnicodeText(const uint16_t *chars, int length) {
+    if (!chars || length <= 0) return 0;
+    CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
+    for (int i = 0; i < length; i++) {
+        UniChar ch = (UniChar)chars[i];
+        CGEventRef down = CGEventCreateKeyboardEvent(source, 0, true);
+        CGEventRef up = CGEventCreateKeyboardEvent(source, 0, false);
+        if (!down || !up) {
+            if (down) CFRelease(down);
+            if (up) CFRelease(up);
+            if (source) CFRelease(source);
+            return 0;
+        }
+        CGEventKeyboardSetUnicodeString(down, 1, &ch);
+        CGEventKeyboardSetUnicodeString(up, 1, &ch);
+        CGEventPost(kCGHIDEventTap, down);
+        CGEventPost(kCGHIDEventTap, up);
+        CFRelease(down);
+        CFRelease(up);
+        usleep(25000);
+    }
+    if (source) CFRelease(source);
+    return 1;
+}
+
+// ── 視窗截圖 ────────────────────────────────────────────────────────
+
+// CGImage → RGBA bytes（premultiplied, big-endian RGBA8888）。
+static int nativeImageToRGBA(CGImageRef image, uint8_t **outData, int *outW, int *outH) {
+    size_t width = CGImageGetWidth(image);
+    size_t height = CGImageGetHeight(image);
+    if (width == 0 || height == 0 || width > 10000 || height > 10000) return 0;
+
+    size_t bytesPerRow = width * 4;
+    size_t total = bytesPerRow * height;
+    uint8_t *data = (uint8_t *)calloc(total, 1);
+    if (!data) return 0;
+
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef ctx = CGBitmapContextCreate(
+        data,
+        width,
+        height,
+        8,
+        bytesPerRow,
+        cs,
+        kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(cs);
+    if (!ctx) {
+        free(data);
+        return 0;
+    }
+    CGContextDrawImage(ctx, CGRectMake(0, 0, width, height), image);
+    CGContextRelease(ctx);
+
+    *outData = data;
+    *outW = (int)width;
+    *outH = (int)height;
+    return 1;
+}
+
+// 截取單一視窗。macOS 14+ 走 ScreenCaptureKit，否則 fallback 到
+// CGWindowListCreateImage（dlsym：新 SDK 已標棄用、未來可能移除 symbol）。
+static int nativeCaptureWindowRGBA(long windowNumber, uint8_t **outData, int *outW, int *outH, WinInfo *outInfo) {
+    *outData = NULL;
+    *outW = 0;
+    *outH = 0;
+    if (outInfo) nativeWindowInfoByNumber(windowNumber, outInfo);
+
+    CGImageRef image = ScWindowCaptureCGImage((uint32_t)windowNumber);
+    if (!image) {
+        typedef CGImageRef (*CreateWindowImageFn)(CGRect, CGWindowListOption, CGWindowID, CGWindowImageOption);
+        CreateWindowImageFn createImage = (CreateWindowImageFn)dlsym(RTLD_DEFAULT, "CGWindowListCreateImage");
+        if (!createImage) return 0;
+        image = createImage(
+            CGRectNull,
+            kCGWindowListOptionIncludingWindow,
+            (CGWindowID)windowNumber,
+            kCGWindowImageBoundsIgnoreFraming);
+    }
+    if (!image) return 0;
+
+    int ok = nativeImageToRGBA(image, outData, outW, outH);
+    CGImageRelease(image);
+    return ok;
+}
+
+// 截取螢幕上的一塊區域。用於 Dock / menu bar / overlay 這類不是一般
+// layer-0 app window 的點擊，讓 OpenCV fallback 能看見 icon 像素。
+static int nativeCaptureScreenRegionRGBA(double x, double y, double w, double h, uint8_t **outData, int *outW, int *outH) {
+    *outData = NULL;
+    *outW = 0;
+    *outH = 0;
+    if (w <= 0 || h <= 0) return 0;
+    typedef CGImageRef (*CreateWindowImageFn)(CGRect, CGWindowListOption, CGWindowID, CGWindowImageOption);
+    CreateWindowImageFn createImage = (CreateWindowImageFn)dlsym(RTLD_DEFAULT, "CGWindowListCreateImage");
+    if (!createImage) return 0;
+    CGImageRef image = createImage(
+        CGRectMake(x, y, w, h),
+        kCGWindowListOptionOnScreenOnly,
+        kCGNullWindowID,
+        kCGWindowImageDefault);
+    if (!image) return 0;
+    int ok = nativeImageToRGBA(image, outData, outW, outH);
+    CGImageRelease(image);
+    return ok;
+}
+*/
+import "C"
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"runtime"
+	"runtime/cgo"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+	"unicode/utf16"
+	"unsafe"
+)
+
+var (
+	nativeAccessibilityPromptShown atomic.Bool
+	nativeListenPromptShown        atomic.Bool
+	nativeScreenCapturePromptShown atomic.Bool
+)
+
+// NativeInput records OS-level click input on macOS via a Quartz CGEventTap.
+// Replay activates the target window (AX raise + frontmost) before posting
+// clicks, and supports visual relocation when window capture is available.
+type NativeInput struct {
+	mu         sync.Mutex
+	onClick    func(NativeClickEvent)
+	onKeyboard func(NativeKeyboardEvent)
+	handle     cgo.Handle
+	tap        *C.NativeTap
+	done       chan struct{}
+	selfPID    int
+}
+
+func NewNativeInput() *NativeInput {
+	return &NativeInput{selfPID: os.Getpid()}
+}
+
+func (n *NativeInput) PermissionStatus() NativePermissionStatus {
+	status := NativePermissionStatus{
+		Accessibility:   C.nativeCheckAccessibility() != 0,
+		InputMonitoring: C.nativePreflightListenAccess() != 0,
+		ScreenRecording: C.nativePreflightScreenCapture() != 0,
+		Platform:        "darwin",
+	}
+	status.Missing = nativePermissionMissing(status)
+	status.MissingKeys = nativePermissionMissingKeys(status)
+	status.NeedsRestart = len(status.Missing) > 0
+	if len(status.Missing) == 0 {
+		status.Message = "Visual Learning native permissions are ready."
+	} else {
+		status.Message = "Grant the missing macOS privacy permissions, then restart ai-console."
+	}
+	return status
+}
+
+func (n *NativeInput) RequestPermissions() NativePermissionStatus {
+	// 只對「目前缺少」的權限發出系統提示，且每個提示在一個 app 生命週期最多一次，
+	// 避免使用者每次按按鈕都被重複彈窗。Accessibility 的提示只是把使用者導去設定頁，
+	// 並非 app 內 inline 授權。
+	if C.nativeCheckAccessibility() == 0 && nativeAccessibilityPromptShown.CompareAndSwap(false, true) {
+		C.nativeRequestAccessibility()
+	}
+	if C.nativePreflightListenAccess() == 0 && nativeListenPromptShown.CompareAndSwap(false, true) {
+		C.nativeRequestListenAccess()
+	}
+	if C.nativePreflightScreenCapture() == 0 && nativeScreenCapturePromptShown.CompareAndSwap(false, true) {
+		C.nativeRequestScreenCapture()
+	}
+	status := n.PermissionStatus()
+	status.Requested = true
+	return status
+}
+
+func nativePermissionMissing(status NativePermissionStatus) []string {
+	missing := []string{}
+	if !status.Accessibility {
+		missing = append(missing, "輔助使用 Accessibility")
+	}
+	if !status.InputMonitoring {
+		missing = append(missing, "輸入監控 Input Monitoring")
+	}
+	if !status.ScreenRecording {
+		missing = append(missing, "螢幕錄製 Screen Recording")
+	}
+	return missing
+}
+
+func nativePermissionMissingKeys(status NativePermissionStatus) []string {
+	missing := []string{}
+	if !status.Accessibility {
+		missing = append(missing, "accessibility")
+	}
+	if !status.InputMonitoring {
+		missing = append(missing, "input_monitoring")
+	}
+	if !status.ScreenRecording {
+		missing = append(missing, "screen_recording")
+	}
+	return missing
+}
+
+// Start 安裝 CGEventTap 並開始錄製外部視窗點擊。
+// 若缺少授權（CGEventTapCreate 回 NULL），回明確錯誤。
+func (n *NativeInput) Start(onClick func(NativeClickEvent), onKeyboard func(NativeKeyboardEvent)) error {
+	n.mu.Lock()
+	if n.done != nil {
+		n.mu.Unlock()
+		return nil // 已在錄製
+	}
+	n.onClick = onClick
+	n.onKeyboard = onKeyboard
+	done := make(chan struct{})
+	n.done = done
+	n.handle = cgo.NewHandle(n)
+	n.mu.Unlock()
+
+	ready := make(chan error, 1)
+	go n.runLoop(ready, done)
+
+	if err := <-ready; err != nil {
+		n.mu.Lock()
+		if n.done == done {
+			n.done = nil
+			if n.handle != 0 {
+				n.handle.Delete()
+				n.handle = 0
+			}
+			n.onClick = nil
+			n.onKeyboard = nil
+		}
+		n.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+func (n *NativeInput) runLoop(ready chan<- error, done chan struct{}) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	// 錄製啟動「只檢查、不主動 prompt」：授權提示視窗會搶焦點、並被 event tap
+	// 錄成多餘步驟。缺權限時直接回明確錯誤，交由 UI（RequestPermissions /
+	// OpenVisualLearningPermissionSettings）引導使用者去設定頁授權後重啟 app。
+	//
+	// listen-only event tap 真正需要的是「輸入監控 Input Monitoring」——這也是
+	// 「錄製成功卻全空」的根因：缺它時 tap 可能建得起來，但系統不送任何事件。
+	if C.nativePreflightListenAccess() == 0 {
+		ready <- fmt.Errorf("native input: 缺少「輸入監控 Input Monitoring」，錄製收不到任何外部點擊/按鍵。請到 系統設定 → 隱私權與安全性 → 輸入監控 開啟 ai-console，完全結束並重啟 app")
+		n.closeDone(done)
+		return
+	}
+
+	tap := C.nativeTapSetup(C.uintptr_t(n.handle))
+	if tap == nil {
+		ready <- fmt.Errorf("native input: CGEventTapCreate 失敗 — 通常仍是「輸入監控 Input Monitoring」尚未對這支執行檔生效，請確認已開啟並完全重啟 app")
+		n.closeDone(done)
+		return
+	}
+
+	// 防呆：tap 建立成功不代表事件會流入。再次確認輸入監控，避免靜默錄空。
+	if C.nativePreflightListenAccess() == 0 {
+		C.nativeTapTeardown(tap)
+		ready <- fmt.Errorf("native input: 已建立事件監聽，但「輸入監控 Input Monitoring」未授權，錄製會收不到任何事件 — 請開啟輸入監控並重啟 app")
+		n.closeDone(done)
+		return
+	}
+
+	n.mu.Lock()
+	n.tap = tap
+	n.mu.Unlock()
+
+	ready <- nil
+	C.nativeTapRunLoop() // 阻塞到 Stop()
+
+	C.nativeTapTeardown(tap)
+	n.closeDone(done)
+}
+
+func (n *NativeInput) closeDone(done chan struct{}) {
+	n.mu.Lock()
+	if n.done == done {
+		select {
+		case <-done:
+		default:
+			close(done)
+		}
+	}
+	n.mu.Unlock()
+}
+
+// Stop 停止 run loop 並拆除 tap。
+func (n *NativeInput) Stop() error {
+	n.mu.Lock()
+	done := n.done
+	tap := n.tap
+	n.mu.Unlock()
+	if done == nil {
+		return nil
+	}
+	if tap != nil {
+		C.nativeTapStop(tap)
+	}
+	timedOut := false
+	select {
+	case <-done:
+	case <-time.After(1500 * time.Millisecond):
+		timedOut = true
+	}
+	// 不論是否逾時都要重置狀態，否則下次 Start() 會誤判仍在錄製而直接
+	// return nil（不建立新 tap），導致後續示範靜默錄不到任何 step。
+	n.mu.Lock()
+	if n.done == done {
+		n.done = nil
+		n.tap = nil
+		n.onClick = nil
+		n.onKeyboard = nil
+		if !timedOut && n.handle != 0 {
+			n.handle.Delete()
+			n.handle = 0
+		}
+		// 逾時時保留 handle：tap 可能仍存活，立即 Delete 會使後續回呼存取
+		// 已刪除的 handle 而 panic。下次 Start() 會建立新 handle，舊的小幅
+		// 洩漏在這條罕見路徑上可接受。
+	}
+	n.mu.Unlock()
+	if timedOut {
+		return fmt.Errorf("native input: recorder stop timed out")
+	}
+	return nil
+}
+
+// emitClick 由 C 回呼觸發（event tap thread）。解析視窗並送出事件。
+func (n *NativeInput) emitClick(x, y, button, clickCount int) {
+	var info C.WinInfo
+	C.nativeWindowAtPoint(C.double(x), C.double(y), &info)
+	if info.found != 0 && int(info.pid) == n.selfPID {
+		return // 略過點到自己 app 的情況（app 內點擊由 WebView 處理）
+	}
+
+	owner := C.GoString(&info.owner[0])
+	title := C.GoString(&info.title[0])
+	if title == "" {
+		title = owner
+	}
+	if info.found != 0 && isMacOSPermissionPromptWindow(owner, title) {
+		return
+	}
+	if owner == "" {
+		owner = "screen"
+	}
+	if title == "" {
+		title = owner
+	}
+
+	var sw, sh C.int
+	C.nativeMainDisplaySize(&sw, &sh)
+
+	btn := "left"
+	if button == 1 {
+		btn = "right"
+	}
+
+	event := NativeClickEvent{
+		Timestamp:     time.Now(),
+		X:             x,
+		Y:             y,
+		Button:        btn,
+		ClickCount:    clickCount,
+		WindowTitle:   title,
+		WindowProcess: owner,
+		WindowHandle:  uintptr(info.windowNumber),
+		ScreenX:       0,
+		ScreenY:       0,
+		ScreenWidth:   int(sw),
+		ScreenHeight:  int(sh),
+		WindowRect: PixelBBox{
+			X: int(info.x),
+			Y: int(info.y),
+			W: int(info.w),
+			H: int(info.h),
+		},
+	}
+	if info.found == 0 {
+		event.WindowHandle = 0
+		event.WindowRect = PixelBBox{}
+	}
+
+	n.mu.Lock()
+	cb := n.onClick
+	n.mu.Unlock()
+	if cb != nil {
+		go cb(event)
+	}
+}
+
+func (n *NativeInput) emitKeyboard(keyCode int, flags uint64, text string) {
+	front := frontmostWindowInfo()
+	if front.PID == 0 || front.PID == n.selfPID {
+		return
+	}
+	key := nativeKeyName(keyCode)
+	modifiers := nativeModifierNames(flags)
+	action := string(MouseEventKey)
+	if len(modifiers) > 0 {
+		action = string(MouseEventShortcut)
+	} else if strings.TrimSpace(text) != "" {
+		action = string(MouseEventText)
+	}
+	if action == string(MouseEventKey) && key == "" {
+		return
+	}
+	var sw, sh C.int
+	C.nativeMainDisplaySize(&sw, &sh)
+	event := NativeKeyboardEvent{
+		Timestamp:     time.Now(),
+		Action:        action,
+		Text:          text,
+		Key:           firstNonEmptyKey(key, strings.TrimSpace(text)),
+		KeyCode:       keyCode,
+		Modifiers:     modifiers,
+		WindowTitle:   front.Title,
+		WindowProcess: front.Process,
+		WindowHandle:  front.Handle,
+		ScreenWidth:   int(sw),
+		ScreenHeight:  int(sh),
+		WindowRect:    front.Rect,
+	}
+	n.mu.Lock()
+	cb := n.onKeyboard
+	n.mu.Unlock()
+	if cb != nil {
+		go cb(event)
+	}
+}
+
+func nativeModifierNames(flags uint64) []string {
+	modifiers := []string{}
+	if flags&uint64(C.kCGEventFlagMaskCommand) != 0 {
+		modifiers = append(modifiers, "cmd")
+	}
+	if flags&uint64(C.kCGEventFlagMaskControl) != 0 {
+		modifiers = append(modifiers, "ctrl")
+	}
+	if flags&uint64(C.kCGEventFlagMaskAlternate) != 0 {
+		modifiers = append(modifiers, "option")
+	}
+	if flags&uint64(C.kCGEventFlagMaskShift) != 0 {
+		modifiers = append(modifiers, "shift")
+	}
+	if flags&uint64(C.kCGEventFlagMaskSecondaryFn) != 0 {
+		modifiers = append(modifiers, "fn")
+	}
+	return modifiers
+}
+
+func nativeKeyName(keyCode int) string {
+	switch keyCode {
+	case 36:
+		return "Enter"
+	case 48:
+		return "Tab"
+	case 49:
+		return "Space"
+	case 51:
+		return "Delete"
+	case 53:
+		return "Escape"
+	case 76:
+		return "NumpadEnter"
+	case 123:
+		return "ArrowLeft"
+	case 124:
+		return "ArrowRight"
+	case 125:
+		return "ArrowDown"
+	case 126:
+		return "ArrowUp"
+	}
+	if keyCode >= 0 && keyCode < len(macKeyCodeNames) {
+		return macKeyCodeNames[keyCode]
+	}
+	return ""
+}
+
+func firstNonEmptyKey(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+var macKeyCodeNames = []string{
+	"A", "S", "D", "F", "H", "G", "Z", "X", "C", "V",
+	"", "B", "Q", "W", "E", "R", "Y", "T", "1", "2",
+	"3", "4", "6", "5", "=", "9", "7", "-", "8", "0",
+	"]", "O", "U", "[", "I", "P", "Enter", "L", "J", "'",
+	"K", ";", "\\", ",", "/", "N", "M", ".", "Tab", "Space",
+	"`", "Delete", "", "Escape",
+}
+
+// ResolveWindow 比對錄到的 window handle 與目前桌面：
+//  1. windowNumber 還活著且 owner 沒變 → 直接用；
+//  2. 否則用 process(owner) + title 重新找（目標 app 重開後 windowNumber 必失效）。
+func (n *NativeInput) ResolveWindow(handle uintptr, process, title string) (ResolvedWindow, bool) {
+	process = strings.TrimSpace(process)
+	title = strings.TrimSpace(title)
+
+	if handle != 0 {
+		var info C.WinInfo
+		if C.nativeWindowInfoByNumber(C.long(handle), &info) != 0 && info.found != 0 && info.w > 1 && info.h > 1 {
+			owner := C.GoString(&info.owner[0])
+			// windowNumber 會被系統回收重用；owner 變了就視為失效。
+			if process == "" || strings.EqualFold(owner, process) {
+				return resolvedFromWinInfo(&info, false), true
+			}
+		}
+	}
+
+	if process == "" {
+		return ResolvedWindow{}, false
+	}
+	cProcess := C.CString(process)
+	cTitle := C.CString(title)
+	defer C.free(unsafe.Pointer(cProcess))
+	defer C.free(unsafe.Pointer(cTitle))
+	var info C.WinInfo
+	C.nativeFindWindowByOwnerTitle(cProcess, cTitle, &info)
+	if info.found == 0 {
+		return ResolvedWindow{}, false
+	}
+	return resolvedFromWinInfo(&info, true), true
+}
+
+func resolvedFromWinInfo(info *C.WinInfo, refound bool) ResolvedWindow {
+	owner := C.GoString(&info.owner[0])
+	title := C.GoString(&info.title[0])
+	if title == "" {
+		title = owner
+	}
+	return ResolvedWindow{
+		Handle:  uintptr(info.windowNumber),
+		PID:     int(info.pid),
+		Title:   title,
+		Process: owner,
+		Rect: PixelBBox{
+			X: int(info.x),
+			Y: int(info.y),
+			W: int(info.w),
+			H: int(info.h),
+		},
+		Refound: refound,
+	}
+}
+
+// activateStepWindow 回放點擊前把目標視窗帶到前景（對齊 Windows 版
+// SetForegroundWindow + waitForForegroundWindow 行為）。
+// 回傳 (foregroundOK, frontTitle, frontProcess)。
+func (n *NativeInput) activateStepWindow(step LearningReplayStep) (bool, string, string) {
+	resolved, ok := n.ResolveWindow(step.WindowHandle, step.WindowProcess, step.WindowTitle)
+	if !ok {
+		front := frontmostWindowInfo()
+		return false, front.Title, front.Process
+	}
+
+	// 已在前景就不用動。
+	if front := frontmostWindowInfo(); front.PID != 0 && front.PID == resolved.PID {
+		return true, front.Title, front.Process
+	}
+
+	cTitle := C.CString(resolved.Title)
+	C.nativeActivateWindow(
+		C.int(resolved.PID),
+		C.double(resolved.Rect.X), C.double(resolved.Rect.Y),
+		C.double(resolved.Rect.W), C.double(resolved.Rect.H),
+		cTitle,
+	)
+	C.free(unsafe.Pointer(cTitle))
+
+	deadline := time.Now().Add(900 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		front := frontmostWindowInfo()
+		if front.PID != 0 && front.PID == resolved.PID {
+			return true, front.Title, front.Process
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	front := frontmostWindowInfo()
+	return false, front.Title, front.Process
+}
+
+func frontmostWindowInfo() ResolvedWindow {
+	var info C.WinInfo
+	C.nativeFrontmostWindow(&info)
+	if info.found == 0 {
+		return ResolvedWindow{}
+	}
+	return resolvedFromWinInfo(&info, false)
+}
+
+// Click / MoveCursorOnly：以 macOS 全域螢幕座標（point）重放。
+func (n *NativeInput) Click(step LearningReplayStep) NativeReplayResult {
+	switch step.Action {
+	case string(MouseEventText):
+		return n.TypeText(step)
+	case string(MouseEventSensitive):
+		return NativeReplayResult{
+			OK:            false,
+			Skipped:       true,
+			Method:        "native_sensitive_text",
+			Index:         step.Index,
+			Label:         step.Label,
+			X:             step.X,
+			Y:             step.Y,
+			Error:         "sensitive text was not saved; use the configured password/credential app to authorize filling it",
+			WindowTitle:   step.WindowTitle,
+			WindowProcess: step.WindowProcess,
+			Sensitive:     true,
+		}
+	case string(MouseEventShortcut), string(MouseEventKey):
+		return n.PressKey(step)
+	}
+	if step.CoordinateSpace != "screen" && step.Source != "native" {
+		return NativeReplayResult{
+			OK:      false,
+			Skipped: true,
+			Method:  "native",
+			Index:   step.Index,
+			Label:   step.Label,
+			X:       step.X,
+			Y:       step.Y,
+			Error:   "not a native screen-coordinate step",
+		}
+	}
+	if C.nativeCheckAccessibility() == 0 {
+		return NativeReplayResult{
+			OK:            false,
+			Method:        "native",
+			Index:         step.Index,
+			Label:         step.Label,
+			X:             step.X,
+			Y:             step.Y,
+			Error:         "native input: 回放需要「輔助使用 Accessibility」權限（系統設定 → 隱私權與安全性 → 輔助使用），開啟後請重啟 app",
+			WindowTitle:   step.WindowTitle,
+			WindowProcess: step.WindowProcess,
+		}
+	}
+
+	// 關鍵：先把目標視窗帶到前景。沒有這步，使用者錄完示範切回本 app 後，
+	// 目標視窗被蓋住，所有點擊都會打在本 app 或別的視窗上。
+	foregroundOK, frontTitle, frontProcess := n.activateStepWindow(step)
+
+	preview := n.ShowAgentCursor(step)
+	defer n.HideAgentCursor()
+	time.Sleep(450 * time.Millisecond)
+	rightButton := 0
+	if strings.EqualFold(step.Button, "right") || strings.EqualFold(step.Action, "right_click") {
+		rightButton = 1
+	}
+	clicks := 1
+	if strings.EqualFold(step.Action, string(MouseEventDoubleClick)) {
+		clicks = 2
+	}
+	if C.nativePostMouseClick(C.double(step.X), C.double(step.Y), C.int(rightButton), C.int(clicks)) == 0 {
+		return NativeReplayResult{
+			OK:                false,
+			Method:            "native",
+			Index:             step.Index,
+			Label:             step.Label,
+			X:                 step.X,
+			Y:                 step.Y,
+			Error:             "native input: failed to create macOS mouse event",
+			WindowTitle:       step.WindowTitle,
+			WindowProcess:     step.WindowProcess,
+			ForegroundOK:      foregroundOK,
+			ForegroundTitle:   frontTitle,
+			ForegroundProcess: frontProcess,
+		}
+	}
+	time.Sleep(220 * time.Millisecond)
+	warnings := []string{}
+	if !foregroundOK {
+		warnings = append(warnings, "target window could not be confirmed as frontmost before the click; the click may have hit another window")
+	}
+	if preview.Error != "" {
+		warnings = append(warnings, preview.Error)
+	}
+	return NativeReplayResult{
+		OK:                true,
+		Method:            "native",
+		Index:             step.Index,
+		Label:             step.Label,
+		X:                 step.X,
+		Y:                 step.Y,
+		WindowTitle:       step.WindowTitle,
+		WindowProcess:     step.WindowProcess,
+		ForegroundOK:      foregroundOK,
+		ForegroundTitle:   frontTitle,
+		ForegroundProcess: frontProcess,
+		Warning:           strings.Join(warnings, "; "),
+	}
+}
+
+func (n *NativeInput) TypeText(step LearningReplayStep) NativeReplayResult {
+	if step.RequiresConfirm && !step.ReplayConfirmed {
+		return NativeReplayResult{
+			OK:                false,
+			Skipped:           true,
+			NeedsConfirmation: true,
+			Method:            "native_text_confirmation",
+			Index:             step.Index,
+			Label:             step.Label,
+			X:                 step.X,
+			Y:                 step.Y,
+			Text:              step.Text,
+			WindowTitle:       step.WindowTitle,
+			WindowProcess:     step.WindowProcess,
+			Error:             "text input requires confirmation before replay",
+		}
+	}
+	if strings.TrimSpace(step.Text) == "" {
+		return NativeReplayResult{
+			OK:            false,
+			Skipped:       true,
+			Method:        "native_text",
+			Index:         step.Index,
+			Label:         step.Label,
+			X:             step.X,
+			Y:             step.Y,
+			Error:         "text step has no saved text",
+			WindowTitle:   step.WindowTitle,
+			WindowProcess: step.WindowProcess,
+		}
+	}
+	if C.nativeCheckAccessibility() == 0 {
+		return NativeReplayResult{
+			OK:            false,
+			Method:        "native_text",
+			Index:         step.Index,
+			Label:         step.Label,
+			X:             step.X,
+			Y:             step.Y,
+			Error:         "native input: text replay requires Accessibility permission",
+			WindowTitle:   step.WindowTitle,
+			WindowProcess: step.WindowProcess,
+		}
+	}
+	foregroundOK, frontTitle, frontProcess := n.activateStepWindow(step)
+	time.Sleep(250 * time.Millisecond)
+	method := "native_paste_safe"
+	ok := false
+	if strings.EqualFold(step.Playback, "type") {
+		ok = nativeTypeUnicodeText(step.Text)
+		method = "native_type_text"
+	} else {
+		ok = nativePasteText(step.Text)
+		if !ok {
+			ok = nativeTypeUnicodeText(step.Text)
+			method = "native_type_text"
+		}
+	}
+	result := NativeReplayResult{
+		OK:                ok,
+		Method:            method,
+		Index:             step.Index,
+		Label:             step.Label,
+		X:                 step.X,
+		Y:                 step.Y,
+		Text:              step.Text,
+		WindowTitle:       step.WindowTitle,
+		WindowProcess:     step.WindowProcess,
+		ForegroundOK:      foregroundOK,
+		ForegroundTitle:   frontTitle,
+		ForegroundProcess: frontProcess,
+	}
+	if !ok {
+		result.Error = "native input: failed to replay text"
+	}
+	return result
+}
+
+func (n *NativeInput) PressKey(step LearningReplayStep) NativeReplayResult {
+	if C.nativeCheckAccessibility() == 0 {
+		return NativeReplayResult{
+			OK:            false,
+			Method:        "native_key",
+			Index:         step.Index,
+			Label:         step.Label,
+			X:             step.X,
+			Y:             step.Y,
+			Error:         "native input: key replay requires Accessibility permission",
+			WindowTitle:   step.WindowTitle,
+			WindowProcess: step.WindowProcess,
+		}
+	}
+	foregroundOK, frontTitle, frontProcess := n.activateStepWindow(step)
+	time.Sleep(180 * time.Millisecond)
+	ok := false
+	key := strings.TrimSpace(step.Key)
+	if strings.EqualFold(key, "Enter") || strings.EqualFold(key, "NumpadEnter") {
+		ok = nativeTypeUnicodeText("\n")
+	} else if strings.EqualFold(key, "Tab") {
+		ok = nativeTypeUnicodeText("\t")
+	} else if strings.EqualFold(key, "Space") {
+		ok = nativeTypeUnicodeText(" ")
+	} else if strings.EqualFold(key, "Escape") {
+		ok = nativePostVirtualKey(53, step.Modifiers)
+	} else if len(step.Modifiers) > 0 {
+		ok = nativePostShortcut(step)
+	} else if key != "" && len([]rune(key)) == 1 {
+		ok = nativeTypeUnicodeText(key)
+	}
+	result := NativeReplayResult{
+		OK:                ok,
+		Method:            "native_key",
+		Index:             step.Index,
+		Label:             step.Label,
+		X:                 step.X,
+		Y:                 step.Y,
+		Key:               key,
+		Modifiers:         append([]string(nil), step.Modifiers...),
+		WindowTitle:       step.WindowTitle,
+		WindowProcess:     step.WindowProcess,
+		ForegroundOK:      foregroundOK,
+		ForegroundTitle:   frontTitle,
+		ForegroundProcess: frontProcess,
+	}
+	if !ok {
+		result.Error = "native input: unsupported or failed key replay"
+	}
+	return result
+}
+
+func nativePasteText(text string) bool {
+	previous, _ := exec.Command("pbpaste").Output()
+	cmd := exec.Command("pbcopy")
+	cmd.Stdin = strings.NewReader(text)
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	ok := C.nativePostShortcutV() != 0
+	time.Sleep(120 * time.Millisecond)
+	restore := exec.Command("pbcopy")
+	restore.Stdin = strings.NewReader(string(previous))
+	_ = restore.Run()
+	return ok
+}
+
+func nativeTypeUnicodeText(text string) bool {
+	encoded := utf16.Encode([]rune(text))
+	if len(encoded) == 0 {
+		return false
+	}
+	return C.nativePostUnicodeText((*C.uint16_t)(unsafe.Pointer(&encoded[0])), C.int(len(encoded))) != 0
+}
+
+func nativePostShortcut(step LearningReplayStep) bool {
+	keyCode, ok := macKeyNameToCode(strings.TrimSpace(step.Key))
+	if !ok {
+		return false
+	}
+	return nativePostVirtualKey(keyCode, step.Modifiers)
+}
+
+func nativePostVirtualKey(keyCode int, modifiers []string) bool {
+	flags := nativeFlagsFromModifiers(modifiers)
+	return C.nativePostVirtualKeyCode(C.int(keyCode), C.uint64_t(flags)) != 0
+}
+
+func macKeyNameToCode(key string) (int, bool) {
+	for code, name := range macKeyCodeNames {
+		if strings.EqualFold(name, key) {
+			return code, true
+		}
+	}
+	return 0, false
+}
+
+func nativeFlagsFromModifiers(modifiers []string) uint64 {
+	var flags uint64
+	for _, mod := range modifiers {
+		switch strings.ToLower(strings.TrimSpace(mod)) {
+		case "cmd", "command", "meta":
+			flags |= uint64(C.kCGEventFlagMaskCommand)
+		case "ctrl", "control":
+			flags |= uint64(C.kCGEventFlagMaskControl)
+		case "option", "alt":
+			flags |= uint64(C.kCGEventFlagMaskAlternate)
+		case "shift":
+			flags |= uint64(C.kCGEventFlagMaskShift)
+		case "fn":
+			flags |= uint64(C.kCGEventFlagMaskSecondaryFn)
+		}
+	}
+	return flags
+}
+
+func (n *NativeInput) MoveCursorOnly(step LearningReplayStep) NativeReplayResult {
+	if C.nativeCheckAccessibility() == 0 {
+		return NativeReplayResult{
+			OK:      false,
+			Skipped: true,
+			Method:  "native_preview",
+			Index:   step.Index,
+			Label:   step.Label,
+			X:       step.X,
+			Y:       step.Y,
+			Error:   "native input: 回放預覽需要「輔助使用 Accessibility」權限，開啟後請重啟 app",
+		}
+	}
+	// 預覽也先把目標帶到前景，使用者才能看到游標停在正確元件上。
+	n.activateStepWindow(step)
+	n.moveCursorSmooth(step.X, step.Y)
+	return NativeReplayResult{
+		OK:      true,
+		Skipped: true,
+		Method:  "native_preview",
+		Index:   step.Index,
+		Label:   step.Label,
+		X:       step.X,
+		Y:       step.Y,
+	}
+}
+
+func (n *NativeInput) ShowAgentCursor(step LearningReplayStep) NativeReplayResult {
+	C.nativeShowAgentCursor(C.double(step.X), C.double(step.Y))
+	return NativeReplayResult{
+		OK:      true,
+		Skipped: true,
+		Method:  "native_agent_cursor",
+		Index:   step.Index,
+		Label:   step.Label,
+		X:       step.X,
+		Y:       step.Y,
+	}
+}
+
+func (n *NativeInput) HideAgentCursor() {
+	C.nativeHideAgentCursor()
+}
+
+// CaptureWindow 截取單一視窗（macOS 14+ 用 ScreenCaptureKit，否則 legacy）。
+// 回傳的 WindowCapture.Scale = 截圖 pixel 寬 / 視窗 point 寬（Retina ≈ 2）。
+func (n *NativeInput) CaptureWindow(hwnd uintptr) (WindowCapture, error) {
+	if hwnd == 0 {
+		return WindowCapture{}, fmt.Errorf("native capture: window handle is required")
+	}
+	if C.nativePreflightScreenCapture() == 0 {
+		if nativeScreenCapturePromptShown.CompareAndSwap(false, true) {
+			C.nativeRequestScreenCapture()
+		}
+		return WindowCapture{}, fmt.Errorf("native capture: 缺少「螢幕錄製 Screen Recording」權限（系統設定 → 隱私權與安全性 → 螢幕錄製），視覺重定位停用，回放將退回原始座標")
+	}
+	var data *C.uint8_t
+	var width, height C.int
+	var info C.WinInfo
+	ok := C.nativeCaptureWindowRGBA(C.long(hwnd), &data, &width, &height, &info)
+	if ok == 0 || data == nil || width <= 0 || height <= 0 {
+		return WindowCapture{}, fmt.Errorf("native capture: window capture failed (window %d may be closed)", hwnd)
+	}
+	defer C.free(unsafe.Pointer(data))
+	size := int(width) * int(height) * 4
+	imageData := C.GoBytes(unsafe.Pointer(data), C.int(size))
+	owner := C.GoString(&info.owner[0])
+	title := C.GoString(&info.title[0])
+	if title == "" {
+		title = owner
+	}
+	scale := 1.0
+	if info.found != 0 && info.w > 0 {
+		scale = float64(width) / float64(info.w)
+		// 截圖可能比視窗 bounds 多/少 1-2px（陰影裁切），吸附到常見倍率。
+		for _, snap := range []float64{1, 2, 3} {
+			if scale > snap*0.92 && scale < snap*1.08 {
+				scale = snap
+				break
+			}
+		}
+		if scale <= 0 {
+			scale = 1
+		}
+	}
+	return WindowCapture{
+		ImageData: imageData,
+		Width:     int(width),
+		Height:    int(height),
+		Scale:     scale,
+		WindowRect: PixelBBox{
+			X: int(info.x),
+			Y: int(info.y),
+			W: int(info.w),
+			H: int(info.h),
+		},
+		WindowTitle:   title,
+		WindowProcess: owner,
+	}, nil
+}
+
+// CaptureScreenRegion captures visible screen pixels for surfaces that are not
+// stable layer-0 windows, such as the Dock, menu bar, or floating overlays.
+func (n *NativeInput) CaptureScreenRegion(rect PixelBBox) (WindowCapture, error) {
+	if rect.W <= 0 || rect.H <= 0 {
+		return WindowCapture{}, fmt.Errorf("native capture: invalid screen region %+v", rect)
+	}
+	if C.nativePreflightScreenCapture() == 0 {
+		if nativeScreenCapturePromptShown.CompareAndSwap(false, true) {
+			C.nativeRequestScreenCapture()
+		}
+		return WindowCapture{}, fmt.Errorf("native capture: 缺少「螢幕錄製 Screen Recording」權限（系統設定 → 隱私權與安全性 → 螢幕錄製），螢幕區塊視覺重定位停用")
+	}
+	var data *C.uint8_t
+	var width, height C.int
+	ok := C.nativeCaptureScreenRegionRGBA(
+		C.double(rect.X),
+		C.double(rect.Y),
+		C.double(rect.W),
+		C.double(rect.H),
+		&data,
+		&width,
+		&height,
+	)
+	if ok == 0 || data == nil || width <= 0 || height <= 0 {
+		return WindowCapture{}, fmt.Errorf("native capture: screen region capture failed %+v", rect)
+	}
+	defer C.free(unsafe.Pointer(data))
+	size := int(width) * int(height) * 4
+	imageData := C.GoBytes(unsafe.Pointer(data), C.int(size))
+	scale := 1.0
+	if rect.W > 0 {
+		scale = float64(width) / float64(rect.W)
+		for _, snap := range []float64{1, 2, 3} {
+			if scale > snap*0.92 && scale < snap*1.08 {
+				scale = snap
+				break
+			}
+		}
+		if scale <= 0 {
+			scale = 1
+		}
+	}
+	return WindowCapture{
+		ImageData:     imageData,
+		Width:         int(width),
+		Height:        int(height),
+		Scale:         scale,
+		WindowRect:    rect,
+		WindowTitle:   "screen region",
+		WindowProcess: "screen",
+	}, nil
+}
+
+func (n *NativeInput) moveCursorSmooth(targetX, targetY int) {
+	var sx, sy C.double
+	if C.nativeCurrentMouseLocation(&sx, &sy) == 0 {
+		C.nativePostMouseMove(C.double(targetX), C.double(targetY))
+		return
+	}
+	startX := float64(sx)
+	startY := float64(sy)
+	if int(startX) == targetX && int(startY) == targetY {
+		return
+	}
+	const steps = 28
+	for i := 1; i <= steps; i++ {
+		t := float64(i) / float64(steps)
+		eased := 1 - (1-t)*(1-t)
+		x := startX + (float64(targetX)-startX)*eased
+		y := startY + (float64(targetY)-startY)*eased
+		C.nativePostMouseMove(C.double(x), C.double(y))
+		time.Sleep(28 * time.Millisecond)
+	}
+	C.nativePostMouseMove(C.double(targetX), C.double(targetY))
+}
+
+func isMacOSPermissionPromptWindow(owner, title string) bool {
+	text := strings.ToLower(strings.TrimSpace(owner + " " + title))
+	return strings.Contains(text, "universalaccessauthwarn")
+}
+
+// handleToNativeInput 從 cgo.Handle 還原 *NativeInput（供匯出回呼使用）。
+func handleToNativeInput(h uintptr) (*NativeInput, bool) {
+	v := cgo.Handle(h).Value()
+	n, ok := v.(*NativeInput)
+	return n, ok
+}

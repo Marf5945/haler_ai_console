@@ -1,0 +1,13 @@
+#!/bin/sh
+# pre-commit — 清 generated 檔的 trailing whitespace（v3.1.7）。
+# wails build 每次重生 frontend/wailsjs/go/models.ts 都會帶 trailing whitespace，
+# 這裡在 commit 前自動清掉；若該檔已 staged 則重新加入本次 commit。
+# 安裝：cp scripts/git-hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+f="frontend/wailsjs/go/models.ts"
+if [ -f "$f" ]; then
+  perl -i -pe 's/[ \t]+$//' "$f"
+  if git diff --cached --name-only | grep -qx "$f"; then
+    git add "$f"
+  fi
+fi
+exit 0

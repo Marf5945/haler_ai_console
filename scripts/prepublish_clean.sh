@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 find . -type f -name '*_test.go' -not -path './.git/*' -delete
-rm -rf frontend/src/test adapter/visual_learning/testdata frontend/node_modules
+rm -rf frontend/src/test frontend/dist frontend/node_modules adapter/visual_learning/testdata
 rm -f assets/models/__dummy_test__ test_dialogues_1000chars_10sets.md
 rm -f adapter/visual_learning/YOLOX_MIGRATION.md build/darwin/Info.dev.plist
 rm -f scripts/vision_organ_smoke.sh

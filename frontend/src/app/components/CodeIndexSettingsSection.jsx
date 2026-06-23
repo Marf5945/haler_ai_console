@@ -1,9 +1,18 @@
 import {useState} from 'react';
+import {callWails} from '../../lib/callWails';
+
+function invokeApp(method, ...args) {
+  return callWails(() => {
+    const fn = window.go?.main?.App?.[method];
+    if (typeof fn !== 'function') throw new Error(`Wails binding missing: ${method}`);
+    return fn(...args);
+  });
+}
 
 export default function CodeIndexSettingsSection({
-  onRebuild = async () => null,
-  onSearch = async () => [],
-  onBuildContext = async () => null,
+  onRebuild = () => invokeApp('RebuildCodeIndex'),
+  onSearch = (query, limit) => invokeApp('SearchCodeSections', query, limit),
+  onBuildContext = (query, isHighImpact) => invokeApp('BuildCodeContext', query, isHighImpact),
 }) {
   const [query, setQuery] = useState('BuildLLMContext');
   const [busy, setBusy] = useState('');

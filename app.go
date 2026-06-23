@@ -44,6 +44,7 @@ import (
 	"ui_console/internal/urlsafe"
 	"ui_console/internal/voice"
 	"ui_console/orchestration/cli_manager"
+	codeindexsvc "ui_console/orchestration/codeindex"
 	"ui_console/orchestration/dag"
 	"ui_console/orchestration/skill_step"
 	"ui_console/orchestration/stop_recovery"
@@ -231,7 +232,8 @@ type App struct {
 	referencePromptTargets map[string][]string
 
 	// v3.6.5 Document Service（§24）— 文件匯入/匯出
-	documentStore *builtin.Store
+	documentStore    *builtin.Store
+	codeIndexService *codeindexsvc.Service
 
 	// v4.0 Scheduler 時間排程系統（§27）— 定時執行 Event/Skill/Callback
 	schedulerService *scheduler.Service
@@ -338,7 +340,8 @@ func NewApp() *App {
 		credentialStore: sharedSecretStore,
 
 		// v3.6.1 Memory Pipeline（§18）
-		memoryPipeline: memory.NewPipeline(hookRoot),
+		memoryPipeline:   memory.NewPipeline(hookRoot),
+		codeIndexService: codeindexsvc.NewService(cwd, hookRoot),
 
 		// v3.6.1 DAG Scheduler（§19）
 		dagScheduler:    dag.NewScheduler(hookRoot),

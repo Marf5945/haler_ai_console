@@ -43,6 +43,7 @@ const (
 	LinkLLMProvider      LinkType = "llm_provider_candidate"
 	LinkDocumentation    LinkType = "documentation" // reference only, no execution
 	LinkMCPServer        LinkType = "mcp_server"    // #47: MCP server（獨立路徑）
+	LinkSharedSource     LinkType = "shared_source" // local/shared document source
 	LinkUnsupported      LinkType = "unsupported"   // rejected
 )
 
@@ -172,6 +173,41 @@ func (s *Service) Register(url, label string) (*ExternalLink, error) {
 		ID:           fmt.Sprintf("link-%d", time.Now().UnixNano()),
 		URL:          url,
 		LinkType:     lt,
+		Label:        label,
+		RegisteredAt: time.Now(),
+	}
+	s.links = append(s.links, link)
+	if err := s.store.SaveRaw(s.links); err != nil {
+		return nil, err
+	}
+	return &link, nil
+}
+
+// RegisterSharedSource records a local/shared document source after the caller
+// has already validated readability and containment rules.
+func (s *Service) RegisterSharedSource(path, label string) (*ExternalLink, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, fmt.Errorf("external_link: shared source path must not be empty")
+	}
+	label = strings.TrimSpace(label)
+	if label == "" {
+		label = filepath.Base(path)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, l := range s.links {
+		if l.URL == path && l.LinkType == LinkSharedSource {
+			return &l, nil
+		}
+	}
+
+	link := ExternalLink{
+		ID:           fmt.Sprintf("link-%d", time.Now().UnixNano()),
+		URL:          path,
+		LinkType:     LinkSharedSource,
 		Label:        label,
 		RegisteredAt: time.Now(),
 	}

@@ -3274,17 +3274,90 @@
   }
 
   .reference-link-card,
-  .reference-file-card {
+  .reference-file-card,
+  .shared-link-card {
     @apply shrink-0;
   }
 
-  .reference-file-card {
+  .reference-file-card,
+  .shared-link-card {
     @apply border-[#45c8bb]/58;
     background: linear-gradient(180deg, rgba(28,91,102,.92), rgba(9,26,43,.98));
   }
 
-  .reference-file-card:hover {
+  .reference-file-card:hover,
+  .shared-link-card:hover {
     box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 0 0 1px rgba(69,200,187,.24), 0 12px 28px rgba(0,0,0,.34);
+  }
+
+  .reference-file-card,
+  .shared-link-card {
+    @apply relative overflow-visible;
+    cursor: default;
+  }
+
+  .reference-file-card > span:nth-child(2),
+  .shared-link-card > span:nth-child(2) {
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap;
+    font-size: clamp(12px, 1vw, 16px);
+    line-height: 1;
+  }
+
+  .rail-hint-popover {
+    @apply pointer-events-none absolute right-0 top-[calc(100%+8px)] z-40 grid min-w-[190px] gap-1 rounded-[8px] border px-3 py-2 text-left opacity-0 shadow-2xl transition;
+    border-color: rgba(15,23,42,.12);
+    background: rgba(248,250,252,.98);
+    color: #111827;
+    transform: translateY(-4px);
+  }
+
+  .rail-hint-popover::before {
+    @apply absolute right-4 top-[-5px] h-2.5 w-2.5 rotate-45 border-l border-t;
+    content: "";
+    border-color: rgba(15,23,42,.12);
+    background: rgba(248,250,252,.98);
+  }
+
+  .rail-hint-popover strong {
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] font-black leading-tight;
+  }
+
+  .rail-hint-popover small {
+    @apply text-[11px] font-bold leading-snug;
+    color: #475569;
+  }
+
+  .reference-file-card:hover .rail-hint-popover,
+  .shared-link-card:hover .rail-hint-popover {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .shared-source-list {
+    --shared-source-row-height: 36px;
+    --shared-source-row-gap: 0.25rem;
+    @apply grid overflow-y-auto pr-0.5;
+    gap: var(--shared-source-row-gap);
+    max-height: calc((var(--shared-source-row-height) * 4) + (var(--shared-source-row-gap) * 3));
+    grid-auto-rows: var(--shared-source-row-height);
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+
+  .shared-source-list::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+
+  .shared-source-name {
+    @apply relative grid overflow-hidden rounded-[7px] border px-2 py-1 text-[9px] font-black leading-tight text-white/78;
+    align-content: center;
+    border-color: rgba(69,200,187,.38);
+    background: linear-gradient(180deg, rgba(18,74,82,.34), rgba(0,0,0,.20));
+  }
+
+  .shared-source-name .reference-file-detail {
+    color: rgba(196,255,247,.50);
   }
 
   /* Right rail learning/recording mode controls sit between reference link and file drop. */
@@ -4818,8 +4891,14 @@
     backdrop-filter: blur(6px);
   }
 
+  .settings-persona-patrol-badge {
+    @apply absolute right-2 top-2 max-w-[72px] overflow-hidden text-ellipsis whitespace-nowrap rounded-[6px] border border-white/35 px-2 py-1 text-[10px] font-black leading-none text-[#1d1205];
+    background: linear-gradient(180deg, rgba(255,248,224,.96), rgba(255,185,78,.94));
+    box-shadow: 0 4px 12px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.72);
+  }
+
   .settings-persona-lock {
-    @apply absolute right-2 top-2 rounded-[5px] bg-[#f0b65f] px-[6px] py-[3px] text-[10px] font-black text-[#15100a];
+    @apply absolute left-2 top-2 rounded-[5px] bg-[#f0b65f] px-[6px] py-[3px] text-[10px] font-black text-[#15100a];
     box-shadow: 0 8px 18px rgba(0,0,0,.28);
   }
 
@@ -5007,6 +5086,10 @@
 
   .persona-form textarea {
     @apply h-[85px] resize-none py-3;
+  }
+
+  .persona-form textarea.persona-patrol-dialogue {
+    @apply h-[72px];
   }
 
   .persona-form input::placeholder,

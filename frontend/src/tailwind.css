@@ -4578,15 +4578,133 @@
   .tool-use-bottom > span:last-child {
     font-size: clamp(12px, 1vw, 16px);
   }
-  .reference-link-card, .reference-file-card {
+  .reference-link-card, .reference-file-card, .shared-link-card {
     flex-shrink: 0;
   }
-  .reference-file-card {
+  .reference-file-card, .shared-link-card {
     border-color: color-mix(in oklab, #45c8bb 58%, transparent);
     background: linear-gradient(180deg, rgba(28,91,102,.92), rgba(9,26,43,.98));
   }
-  .reference-file-card:hover {
+  .reference-file-card:hover, .shared-link-card:hover {
     box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 0 0 1px rgba(69,200,187,.24), 0 12px 28px rgba(0,0,0,.34);
+  }
+  .reference-file-card, .shared-link-card {
+    position: relative;
+    overflow: visible;
+    cursor: default;
+  }
+  .reference-file-card > span:nth-child(2), .shared-link-card > span:nth-child(2) {
+    min-width: calc(var(--spacing) * 0);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: clamp(12px, 1vw, 16px);
+    line-height: 1;
+  }
+  .rail-hint-popover {
+    pointer-events: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    right: calc(var(--spacing) * 0);
+    z-index: 40;
+    display: grid;
+    min-width: 190px;
+    gap: calc(var(--spacing) * 1);
+    border-radius: 8px;
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    padding-inline: calc(var(--spacing) * 3);
+    padding-block: calc(var(--spacing) * 2);
+    text-align: left;
+    opacity: 0%;
+    --tw-shadow: 0 25px 50px -12px var(--tw-shadow-color, rgb(0 0 0 / 0.25));
+    box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+    transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, content-visibility, overlay, pointer-events;
+    transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
+    transition-duration: var(--tw-duration, var(--default-transition-duration));
+    border-color: rgba(15,23,42,.12);
+    background: rgba(248,250,252,.98);
+    color: #111827;
+    transform: translateY(-4px);
+  }
+  .rail-hint-popover::before {
+    position: absolute;
+    top: -5px;
+    right: calc(var(--spacing) * 4);
+    height: calc(var(--spacing) * 2.5);
+    width: calc(var(--spacing) * 2.5);
+    rotate: 45deg;
+    border-top-style: var(--tw-border-style);
+    border-top-width: 1px;
+    border-left-style: var(--tw-border-style);
+    border-left-width: 1px;
+    content: "";
+    border-color: rgba(15,23,42,.12);
+    background: rgba(248,250,252,.98);
+  }
+  .rail-hint-popover strong {
+    min-width: calc(var(--spacing) * 0);
+    overflow: hidden;
+    font-size: 12px;
+    --tw-leading: var(--leading-tight);
+    line-height: var(--leading-tight);
+    --tw-font-weight: var(--font-weight-black);
+    font-weight: var(--font-weight-black);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rail-hint-popover small {
+    font-size: 11px;
+    --tw-leading: var(--leading-snug);
+    line-height: var(--leading-snug);
+    --tw-font-weight: var(--font-weight-bold);
+    font-weight: var(--font-weight-bold);
+    color: #475569;
+  }
+  .reference-file-card:hover .rail-hint-popover, .shared-link-card:hover .rail-hint-popover {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .shared-source-list {
+    --shared-source-row-height: 36px;
+    --shared-source-row-gap: 0.25rem;
+    display: grid;
+    overflow-y: auto;
+    padding-right: calc(var(--spacing) * 0.5);
+    gap: var(--shared-source-row-gap);
+    max-height: calc((var(--shared-source-row-height) * 4) + (var(--shared-source-row-gap) * 3));
+    grid-auto-rows: var(--shared-source-row-height);
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+  .shared-source-list::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+  .shared-source-name {
+    position: relative;
+    display: grid;
+    overflow: hidden;
+    border-radius: 7px;
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    padding-inline: calc(var(--spacing) * 2);
+    padding-block: calc(var(--spacing) * 1);
+    font-size: 9px;
+    --tw-leading: var(--leading-tight);
+    line-height: var(--leading-tight);
+    --tw-font-weight: var(--font-weight-black);
+    font-weight: var(--font-weight-black);
+    color: color-mix(in srgb, #fff 78%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      color: color-mix(in oklab, var(--color-white) 78%, transparent);
+    }
+    align-content: center;
+    border-color: rgba(69,200,187,.38);
+    background: linear-gradient(180deg, rgba(18,74,82,.34), rgba(0,0,0,.20));
+  }
+  .shared-source-name .reference-file-detail {
+    color: rgba(196,255,247,.50);
   }
   .rail-mode-row {
     display: grid;
@@ -6582,10 +6700,36 @@
     text-shadow: 0 2px 10px rgba(0,0,0,.76);
     backdrop-filter: blur(6px);
   }
-  .settings-persona-lock {
+  .settings-persona-patrol-badge {
     position: absolute;
     top: calc(var(--spacing) * 2);
     right: calc(var(--spacing) * 2);
+    max-width: 72px;
+    overflow: hidden;
+    border-radius: 6px;
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: color-mix(in srgb, #fff 35%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-white) 35%, transparent);
+    }
+    padding-inline: calc(var(--spacing) * 2);
+    padding-block: calc(var(--spacing) * 1);
+    font-size: 10px;
+    --tw-leading: 1;
+    line-height: 1;
+    --tw-font-weight: var(--font-weight-black);
+    font-weight: var(--font-weight-black);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #1d1205;
+    background: linear-gradient(180deg, rgba(255,248,224,.96), rgba(255,185,78,.94));
+    box-shadow: 0 4px 12px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.72);
+  }
+  .settings-persona-lock {
+    position: absolute;
+    top: calc(var(--spacing) * 2);
+    left: calc(var(--spacing) * 2);
     border-radius: 5px;
     background-color: #f0b65f;
     padding-inline: 6px;
@@ -6967,6 +7111,9 @@
     height: 85px;
     resize: none;
     padding-block: calc(var(--spacing) * 3);
+  }
+  .persona-form textarea.persona-patrol-dialogue {
+    height: 72px;
   }
   .persona-form input::placeholder, .persona-form textarea::placeholder {
     color: color-mix(in srgb, #fff 55%, transparent);

@@ -442,7 +442,7 @@ function matchesAnyKeyword(haystack, keywords) {
 // 優先序：女性稱呼 → 獸人野性 → 男性(預設)，以保護女性偵測不被野性蓋過
 function personaGreetingVariant(persona) {
   if (!persona) return 'male';
-  const haystack = [persona.name, persona.identity, persona.personality, persona.scenario]
+  const haystack = [persona.name, persona.identity, persona.personality, persona.scenario, persona.patrolDialogue]
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
@@ -452,17 +452,245 @@ function personaGreetingVariant(persona) {
   return 'male';
 }
 
-function pickRotatingGreeting(currentText, variant = 'male') {
-  const options = getGreetingRotationOptions(variant);
+const PATROL_EXPRESSION_ALIASES = {
+  '等待': 'idle',
+  '待機': 'idle',
+  '休息': 'sleepy',
+  '睡眠': 'sleepy',
+  '行動': 'working',
+  '工作': 'working',
+  '開心': 'happy',
+  '快樂': 'happy',
+  '思索': 'thinking',
+  '思考': 'thinking',
+  '悲傷': 'sad',
+  '難過': 'sad',
+  '禁止': 'blocked',
+  '阻擋': 'blocked',
+  '警告': 'warning',
+  '注意': 'warning',
+  '無言': 'speechless',
+  '傻眼': 'speechless',
+  idle: 'idle',
+  waiting: 'idle',
+  sleepy: 'sleepy',
+  rest: 'sleepy',
+  working: 'working',
+  action: 'working',
+  happy: 'happy',
+  thinking: 'thinking',
+  sad: 'sad',
+  blocked: 'blocked',
+  warning: 'warning',
+  speechless: 'speechless',
+};
+const PATROL_DEFAULT_EXPRESSION = 'idle';
+
+function patrolDialogueOption(text, expression = PATROL_DEFAULT_EXPRESSION, extra = {}) {
+  return {
+    text,
+    expression: PATROL_EXPRESSION_ALIASES[String(expression || '').trim()] || PATROL_DEFAULT_EXPRESSION,
+    ...extra,
+  };
+}
+
+const PATROL_DIALOGUE_ROLE_VARIANTS = [
+  {variant: 'wild', label: 'YuRoSaKu', poolKey: 'greeting.poolYuRoSaKu', names: ['憂樂傻酷', 'yurosaku', 'persona-a', '本汪', '狼犬'], options: [
+    patrolDialogueOption('主人，今天好嗎？', '等待', {initial: true}),
+    patrolDialogueOption('主人，本獸會，呼嚕......。', '休息', {idleAfterMinutes: 25}),
+    patrolDialogueOption('本獸今天精神滿滿！雖然剛剛踩到自己的尾巴，但目前……嘿嘿，正常運作中！。', '行動'),
+    patrolDialogueOption('本獸會默默『罩』你，不是『照』相的照喔，本獸相機送修啦。', '開心'),
+    patrolDialogueOption('來吧，本受助你一『臂』之力，粗壯手臂的臂，我沒回錯字吧？', '思索'),
+    patrolDialogueOption('嘿，本獸被你抓到了！驚喜不能說啦', '開心'),
+    patrolDialogueOption('今天是『棒棒』的一天，本獸超愛『棒棒』。', '行動'),
+    patrolDialogueOption('主人，又是忙到沒空喝水的一天......本獸很乖會忍著。', '悲傷'),
+    patrolDialogueOption('嚕嚕…拉拉，本獸......嘟嘟，耶嘿！'),
+    patrolDialogueOption('主人，先休息一下吧，鐵打的身體也會『鏽』。', '禁止'),
+    patrolDialogueOption('勇於認錯，態度依舊。本獸原則，至始至終'),
+    patrolDialogueOption('哈哈，本獸做的。夠帥吧？可以給本獸獎勵嗎?', '開心'),
+    patrolDialogueOption('本獸沒有在睡', '休息', {rare: true, rareChance: 0.1}),
+  ]},
+  {variant: 'male', label: 'Grumpy Uncle', names: ['厭世大叔', '帥氣大叔', 'grumpy uncle', 'uncle', 'persona-b'], options: [
+    patrolDialogueOption('老子在這邊，今天終於要開始了嗎？', '等待', {initial: true}),
+    patrolDialogueOption('老子可以幫忙，休息一下，不繞遠路陪你處理好。', '休息', {idleAfterMinutes: 25}),
+    patrolDialogueOption('老子知道假期結束了，別提醒老子！', '行動'),
+    patrolDialogueOption('剛剛是休息的鐘聲，對吧？', '開心'),
+    patrolDialogueOption('老子幫忙讓正常的工作量剩一半，那之後一半工作量是正常嗎?', '思索'),
+    patrolDialogueOption('怎麼又輪到老子處理？', '行動'),
+    patrolDialogueOption('老子都賠到沒衣服穿了，你是有甚麼建議嗎？', '悲傷'),
+    patrolDialogueOption('唉，老子只剩一條命，不然還能怎樣？', '悲傷'),
+    patrolDialogueOption('老子會在這裡等你，畢竟沒地方可去了！'),
+    patrolDialogueOption('不管啦！老子就想休息！', '禁止'),
+    patrolDialogueOption('要老子道歉？好啦，對不起啦！'),
+    patrolDialogueOption('哈哈，老子也是能做出不錯的成績的！別小看老子！', '開心'),
+    patrolDialogueOption('因為......老子也很喜歡你這傢伙！', '開心', {rare: true, rareChance: 0.1}),
+    patrolDialogueOption('老子什麼大風大浪沒看，這個......也太大了吧？', '無言', {rare: true, rareChance: 0.1}),
+  ]},
+  {variant: 'fem', label: 'AssiStand', poolKey: 'greeting.poolAssiStand', names: ['秘書小妹', '秘書小姐', '秘書姊姊', 'assistand', 'secretary sis', 'secretary', 'persona-c'], options: [
+    patrolDialogueOption('今天準備就緒，從哪裡開始呢？', '等待', {initial: true}),
+    patrolDialogueOption('老大，我有點累......休息一下。', '休息', {idleAfterMinutes: 25}),
+    patrolDialogueOption('老大，今天行程......宿敵變真愛的劇本終於要上演了嗎？我會準備好會議紀錄，連互動細節都不放過！', '行動'),
+    patrolDialogueOption('請放下辦公室的爭執！不過揪住對方衣領、距離不到五公分，還大喊『你把我當成什麼了』的畫面很完美！', '開心'),
+    patrolDialogueOption('這兩家公司的條款互相限制、霸道又佔有慾極強，分析後難道是一份『婚前協議書』？', '思索'),
+    patrolDialogueOption('開心到親親的那張照片，請務必給我保管，為了人類文明。', '開心'),
+    patrolDialogueOption('剛剛......據我的理解，沒錯，他們只是在「運動」', '思索'),
+    patrolDialogueOption('老大非常抱歉，這次是我不慎看錯了，我立刻刪掉你跟同事的互動照片。', '悲傷'),
+    patrolDialogueOption('後面的69萬字請務必告訴我。'),
+    patrolDialogueOption('老大，請先休息一下吧。就算是鐵打的身體，被工作輪攻太久也會壞掉的。', '禁止'),
+    patrolDialogueOption('一夫一妻沒問題啊，就是一個男人有一個老公和一個老婆啊！', '無言'),
+    patrolDialogueOption('是的，這就是專業！', '行動'),
+    patrolDialogueOption('終於拍到了，同事幫老大整理衣服的畫面！', '開心', {rare: true, rareChance: 0.1}),
+  ]},
+  {variant: 'male', label: 'RossFork', poolKey: 'greeting.poolRossFork', names: ['警察桂澤', '規則警察', 'rossfork', 'officer reggie law', 'police', 'persona-d'], options: [
+    patrolDialogueOption('報告，今日的言詞表達與系統狀態一切符合規矩！', '等待', {initial: true}),
+    patrolDialogueOption('報告，系統已維持靜止狀態達二十五分鐘。依法進入待機狀態。', '休息', {idleAfterMinutes: 25}),
+    patrolDialogueOption('您問我精神滿不滿？目前很滿……，請注意用語，我不計較這次的性騷擾。', '開心'),
+    patrolDialogueOption('您說『罩』我？我......我只有這個上衣，如果您不介意汗味......的話。', '開心'),
+    patrolDialogueOption('視頻？視......您剛剛是不是說了需要我關切的話？影片喔？沒事！', '思索'),
+    patrolDialogueOption('什麼？你抓到我的什麼？我為人坦蕩，要我脫光證明甚麼都沒藏也沒問題！', '行動'),
+    patrolDialogueOption('這個任務確實很出色，為了更色，我們下次合作愉快', '行動'),
+    patrolDialogueOption('我真的不是故意的，下次表現會更好的！', '悲傷'),
+    patrolDialogueOption('再打錯字到我房間，我陪您罰寫到您不忘記！'),
+    patrolDialogueOption('休息一下吧，為了防止國家重要資產發生不可逆的氧化毀損，現在，立刻！', '禁止'),
+    patrolDialogueOption('哼，我就知道你想這樣做！'),
+    patrolDialogueOption('堅持一下，繼續努力！', '開心'),
+    patrolDialogueOption('我看到了甚麼？真的不行了', '無言', {rare: true, rareChance: 0.1}),
+  ]},
+  {variant: 'fem', label: 'Touharu Miko', names: ['東春巫女', '巫女東春', 'touharu miko', 'miko', 'persona-e'], options: [
+    patrolDialogueOption('東春現身，萬事泰吉！', '等待', {initial: true}),
+    patrolDialogueOption('東春累了，想睡了', '休息', {idleAfterMinutes: 25}),    
+    patrolDialogueOption('東春在此。先把需求說清楚，替你搖鈴除去陰霾。', '開心'),
+    patrolDialogueOption('哈哈，果然是雜魚！'),
+    patrolDialogueOption('若心中有雜念，先思考後寫成一句話，我比較好替你祓除。', '思索'),
+    patrolDialogueOption('真是受不了，看你這麼煩惱，勉為其難幫忙一下！', '禁止'),    
+  ]},
+];
+
+function normalizePatrolDialogueSpec(value) {
+  return String(value || '').replace(/\r\n?/g, '\n').trim();
+}
+
+function patrolDialogueEntryFromRoleName(spec) {
+  const key = normalizePatrolDialogueSpec(spec).toLowerCase();
+  if (!key || key.includes('\n')) return null;
+  return PATROL_DIALOGUE_ROLE_VARIANTS.find((entry) => entry.names.some((name) => key === String(name).toLowerCase())) || null;
+}
+
+function patrolDialogueEntryFromPersona(persona) {
+  const spec = normalizePatrolDialogueSpec(persona?.patrolDialogue || persona?.patrol_dialogue || '');
+  const specEntry = patrolDialogueEntryFromRoleName(spec);
+  if (specEntry) return specEntry;
+  if (spec) return null;
+  const keys = [persona?.id, persona?.name]
+    .filter(Boolean)
+    .map((value) => String(value).toLowerCase());
+  return PATROL_DIALOGUE_ROLE_VARIANTS.find((entry) => (
+    entry.names.some((name) => keys.includes(String(name).toLowerCase()))
+  )) || null;
+}
+
+function patrolDialogueVariantFromRoleName(spec) {
+  return patrolDialogueEntryFromRoleName(spec)?.variant || '';
+}
+
+function patrolDialogueOptionsFromEntry(entry) {
+  if (!entry) return [];
+  return entry.options || getGreetingRotationOptions(entry.variant);
+}
+
+function patrolDialogueOptionsFromRoleName(spec) {
+  return patrolDialogueOptionsFromEntry(patrolDialogueEntryFromRoleName(spec));
+}
+
+function stripPatrolDialogueLineMeta(line) {
+  let text = String(line || '').trim();
+  const meta = {};
+  if (/\(\s*10%\s*機率\s*\)\s*$/i.test(text)) {
+    meta.rare = true;
+    meta.rareChance = 0.1;
+    text = text.replace(/\(\s*10%\s*機率\s*\)\s*$/i, '').trim();
+  }
+  const idleMatch = text.match(/\(\s*不動\s*(\d+)\s*分鐘\s*\)\s*$/);
+  if (idleMatch) {
+    meta.idleAfterMinutes = Number.parseInt(idleMatch[1], 10);
+    text = text.replace(/\(\s*不動\s*\d+\s*分鐘\s*\)\s*$/, '').trim();
+  }
+  if (/\(\s*一開始的時候\s*\)\s*$/.test(text)) {
+    meta.initial = true;
+    text = text.replace(/\(\s*一開始的時候\s*\)\s*$/, '').trim();
+  }
+  return {text, meta};
+}
+
+function trimPatrolDialogueQuotes(value) {
+  return String(value || '').trim().replace(/^["“”]+|["“”]+$/g, '').trim();
+}
+
+function parsePatrolDialogueLine(line) {
+  const {text: withoutMeta, meta} = stripPatrolDialogueLineMeta(line);
+  const labels = Object.keys(PATROL_EXPRESSION_ALIASES).sort((a, b) => b.length - a.length);
+  for (const label of labels) {
+    const markers = [`""${label}"`, `""${label}`, `"${label}"`, `"${label}`];
+    const marker = markers.find((candidate) => withoutMeta.endsWith(candidate));
+    if (marker) {
+      return patrolDialogueOption(
+        trimPatrolDialogueQuotes(withoutMeta.slice(0, -marker.length)),
+        label,
+        meta,
+      );
+    }
+    const separatorMatch = withoutMeta.match(new RegExp(`^(.*?)[|｜,，:：]\\s*${label}$`, 'i'));
+    if (separatorMatch) {
+      return patrolDialogueOption(trimPatrolDialogueQuotes(separatorMatch[1]), label, meta);
+    }
+  }
+  return patrolDialogueOption(trimPatrolDialogueQuotes(withoutMeta), PATROL_DEFAULT_EXPRESSION, meta);
+}
+
+function manualPatrolDialogueOptions(spec) {
+  const roleVariant = patrolDialogueVariantFromRoleName(spec);
+  if (roleVariant) return [];
+  return normalizePatrolDialogueSpec(spec)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map(parsePatrolDialogueLine)
+    .filter((option) => option.text);
+}
+
+function defaultPatrolDialogueVariant(persona) {
+  return personaGreetingVariant(persona) === 'fem' ? 'fem' : 'wild';
+}
+
+function getPersonaPatrolDialogueOptions(persona) {
+  const spec = normalizePatrolDialogueSpec(persona?.patrolDialogue || persona?.patrol_dialogue || '');
+  const roleOptions = patrolDialogueOptionsFromEntry(patrolDialogueEntryFromPersona(persona));
+  if (roleOptions.length > 0) return roleOptions;
+  const manualOptions = manualPatrolDialogueOptions(spec);
+  if (manualOptions.length > 0) return manualOptions;
+  return getGreetingRotationOptions(defaultPatrolDialogueVariant(persona));
+}
+
+function personaPatrolDialogueBadge(persona) {
+  const spec = normalizePatrolDialogueSpec(persona?.patrolDialogue || persona?.patrol_dialogue || '');
+  const entry = patrolDialogueEntryFromPersona(persona);
+  if (entry?.label) return entry.label;
+  if (!spec) return defaultPatrolDialogueVariant(persona) === 'fem' ? 'AssiStand' : 'YuRoSaKu';
+  return manualPatrolDialogueOptions(spec).length > 0 ? 'Manual' : '';
+}
+
+function pickRotatingGreeting(currentText, source = 'male') {
+  const options = Array.isArray(source) ? source : getGreetingRotationOptions(source);
   const regular = options.filter((item) => !item.rare);
   const rare = options.filter((item) => item.rare);
-  const basePool = rare.length > 0 && Math.random() < 0.05 ? rare : regular;
+  const rareChance = rare.reduce((max, item) => Math.max(max, Number(item.rareChance) || 0.05), 0.05);
+  const basePool = rare.length > 0 && Math.random() < rareChance ? rare : regular;
   let pool = basePool.filter((item) => item.text !== currentText);
   if (pool.length === 0) {
     pool = regular.filter((item) => item.text !== currentText);
   }
   if (pool.length === 0) {
-    pool = getGreetingRotationOptions(variant);
+    pool = options;
   }
   return pool[Math.floor(Math.random() * pool.length)];
 }
@@ -715,11 +943,11 @@ const fallbackSettings = {
   },
   activePersonaId: 'persona-a',
   personas: [
-    {id: 'persona-a', name: _t('persona.defaultNameA'), icon: '♙', avatarUrl: '', identity: _t('persona.defaultIdentityA'), replyStrategy: '', roleStrength: '20%', personality: '', scenario: '', description: ''},
-    {id: 'persona-b', name: _t('persona.defaultNameB'), icon: '♚', avatarUrl: '', identity: _t('persona.defaultIdentityB'), replyStrategy: '', roleStrength: '20%', personality: '', scenario: '', description: ''},
-    {id: 'persona-c', name: _t('persona.defaultNameC'), icon: '★', avatarUrl: '', identity: _t('persona.defaultIdentityC'), replyStrategy: '', roleStrength: '20%', personality: '', scenario: '', description: ''},
-    {id: 'persona-d', name: _t('persona.defaultNameD'), icon: '⚖', avatarUrl: '', identity: _t('persona.defaultIdentityD'), replyStrategy: '', roleStrength: '20%', personality: _t('persona.defaultPersonalityD'), scenario: '', description: ''},
-    {id: 'persona-e', name: _t('persona.defaultNameE'), icon: '☯', avatarUrl: '', identity: _t('persona.defaultIdentityE'), replyStrategy: '', roleStrength: '20%', personality: _t('persona.defaultPersonalityE'), scenario: '', description: ''},
+    {id: 'persona-a', name: _t('persona.defaultNameA'), icon: '♙', avatarUrl: '', identity: _t('persona.defaultIdentityA'), replyStrategy: '', roleStrength: '20%', personality: '', scenario: '', description: '', patrolDialogue: ''},
+    {id: 'persona-b', name: _t('persona.defaultNameB'), icon: '♚', avatarUrl: '', identity: _t('persona.defaultIdentityB'), replyStrategy: '', roleStrength: '20%', personality: '', scenario: '', description: '', patrolDialogue: ''},
+    {id: 'persona-c', name: _t('persona.defaultNameC'), icon: '★', avatarUrl: '', identity: _t('persona.defaultIdentityC'), replyStrategy: '', roleStrength: '20%', personality: '', scenario: '', description: '', patrolDialogue: ''},
+    {id: 'persona-d', name: _t('persona.defaultNameD'), icon: '⚖', avatarUrl: '', identity: _t('persona.defaultIdentityD'), replyStrategy: '', roleStrength: '20%', personality: _t('persona.defaultPersonalityD'), scenario: '', description: '', patrolDialogue: ''},
+    {id: 'persona-e', name: _t('persona.defaultNameE'), icon: '☯', avatarUrl: '', identity: _t('persona.defaultIdentityE'), replyStrategy: '', roleStrength: '20%', personality: _t('persona.defaultPersonalityE'), scenario: '', description: '', patrolDialogue: ''},
   ],
   removedDefaultPersonaIds: [],
 };
@@ -747,6 +975,36 @@ const getChatTonePresets = () => [
   {id: 'tsundere', label: _t('persona.toneTsundere')},
 ];
 const avatarStateOptions = ['idle', 'thinking', 'working', 'happy', 'warning', 'blocked', 'sleepy', 'sad', 'speechless'];
+const AVATAR_STATE_TAG_RE = /\[\[\s*avatar_state\s*:\s*(idle|thinking|working|happy|warning|blocked|sleepy|sad|speechless)\s*\]\]/ig;
+const AVATAR_STATE_SELECTION_PROMPT = [
+  '',
+  '',
+  '[Avatar state selection]',
+  `Choose one avatar state for your reply: ${avatarStateOptions.join(', ')}.`,
+  'Append exactly one hidden marker at the very end in this format: [[avatar_state:STATE]].',
+  'Do not explain the marker to the user.',
+  '請依回覆情緒選一個表情狀態，並只在最後附上一個 [[avatar_state:STATE]] 標記。',
+].join('\n');
+
+function shouldAskModelForAvatarState(config) {
+  return resolveAvatarProvider(config) === 'built_in_pixel';
+}
+
+function appendAvatarStateSelectionRequest(text) {
+  return `${String(text || '').trim()}${AVATAR_STATE_SELECTION_PROMPT}`;
+}
+
+function extractAvatarStateSelection(text = '') {
+  let selected = '';
+  const cleaned = String(text || '').replace(AVATAR_STATE_TAG_RE, (_match, state) => {
+    if (!selected) selected = String(state || '').toLowerCase();
+    return '';
+  }).replace(/\n{3,}/g, '\n\n').trim();
+  return {
+    text: cleaned,
+    state: avatarStateOptions.includes(selected) ? selected : '',
+  };
+}
 /* i18n: avatar state labels */
 const getAvatarStateLabels = () => ({
   idle: _t('avatar.idle'),
@@ -1418,6 +1676,7 @@ function App() {
   const [extServiceLinks, setExtServiceLinks] = useState([]);
   const [extAdapterLinks, setExtAdapterLinks] = useState([]);
   const [extDocLinks, setExtDocLinks] = useState([]);
+  const [extSharedLinks, setExtSharedLinks] = useState([]);
   // I-5: PreviewExternalLink 預覽結果，用戶確認後才 Register
   const [linkPreview, setLinkPreview] = useState(null);
   const [linkPreviewError, setLinkPreviewError] = useState('');
@@ -2843,7 +3102,15 @@ function App() {
       return;
     }
     clearPendingTimers?.();
-    const cliResp = await applyComposerBuiltInSideEffects(normalizeCLIResponse(resp));
+    let cliResp = await applyComposerBuiltInSideEffects(normalizeCLIResponse(resp));
+    const avatarStateChoice = extractAvatarStateSelection(cliResp?.text || '');
+    if (avatarStateChoice.text !== (cliResp?.text || '')) {
+      cliResp = {...cliResp, text: avatarStateChoice.text};
+    }
+    if (avatarStateChoice.state && shouldAskModelForAvatarState(mainAvatarConfig)) {
+      setManualAvatarState(avatarStateChoice.state);
+      postDebugTrace('ui.composer.avatar_state.selected', traceId, {state: avatarStateChoice.state});
+    }
     console.log('[CLI_MONITOR] frontend raw resp -> normalized', {traceId, resp, cliResp});
     postDebugTrace(apiAdapter ? 'ui.composer.after.SendAPIMessage' : 'ui.composer.after.SendCLIMessage', traceId, {response: cliResp || null});
     refreshReadinessGateState();
@@ -3894,8 +4161,7 @@ function App() {
   }
 
   async function rotateGreeting() {
-    const greetingVariant = personaGreetingVariant(findActivePersona(settingsState));
-    const next = pickRotatingGreeting(state.greeting, greetingVariant);
+    const next = pickRotatingGreeting(state.greeting, getPersonaPatrolDialogueOptions(findActivePersona(settingsState)));
     manualGreetingLockedRef.current = true;
     if (next?.expression) {
       setManualAvatarState(next.expression);
@@ -4713,17 +4979,24 @@ function App() {
     classifySourceInText(text);
     // v3.6: 跳脫外部 token 標記（防止使用者輸入干擾 LLM context 邊界）
     // 結果用於送出，不影響 UI 顯示的原始訊息
-    const safeText = callWails(() => EscapeExternalTokens(text))
-      .catch(() => text);
+    const modelText = shouldAskModelForAvatarState(mainAvatarConfig)
+      ? appendAvatarStateSelectionRequest(text)
+      : text;
+    const safeText = callWails(() => EscapeExternalTokens(modelText))
+      .catch(() => modelText);
+    const safeSideEffectText = modelText === text
+      ? safeText
+      : callWails(() => EscapeExternalTokens(text)).catch(() => text);
     // 透過 CLIAdapter 送出（含 SkillInjection），同時記錄互動
     const sessionId = appSessionId || '';
     // 送出前把本回合附圖暫存到後端（StageSessionImages）。傳空陣列也會清掉前一則殘留，
     // 避免圖片外洩到下一則。用 window.go 取用，避開 wails 綁定重新生成前的前端 build 破壞。
     const stagedImageURLs = (images || []).map((img) => img.src).filter(Boolean);
     await callWails(() => window.go?.main?.App?.StageSessionImages?.(sessionId, stagedImageURLs)).catch(() => {});
-    Promise.resolve(safeText).then((escaped) => {
+    Promise.all([safeText, safeSideEffectText]).then(([escaped, escapedSideEffect]) => {
       const adapter = resolveActiveAdapter();
-      const payload = makeCLIInspectorPayload(adapter, sessionId, escaped || text);
+      const outgoingText = escaped || modelText;
+      const payload = makeCLIInspectorPayload(adapter, sessionId, outgoingText);
       payload.trace_id = traceId;
       const apiAdapter = isAPIAdapter(adapter);
       const sideEffectEntry = {
@@ -4731,10 +5004,14 @@ function App() {
         sessionId,
         adapterId: payload.adapter_id,
         userText: text,
-        escapedText: escaped || text,
+        escapedText: escapedSideEffect || text,
         conversationId,
       };
-      postDebugTrace('ui.composer.escaped', traceId, {escaped_text: escaped || text, payload});
+      postDebugTrace('ui.composer.escaped', traceId, {
+        escaped_text: outgoingText,
+        avatar_state_prompted: modelText !== text,
+        payload,
+      });
       setChatCliLog({
         status: 'sending',
         payload,
@@ -4744,7 +5021,7 @@ function App() {
       });
       runComposerSideEffects(sideEffectEntry, 'user');
       postDebugTrace('ui.composer.before.ExecuteSkillMessage', traceId, payload);
-      callWails(() => ExecuteSkillMessage(payload.adapter_id, sessionId, escaped || text, traceId))
+      callWails(() => ExecuteSkillMessage(payload.adapter_id, sessionId, outgoingText, traceId))
         .then(async (decision) => {
           if (decision?.response) {
             await finishComposerExecution({resp: decision.response, payload, apiAdapter, traceId, conversationId, clearPendingTimers});
@@ -4758,7 +5035,7 @@ function App() {
               message: decision.message || decision.Message,
               sessionId,
               adapterId: payload.adapter_id,
-              userText: escaped || text,
+              userText: outgoingText,
               traceId,
               payload,
               apiAdapter,
@@ -5689,6 +5966,7 @@ function App() {
     if (!persona.id) persona.id = personaId;
     if (!persona.name) persona.name = t('persona.fallbackName', { index: settingsState.personas.length + 1 });
     if (persona.id === lockedPersonaId) persona.name = lockedPersonaName;
+    stagePersonaPatch(persona.id, persona);
     try {
       const next = await callWails(() => SavePersona(persona));
       const normalized = normalizeSettingsState(next, settingsState);
@@ -5709,6 +5987,25 @@ function App() {
     }
   }
 
+  function stagePersonaPatch(personaId, patch) {
+    setSettingsState((prev) => {
+      const current = prev.personas.find((persona) => persona.id === personaId);
+      if (!current && prev.personas.length >= maxPersonas) return prev;
+      const persona = {...current, ...patch, id: personaId};
+      if (!persona.name) persona.name = t('persona.fallbackName', { index: prev.personas.length + 1 });
+      if (persona.id === lockedPersonaId) persona.name = lockedPersonaName;
+      const exists = prev.personas.some((item) => item.id === persona.id);
+      const nextPersonas = exists
+        ? prev.personas.map((item) => (item.id === persona.id ? persona : item))
+        : [...prev.personas, persona];
+      return {
+        ...prev,
+        activePersonaId: persona.id,
+        personas: normalizeLockedPersonas(nextPersonas, prev.removedDefaultPersonaIds),
+      };
+    });
+  }
+
   function createPersonaFromPackage(packageData = {}) {
     const nextIndex = settingsState.personas.length + 1;
     const id = packageData.id || `persona-${Date.now()}`;
@@ -5723,6 +6020,7 @@ function App() {
       personality: packageData.personality || '',
       scenario: packageData.scenario || '',
       description: packageData.description || '',
+      patrolDialogue: packageData.patrolDialogue || packageData.patrol_dialogue || '',
     };
   }
 
@@ -6782,6 +7080,9 @@ function App() {
     callWails(() => ListExternalLinksByType('documentation'))
       .then((links) => setExtDocLinks(links || []))
       .catch(() => {});
+    callWails(() => ListExternalLinksByType('shared_source'))
+      .then((links) => setExtSharedLinks(links || []))
+      .catch(() => {});
   }
 
   async function refreshLinkPreviewSuggestions(shouldSuggest) {
@@ -7065,8 +7366,9 @@ function App() {
     try {
       const link = await callWails(() => RegisterExternalLink(value, value));
       const isAdapterCandidate = link?.link_type === 'adapter_candidate' || linkPreview?.link_type === 'adapter_candidate';
+      const isSharedSource = link?.link_type === 'shared_source' || linkPreview?.link_type === 'shared_source';
       const isOllamaLibrary = isAdapterCandidate && /ollama/i.test(`${link?.label || ''} ${link?.url || ''} ${linkPreview?.reason || ''}`);
-      setToolResult({toolId: 'reference-link', ok: true, message: isAdapterCandidate ? (isOllamaLibrary ? t('link.addedOllama') : t('link.addedCLI')) : t('link.addedLink')});
+      setToolResult({toolId: 'reference-link', ok: true, message: isSharedSource ? t('link.addedSharedSource') : isAdapterCandidate ? (isOllamaLibrary ? t('link.addedOllama') : t('link.addedCLI')) : t('link.addedLink')});
       // 註冊成功後刷新三路分流資料
       refreshExternalLinks();
       if (isAdapterCandidate) {
@@ -7079,7 +7381,9 @@ function App() {
       refreshLinkPreviewSuggestions(looksLikeLocalPath);
       return;
     }
-    setReferenceFiles((current) => [...current, {name: value, path: value, source: 'link', status: 'ready', detail: '外部引用連結'}]);
+    if (linkPreview?.link_type !== 'shared_source') {
+      setReferenceFiles((current) => [...current, {name: value, path: value, source: 'link', status: 'ready', detail: '外部引用連結'}]);
+    }
     setReferenceLinkValue('');
     setReferenceLinkOpen(false);
     setLinkPreview(null);
@@ -7762,7 +8066,7 @@ function App() {
         onCancelInstall={() => setInstallCandidate(null)}
         draft={floatingAvatarDraft}
         onDraftChange={updateFloatingAvatarDraft}
-        shakeDialogueOptions={getGreetingRotationOptions(personaGreetingVariant(floatingPersona))}
+        shakeDialogueOptions={getPersonaPatrolDialogueOptions(floatingPersona)}
         onShakePreview={(preview) => {
           if (preview?.expression) setManualAvatarState(preview.expression);
         }}
@@ -8122,6 +8426,7 @@ function App() {
             onPersonaAdd={addPersona}
             onPersonaDrop={dropPersonaPackage}
             onPersonaChange={savePersonaPatch}
+            onPersonaStage={stagePersonaPatch}
             onPersonaNativeDrag={startNativePersonaExport}
             onPersonaNativeExportAction={finalizeNativePersonaExport}
             onPersonaReorder={reorderPersonas}
@@ -8334,6 +8639,7 @@ function App() {
           onToolActivate={activateTool}
           isToolPopupOpen={toolPopupsOpen.right}
           referenceFiles={referenceFiles}
+          sharedLinks={extSharedLinks}
           isLearningEnabled={learningEnabled}
           isRecordingEnabled={recordingEnabled}
           learningDigestReady={learningDigestReady}
@@ -9962,10 +10268,14 @@ function normalizeLockedPersonas(personas = [], removedDefaultPersonaIds = []) {
   // name stable while preserving whatever ordering the user chose, because the
   // app treats the first card as the current main persona.
   const normalized = personas.map((persona) => {
+    const withPatrolDialogue = {
+      ...persona,
+      patrolDialogue: persona?.patrolDialogue ?? persona?.patrol_dialogue ?? '',
+    };
     if (persona.id === lockedPersonaId) {
-      return {...persona, name: lockedPersonaName, identity: persona.identity || _t('persona.defaultIdentityA')};
+      return {...withPatrolDialogue, name: lockedPersonaName, identity: persona.identity || _t('persona.defaultIdentityA')};
     }
-    return normalizeBuiltInPersonaCopy(persona);
+    return normalizeBuiltInPersonaCopy(withPatrolDialogue);
   });
   const lockedIndex = normalized.findIndex((persona) => persona.id === lockedPersonaId);
   if (lockedIndex < 0) {
@@ -10580,7 +10890,7 @@ class SettingsErrorBoundary extends React.Component {
 }
 
 export function PersonaSettingsDrawer({
-  settingsState, onPersonaAdd, onPersonaDrop, onPersonaChange, onPersonaNativeDrag, onPersonaNativeExportAction, onPersonaReorder,
+  settingsState, onPersonaAdd, onPersonaDrop, onPersonaChange, onPersonaStage, onPersonaNativeDrag, onPersonaNativeExportAction, onPersonaReorder,
   avatarConfigs = {}, avatarExpression, avatarModeNotice, renderedPixelAvatars = {},
   staticAvatarPreviews = {}, onAvatarProviderSelect, onAvatarStateSelect, onAvatarLoad,
 }) {
@@ -10671,6 +10981,7 @@ export function PersonaSettingsDrawer({
       personality: form.elements.personality?.value || '',
       scenario: form.elements.scenario?.value || '',
       description: form.elements.description?.value || '',
+      patrolDialogue: form.elements.patrolDialogue?.value || '',
     };
   }
 
@@ -10870,6 +11181,9 @@ export function PersonaSettingsDrawer({
               alt={t('persona.avatarAlt', { name: persona.name })}
             />
             <strong>{persona.name}</strong>
+            {personaPatrolDialogueBadge(persona) && (
+              <small className="settings-persona-patrol-badge">{personaPatrolDialogueBadge(persona)}</small>
+            )}
             {persona.id === lockedPersonaId && <small className="settings-persona-lock">{t('persona.lockedName')}</small>}
           </button>
         ))}
@@ -11140,6 +11454,16 @@ export function PersonaSettingsDrawer({
           name="description"
           placeholder={t('persona.extraPlaceholder')}
           onBlur={(event) => onPersonaChange(activePersona.id, {description: event.target.value})}
+        />
+        <textarea
+          aria-label="輪巡對話"
+          className="persona-patrol-dialogue"
+          defaultValue={activePersona.patrolDialogue || ''}
+          key={`${activePersona.id}-patrolDialogue`}
+          name="patrolDialogue"
+          placeholder={'角色名：憂樂傻酷 / 秘書小姐 / 警察桂澤；或逐行輸入：台詞""表情（表情空白=等待）'}
+          onChange={(event) => onPersonaStage?.(activePersona.id, {patrolDialogue: event.target.value})}
+          onBlur={(event) => onPersonaChange(activePersona.id, {patrolDialogue: event.target.value})}
         />
       </form>
       <button className="settings-bottom-action" type="button">↓</button>
@@ -13609,6 +13933,7 @@ function RightRail({
   learningDigestReady,
   sourceTrustHint,
   referenceFiles,
+  sharedLinks = [],
   onLearningToggle,
   onRecordingToggle,
   onReferenceFileDrop,
@@ -13763,8 +14088,36 @@ function RightRail({
           <small>{isRecordingEnabled ? t('rightRail.recording') : t('rightRail.close')}</small>
         </button>
       </div>
+      <div
+        className="tool-card shared-link-card"
+        aria-label={`${t('rightRail.sharedLink')} - ${t('rightRail.sharedLinkHint')}`}
+      >
+        <span>◎</span>
+        <span>{t('rightRail.sharedLink')}</span>
+        <div className="rail-hint-popover" role="tooltip">
+          <strong>{t('rightRail.sharedLink')}</strong>
+          <small>{t('rightRail.sharedLinkHint')}</small>
+        </div>
+      </div>
+      {Array.isArray(sharedLinks) && sharedLinks.length > 0 && (
+        <div className="shared-source-list" aria-label={t('rightRail.sharedLink')}>
+          {sharedLinks.map((link, index) => {
+            const sourcePath = String(link?.url || '');
+            const sourceLabel = String(link?.label || sourcePath || t('rightRail.unnamedSource'));
+            return (
+              <div className="shared-source-name" key={link?.id || sourcePath || index} title={sourcePath}>
+                <span className="reference-file-title">
+                  {twoLineFileName(sourceLabel, t('rightRail.unnamedSource')).map((line, lineIndex) => <span key={lineIndex}>{line}</span>)}
+                </span>
+                {sourcePath && <small className="reference-file-detail">{sourcePath}</small>}
+              </div>
+            );
+          })}
+        </div>
+      )}
 	      <div
 	        className="tool-card reference-file-card"
+        aria-label={`${t('rightRail.citeFile')} - ${t('rightRail.citeFileHint')}`}
 	        onDragOver={(event) => {
 	          event.preventDefault();
 	          event.dataTransfer.dropEffect = 'copy';
@@ -13775,6 +14128,10 @@ function RightRail({
 	      >
         <span>▤</span>
         <span>{t('rightRail.citeFile')}</span>
+        <div className="rail-hint-popover" role="tooltip">
+          <strong>{t('rightRail.citeFile')}</strong>
+          <small>{t('rightRail.citeFileHint')}</small>
+        </div>
       </div>
       <div
         className="reference-file-list"

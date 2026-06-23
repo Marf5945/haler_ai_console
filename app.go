@@ -3712,6 +3712,9 @@ func (a *App) PreviewExternalLink(url string) interface{} {
 			Reason:   fmt.Sprintf("偵測到本機 CLI：%s", cli.Name),
 		})
 	}
+	if preview, ok := previewSharedSourcePath(url); ok {
+		return frontendDTO(preview)
+	}
 	return frontendDTO(a.linkService.Preview(url))
 }
 
@@ -3769,6 +3772,13 @@ func (a *App) RegisterExternalLink(url, label string) (interface{}, error) {
 			LinkType: external_link.LinkAdapterCandidate,
 			Label:    cli.Name,
 		}), nil
+	}
+	if link, ok, err := registerSharedSourcePath(url, label, a.linkService); ok {
+		if err != nil {
+			return nil, err
+		}
+		localsearch.InvalidateAll()
+		return frontendDTO(link), nil
 	}
 	link, err := a.linkService.Register(url, label)
 	return frontendDTO(link), err

@@ -180,17 +180,18 @@ type PendingImport struct {
 // Missing optional fields are normalized to empty strings so older packages can
 // still be reviewed instead of failing hard.
 type PersonaPackage struct {
-	Schema        string `json:"schema"`
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Icon          string `json:"icon"`
-	AvatarURL     string `json:"avatarUrl"`
-	Identity      string `json:"identity"`
-	ReplyStrategy string `json:"replyStrategy"`
-	RoleStrength  string `json:"roleStrength"`
-	Personality   string `json:"personality"`
-	Scenario      string `json:"scenario"`
-	Description   string `json:"description"`
+	Schema         string `json:"schema"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Icon           string `json:"icon"`
+	AvatarURL      string `json:"avatarUrl"`
+	Identity       string `json:"identity"`
+	ReplyStrategy  string `json:"replyStrategy"`
+	RoleStrength   string `json:"roleStrength"`
+	Personality    string `json:"personality"`
+	Scenario       string `json:"scenario"`
+	Description    string `json:"description"`
+	PatrolDialogue string `json:"patrolDialogue"`
 }
 
 // RejectedImportSummary is the sanitised log entry retained after rejection.

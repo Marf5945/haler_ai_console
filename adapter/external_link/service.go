@@ -43,6 +43,7 @@ const (
 	LinkLLMProvider      LinkType = "llm_provider_candidate"
 	LinkDocumentation    LinkType = "documentation" // reference only, no execution
 	LinkMCPServer        LinkType = "mcp_server"    // #47: MCP server（獨立路徑）
+	LinkSharedSource     LinkType = "shared_source" // local/share folder or document corpus
 	LinkUnsupported      LinkType = "unsupported"   // rejected
 )
 
@@ -184,6 +185,41 @@ func (s *Service) Register(url, label string) (*ExternalLink, error) {
 
 // RegisterAdapterCandidate 已廢棄——adapter 註冊現在只走 adapter_registry。
 // Deprecated: adapter registration is handled exclusively by adapter_registry.
+
+// RegisterSharedSource stores a trusted local/shared path as a document source.
+// The caller owns path validation because local paths intentionally do not pass
+// the HTTPS-only URL policy used for web links.
+func (s *Service) RegisterSharedSource(path, label string) (*ExternalLink, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, fmt.Errorf("external_link: shared source path must not be empty")
+	}
+	if strings.TrimSpace(label) == "" {
+		label = filepath.Base(path)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, l := range s.links {
+		if l.URL == path && l.LinkType == LinkSharedSource {
+			return &l, nil
+		}
+	}
+
+	link := ExternalLink{
+		ID:           fmt.Sprintf("shared-%d", time.Now().UnixNano()),
+		URL:          path,
+		LinkType:     LinkSharedSource,
+		Label:        label,
+		RegisteredAt: time.Now(),
+	}
+	s.links = append(s.links, link)
+	if err := s.store.SaveRaw(s.links); err != nil {
+		return nil, err
+	}
+	return &link, nil
+}
 
 // ListByType returns all registered links of a given type.
 // documentation links must NOT be passed to the routing / execution area.

@@ -10,6 +10,7 @@ export default function ReferenceLinkModal({value, linkPreview, error, suggestio
     adapter_candidate: isOllamaModelLibraryPreview ? '本地模型 Adapter' : 'CLI Adapter',
     llm_provider_candidate: t('link.llmApiInterface'),
     documentation: t('link.docLinkShort'),
+    shared_source: t('link.sharedSource'),
     unsupported: t('link.unsupported'),
   });
   const linkTypeLabel = getLinkTypeLabel();
@@ -50,6 +51,7 @@ export default function ReferenceLinkModal({value, linkPreview, error, suggestio
               </small>
             )}
             {linkPreview.link_type === 'documentation' && <small>{t('link.docOnlyRef')}</small>}
+            {linkPreview.link_type === 'shared_source' && linkPreview.reason && <small>{linkPreview.reason}</small>}
             {linkPreview.link_type === 'adapter_candidate' && linkPreview.reason && <small>（{linkPreview.reason}）</small>}
           </p>
         )}

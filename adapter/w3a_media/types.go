@@ -94,10 +94,10 @@ func (v VerificationStatus) IsTrainingSafe() bool {
 type MediaScope string
 
 const (
-	ScopeImage    MediaScope = "image"
-	ScopeAudio    MediaScope = "audio"
-	ScopeDocument MediaScope = "document"
-	ScopeVideo    MediaScope = "future_video" // 未來擴充
+	ScopeImage MediaScope = "image"
+	ScopeAudio MediaScope = "audio"
+	ScopeVideo MediaScope = "future_video" // 未來擴充
+	ScopeDocument MediaScope = "document"        // §9A 文檔來源證明
 )
 
 // ──────────────────────────────────────────────
@@ -208,11 +208,11 @@ type W3AMediaInfo struct {
 	Fingerprint        DualLayerFingerprint      `json:"fingerprint"`
 	Operations         []AppOperationFingerprint `json:"operations,omitempty"`
 	DeveloperSignature *DeveloperSignature       `json:"developer_signature,omitempty"`
-	Asset              *AssetIdentity            `json:"asset,omitempty"`
 	Pollution          *PollutionReport          `json:"pollution,omitempty"`
 	Training           *TrainingEligibility      `json:"training,omitempty"`
 	CreatedAt          time.Time                 `json:"created_at"`
 	VerifiedAt         time.Time                 `json:"verified_at,omitempty"`
+	Asset              *AssetIdentity            `json:"asset,omitempty"` // §9A 預留：線上認證/唯一碼/所有權（離線恆 inert）
 }
 
 // ──────────────────────────────────────────────

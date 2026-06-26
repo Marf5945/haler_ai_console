@@ -491,17 +491,41 @@
     "fillNamePath": "Completa un nombre y una ruta",
     "registerFail": "Error de registro: verifica que la ruta sea correcta",
     "steps": {
-      "welcome": {"title": "Bienvenida", "description": "Elige el idioma de la interfaz y conecta un endpoint de IA. Puedes omitirlo, pero algunas funciones quedarán limitadas."},
-      "adapter": {"title": "Elegir conexión", "description": "Pega una configuración API, conecta un endpoint de modelo local o indica una ruta local de CLI."},
-      "persona": {"title": "Configurar persona", "description": "Configura el nombre del asistente y el estilo de respuesta."},
-      "tool": {"title": "Probar herramientas", "description": "Abre el panel de herramientas y prueba una herramienta."},
-      "complete": {"title": "Listo", "description": "Ya puedes empezar."}
+      "welcome": {
+        "title": "Bienvenida",
+        "description": "Elige el idioma de la interfaz y conecta un endpoint de IA. Puedes omitirlo, pero algunas funciones quedarán limitadas."
+      },
+      "adapter": {
+        "title": "Elegir conexión",
+        "description": "Pega una configuración API, conecta un endpoint de modelo local o indica una ruta local de CLI."
+      },
+      "persona": {
+        "title": "Configurar persona",
+        "description": "Configura el nombre del asistente y el estilo de respuesta."
+      },
+      "tool": {
+        "title": "Probar herramientas",
+        "description": "Abre el panel de herramientas y prueba una herramienta."
+      },
+      "complete": {
+        "title": "Listo",
+        "description": "Ya puedes empezar."
+      }
     },
     "connectionChoice": "Elegir conexión de IA",
     "connection": {
-      "api": {"title": "API", "hint": "Pega API key, Base URL y model"},
-      "cli": {"title": "Ruta CLI", "hint": "Escanea o pega el ejecutable CLI local"},
-      "local": {"title": "Modelo local", "hint": "Escanea o introduce un endpoint Ollama / LM Studio"}
+      "api": {
+        "title": "API",
+        "hint": "Pega API key, Base URL y model"
+      },
+      "cli": {
+        "title": "Ruta CLI",
+        "hint": "Escanea o pega el ejecutable CLI local"
+      },
+      "local": {
+        "title": "Modelo local",
+        "hint": "Escanea o introduce un endpoint Ollama / LM Studio"
+      }
     },
     "apiProvider": "Proveedor API",
     "connectAPI": "Conectar API",
@@ -678,7 +702,9 @@
     "uploadImageError": "Pega o arrastra una imagen",
     "uploadPersonaLabel": "Avatar estático de {name}",
     "installFail": "No se pudo instalar el paquete de persona",
-    "skillInstallConfirmed": "Instalación de la habilidad {title} confirmada"
+    "skillInstallConfirmed": "Instalación de la habilidad {title} confirmada",
+    "patrolDialogueAriaLabel": "Persona-specific patrol dialogue",
+    "patrolDialoguePlaceholder": "Persona-specific dialogue or catchphrases, one per line. You can end a line with states like happy, thinking, or sleepy."
   },
   "confirm": {
     "destructiveTitle": "Confirmación de Operación Destructiva",
@@ -1005,7 +1031,9 @@
     "docOnlyRef": "(Solo referencia, no para ejecución de herramientas)",
     "suggestionsTitle": "Quizá quieras añadir:",
     "foundItem": "Encontrado {{name}}",
-    "exampleItem": "Ejemplo de {{name}}"
+    "exampleItem": "Ejemplo de {{name}}",
+    "addedSharedSource": "Shared source added",
+    "sharedSource": "Shared Source"
   },
   "cli": {
     "interactiveView": "Vista Interactiva de CLI",
@@ -1126,7 +1154,10 @@
     "refStatusChecking": "Comprobando",
     "refStatusReady": "Cargado",
     "refStatusError": "Fallido",
-    "refStatusAdded": "Añadido"
+    "refStatusAdded": "Añadido",
+    "sharedLink": "Shared Link",
+    "sharedLinkHint": "Includes shared spaces and shared docs",
+    "sharedLinkCount": "{count} sources"
   },
   "scheduler": {
     "dialogLabel": "Hora de Programación",
@@ -1387,6 +1418,9 @@
     "retry": "Reintentar"
   },
   "floatingAvatar": {
+    "bodyHead": "Head",
+    "bodyFull": "Full body",
+    "bodySwitchLabel": "Show",
     "installTitle": "Install this?",
     "installStep1": "Check the source and permissions, then press Confirm below",
     "installStep2": "Confirmed — press Send above to finish installing",

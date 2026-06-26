@@ -492,17 +492,41 @@
     "fillNamePath": "Preencha um nome e um caminho",
     "registerFail": "Falha no registo — verifique se o caminho está correto",
     "steps": {
-      "welcome": {"title": "Bem-vindo", "description": "Escolha o idioma da interface e ligue um endpoint de IA. Pode ignorar, mas algumas funcionalidades ficarão limitadas."},
-      "adapter": {"title": "Escolher Ligação", "description": "Cole uma configuração de API, ligue um endpoint de modelo local ou indique um caminho de CLI local."},
-      "persona": {"title": "Definir Persona", "description": "Defina o nome do assistente e o estilo de resposta."},
-      "tool": {"title": "Experimentar Ferramentas", "description": "Abra o painel de ferramentas e experimente uma ferramenta."},
-      "complete": {"title": "Concluído", "description": "Está pronto para começar."}
+      "welcome": {
+        "title": "Bem-vindo",
+        "description": "Escolha o idioma da interface e ligue um endpoint de IA. Pode ignorar, mas algumas funcionalidades ficarão limitadas."
+      },
+      "adapter": {
+        "title": "Escolher Ligação",
+        "description": "Cole uma configuração de API, ligue um endpoint de modelo local ou indique um caminho de CLI local."
+      },
+      "persona": {
+        "title": "Definir Persona",
+        "description": "Defina o nome do assistente e o estilo de resposta."
+      },
+      "tool": {
+        "title": "Experimentar Ferramentas",
+        "description": "Abra o painel de ferramentas e experimente uma ferramenta."
+      },
+      "complete": {
+        "title": "Concluído",
+        "description": "Está pronto para começar."
+      }
     },
     "connectionChoice": "Escolha a ligação de IA",
     "connection": {
-      "api": {"title": "API", "hint": "Cole API key, Base URL e model"},
-      "cli": {"title": "Caminho CLI", "hint": "Procure ou cole o executável CLI local"},
-      "local": {"title": "Modelo Local", "hint": "Procure ou introduza um endpoint Ollama / LM Studio"}
+      "api": {
+        "title": "API",
+        "hint": "Cole API key, Base URL e model"
+      },
+      "cli": {
+        "title": "Caminho CLI",
+        "hint": "Procure ou cole o executável CLI local"
+      },
+      "local": {
+        "title": "Modelo Local",
+        "hint": "Procure ou introduza um endpoint Ollama / LM Studio"
+      }
     },
     "apiProvider": "Fornecedor da API",
     "connectAPI": "Ligar API",
@@ -679,7 +703,9 @@
     "uploadImageError": "Cole ou arraste uma imagem",
     "uploadPersonaLabel": "Avatar estático de {name}",
     "installFail": "Não foi possível instalar o pacote de persona",
-    "skillInstallConfirmed": "Instalação da competência {title} confirmada"
+    "skillInstallConfirmed": "Instalação da competência {title} confirmada",
+    "patrolDialogueAriaLabel": "Persona-specific patrol dialogue",
+    "patrolDialoguePlaceholder": "Persona-specific dialogue or catchphrases, one per line. You can end a line with states like happy, thinking, or sleepy."
   },
   "confirm": {
     "destructiveTitle": "Confirmação de Operação Destrutiva",
@@ -1006,7 +1032,9 @@
     "docOnlyRef": "(Apenas referência, não para execução de ferramentas)",
     "suggestionsTitle": "Talvez queira adicionar:",
     "foundItem": "Encontrado {{name}}",
-    "exampleItem": "Exemplo de {{name}}"
+    "exampleItem": "Exemplo de {{name}}",
+    "addedSharedSource": "Shared source added",
+    "sharedSource": "Shared Source"
   },
   "cli": {
     "interactiveView": "Vista Interativa de CLI",
@@ -1127,7 +1155,10 @@
     "refStatusChecking": "A verificar",
     "refStatusReady": "Carregado",
     "refStatusError": "Falhou",
-    "refStatusAdded": "Adicionado"
+    "refStatusAdded": "Adicionado",
+    "sharedLink": "Shared Link",
+    "sharedLinkHint": "Includes shared spaces and shared docs",
+    "sharedLinkCount": "{count} sources"
   },
   "scheduler": {
     "dialogLabel": "Hora da Agenda",
@@ -1388,6 +1419,9 @@
     "retry": "Tentar de novo"
   },
   "floatingAvatar": {
+    "bodyHead": "Head",
+    "bodyFull": "Full body",
+    "bodySwitchLabel": "Show",
     "installTitle": "Install this?",
     "installStep1": "Check the source and permissions, then press Confirm below",
     "installStep2": "Confirmed — press Send above to finish installing",

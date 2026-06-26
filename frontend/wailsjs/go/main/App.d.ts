@@ -67,6 +67,10 @@ export function BootstrapScheduledSkill(arg1:string):Promise<main.SchedulerSkill
 
 export function BuildAndSaveSkillDraft(arg1:string,arg2:string,arg3:Array<string>,arg4:Array<string>,arg5:skill_step.ExpectedChain):Promise<main.SkillDraftSaveResult>;
 
+export function BuildCodeContext(arg1:string,arg2:boolean):Promise<any>;
+
+export function BuildDocumentSectionContext(arg1:string,arg2:string,arg3:number):Promise<any>;
+
 export function BuildLLMContext(arg1:string,arg2:string,arg3:boolean):Promise<llm_context.ContextPayload>;
 
 export function BuildSkillContext(arg1:string,arg2:string):Promise<skill_step.Injection>;
@@ -130,6 +134,8 @@ export function ConfirmTelegramChatID(arg1:string,arg2:string):Promise<void>;
 export function CreateDAGRun(arg1:string,arg2:string):Promise<dag.DAGRun>;
 
 export function CreateDestructiveReviewCard(arg1:string,arg2:string,arg3:string,arg4:string):Promise<review.Card>;
+
+export function CreateDocumentW3A(arg1:string):Promise<any>;
 
 export function CreateScheduledJob(arg1:string,arg2:string,arg3:string,arg4:string):Promise<scheduler.Job>;
 
@@ -563,6 +569,8 @@ export function PurgeSystemMarks(arg1:string):Promise<void>;
 
 export function ReadDocumentContent(arg1:string):Promise<string>;
 
+export function RebuildCodeIndex():Promise<any>;
+
 export function RebuildGroupSummary(arg1:string,arg2:string):Promise<string>;
 
 export function RecognizeNativeOCR(arg1:Array<number>):Promise<Array<visual_learning.OCRResult>>;
@@ -700,6 +708,8 @@ export function ScanSkillFolder(arg1:string):Promise<any>;
 export function SchedulerHasActiveJobs():Promise<boolean>;
 
 export function ScoreHighlightGroups(arg1:string,arg2:string):Promise<string>;
+
+export function SearchCodeSections(arg1:string,arg2:number):Promise<any>;
 
 export function SearchLearningOperations(arg1:string,arg2:number):Promise<any>;
 

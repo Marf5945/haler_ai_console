@@ -2437,6 +2437,7 @@ export namespace settings {
 	    personality: string;
 	    scenario: string;
 	    description: string;
+	    patrolDialogue: string;
 
 	    static createFrom(source: any = {}) {
 	        return new Persona(source);
@@ -2454,6 +2455,7 @@ export namespace settings {
 	        this.personality = source["personality"];
 	        this.scenario = source["scenario"];
 	        this.description = source["description"];
+	        this.patrolDialogue = source["patrolDialogue"];
 	    }
 	}
 	export class SummaryModelSettings {

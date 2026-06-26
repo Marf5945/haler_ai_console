@@ -17,14 +17,16 @@ import (
 var assets embed.FS
 
 // cspMiddleware 注入 Content-Security-Policy header。
-// SEC-12: 防止 XSS / 注入攻擊，限制前端只連回同源資源。
+// SEC-12: 防止 XSS / 注入攻擊，同時保留 debug trace 連線。
+// connect-src 包含 http://127.0.0.1:* 以支援會自動換 port 的工程師監視頁。
+// 當 DEBUG_TRACE_REMOVE 完成時，移除該例外並收緊為 connect-src 'self'。
 func cspMiddleware(next http.Handler) http.Handler {
 	// style-src 'unsafe-inline': Wails runtime 及部分 UI 框架需要 inline style。
 	// img-src data:/blob: : 前端可能使用 data URI 或 blob 圖片。
 	const csp = "default-src 'self'; " +
 		"script-src 'self'; " +
 		"style-src 'self' 'unsafe-inline'; " +
-		"connect-src 'self'; " +
+		"connect-src 'self' http://127.0.0.1:*; " +
 		"img-src 'self' data: blob:; " +
 		"font-src 'self' data:; " +
 		"object-src 'none'; " +

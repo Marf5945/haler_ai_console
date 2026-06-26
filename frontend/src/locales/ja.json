@@ -496,17 +496,41 @@
     "fillNamePath": "名前とパスを入力してください",
     "registerFail": "登録に失敗しました。パスが正しいか確認してください",
     "steps": {
-      "welcome": {"title": "ようこそ", "description": "まず表示言語を選び、AI エンドポイントを接続します。スキップもできますが、一部機能は制限されます。"},
-      "adapter": {"title": "接続方式を選択", "description": "API 設定、ローカルモデル endpoint、または CLI のローカルパスを指定できます。"},
-      "persona": {"title": "ペルソナ設定", "description": "アシスタント名と返信スタイルを設定します。"},
-      "tool": {"title": "ツールを試す", "description": "ツールパネルを開き、1つ試してみます。"},
-      "complete": {"title": "完了", "description": "使用を開始できます。"}
+      "welcome": {
+        "title": "ようこそ",
+        "description": "まず表示言語を選び、AI エンドポイントを接続します。スキップもできますが、一部機能は制限されます。"
+      },
+      "adapter": {
+        "title": "接続方式を選択",
+        "description": "API 設定、ローカルモデル endpoint、または CLI のローカルパスを指定できます。"
+      },
+      "persona": {
+        "title": "ペルソナ設定",
+        "description": "アシスタント名と返信スタイルを設定します。"
+      },
+      "tool": {
+        "title": "ツールを試す",
+        "description": "ツールパネルを開き、1つ試してみます。"
+      },
+      "complete": {
+        "title": "完了",
+        "description": "使用を開始できます。"
+      }
     },
     "connectionChoice": "AI 接続方式を選択",
     "connection": {
-      "api": {"title": "API", "hint": "API key、Base URL、model を入力"},
-      "cli": {"title": "CLI パス", "hint": "ローカル CLI 実行ファイルを検索または入力"},
-      "local": {"title": "ローカルモデル", "hint": "Ollama / LM Studio endpoint を検索または入力"}
+      "api": {
+        "title": "API",
+        "hint": "API key、Base URL、model を入力"
+      },
+      "cli": {
+        "title": "CLI パス",
+        "hint": "ローカル CLI 実行ファイルを検索または入力"
+      },
+      "local": {
+        "title": "ローカルモデル",
+        "hint": "Ollama / LM Studio endpoint を検索または入力"
+      }
     },
     "apiProvider": "API プロバイダー",
     "connectAPI": "API を接続",
@@ -683,7 +707,9 @@
     "uploadImageError": "画像を貼り付けるかドラッグしてください",
     "uploadPersonaLabel": "{name} の静的アバター",
     "installFail": "Persona パックをインストールできません",
-    "skillInstallConfirmed": "{title} skill のインストールを確認しました"
+    "skillInstallConfirmed": "{title} skill のインストールを確認しました",
+    "patrolDialogueAriaLabel": "Persona-specific patrol dialogue",
+    "patrolDialoguePlaceholder": "Persona-specific dialogue or catchphrases, one per line. You can end a line with states like happy, thinking, or sleepy."
   },
   "confirm": {
     "destructiveTitle": "破壊的操作の確認",
@@ -1010,7 +1036,9 @@
     "docOnlyRef": "（参考のみ、ツール実行用ではありません）",
     "suggestionsTitle": "追加するとよさそうな項目:",
     "foundItem": "{{name}} を検出",
-    "exampleItem": "{{name}} の例"
+    "exampleItem": "{{name}} の例",
+    "addedSharedSource": "Shared source added",
+    "sharedSource": "Shared Source"
   },
   "cli": {
     "interactiveView": "CLI インタラクティブビュー",
@@ -1131,7 +1159,10 @@
     "refStatusChecking": "確認中",
     "refStatusReady": "読み込み済み",
     "refStatusError": "失敗",
-    "refStatusAdded": "追加済み"
+    "refStatusAdded": "追加済み",
+    "sharedLink": "Shared Link",
+    "sharedLinkHint": "Includes shared spaces and shared docs",
+    "sharedLinkCount": "{count} sources"
   },
   "scheduler": {
     "dialogLabel": "スケジュール時刻",
@@ -1392,6 +1423,9 @@
     "retry": "再試行"
   },
   "floatingAvatar": {
+    "bodyHead": "Head",
+    "bodyFull": "Full body",
+    "bodySwitchLabel": "Show",
     "installTitle": "Install this?",
     "installStep1": "Check the source and permissions, then press Confirm below",
     "installStep2": "Confirmed — press Send above to finish installing",

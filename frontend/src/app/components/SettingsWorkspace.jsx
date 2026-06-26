@@ -16,6 +16,7 @@ export default function SettingsWorkspace(props) {
     onSummaryModelChange, onSummaryModelRescan, voiceState, voiceInstallBusy,
     onVoiceSettingsChange, onVoiceSettingsRefresh, onVoiceModelInstall, onVoiceModelRemove,
     onVoiceDebugClear, onSaveBrowserPref, onPreviewStyleDiff,
+    onCodeIndexRebuild, onCodeIndexSearch, onCodeIndexBuildContext,
     ...personaProps
   } = props;
 
@@ -54,7 +55,11 @@ export default function SettingsWorkspace(props) {
       />
       <StateTokenLegend />
       <SkillContextSettingsSection />
-      <CodeIndexSettingsSection />
+      <CodeIndexSettingsSection
+        onRebuild={onCodeIndexRebuild}
+        onSearch={onCodeIndexSearch}
+        onBuildContext={onCodeIndexBuildContext}
+      />
     </main>
   );
 }

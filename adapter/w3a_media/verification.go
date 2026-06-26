@@ -170,6 +170,18 @@ func detectMediaScope(filePath string) MediaScope {
 		strings.HasSuffix(lower, ".mov"),
 		strings.HasSuffix(lower, ".webm"):
 		return ScopeVideo
+	case strings.HasSuffix(lower, ".txt"),
+		strings.HasSuffix(lower, ".md"),
+		strings.HasSuffix(lower, ".markdown"),
+		strings.HasSuffix(lower, ".rtf"),
+		strings.HasSuffix(lower, ".csv"),
+		strings.HasSuffix(lower, ".html"),
+		strings.HasSuffix(lower, ".htm"),
+		strings.HasSuffix(lower, ".pdf"),
+		strings.HasSuffix(lower, ".doc"),
+		strings.HasSuffix(lower, ".docx"),
+		strings.HasSuffix(lower, ".odt"):
+		return ScopeDocument
 	default:
 		return ScopeImage // 預設
 	}

@@ -247,7 +247,7 @@ func CheckHighRiskSkillRequiresReview(resolveJSON string) error {
 // 不包含絕對路徑，只允許相對路徑或 ID。
 func CheckSkillContextNotExposingAbsolutePaths(injectionJSON string) error {
 	// 偵測常見絕對路徑前綴
-	pathPrefixes := []string{`"/` + `Users/`, `"/` + `home/`, `"C:` + `\\`, `"/` + `var/`, `"/` + `tmp/`}
+	pathPrefixes := []string{`"/Users/`, `"/home/`, `"C:\\`, `"/var/`, `"/tmp/`}
 	for _, prefix := range pathPrefixes {
 		if strings.Contains(injectionJSON, prefix) {
 			return fmt.Errorf("specPatchChecker[skill]: skill injection must not expose absolute paths: found %s", prefix)

@@ -159,6 +159,7 @@ type App struct {
 
 	// v3.6.1 LLM Context Governance（§11）— 雙層掃描
 	// 無需 service 實例，全部為純函式（llm_context 套件）
+	codeIndexService *codeindexsvc.Service
 
 	// v3.6.1 Memory Pipeline（§18）— 三級記憶管線
 	memoryPipeline *memory.Pipeline
@@ -232,8 +233,7 @@ type App struct {
 	referencePromptTargets map[string][]string
 
 	// v3.6.5 Document Service（§24）— 文件匯入/匯出
-	documentStore    *builtin.Store
-	codeIndexService *codeindexsvc.Service
+	documentStore *builtin.Store
 
 	// v4.0 Scheduler 時間排程系統（§27）— 定時執行 Event/Skill/Callback
 	schedulerService *scheduler.Service
@@ -340,8 +340,8 @@ func NewApp() *App {
 		credentialStore: sharedSecretStore,
 
 		// v3.6.1 Memory Pipeline（§18）
-		memoryPipeline:   memory.NewPipeline(hookRoot),
 		codeIndexService: codeindexsvc.NewService(cwd, hookRoot),
+		memoryPipeline:   memory.NewPipeline(hookRoot),
 
 		// v3.6.1 DAG Scheduler（§19）
 		dagScheduler:    dag.NewScheduler(hookRoot),
@@ -525,7 +525,15 @@ func appDataRoot() string {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.startHookGeneRecorder()
-	debugtrace.Record("go.startup", "", map[string]interface{}{})
+	// DEBUG_TRACE_REMOVE: Temporary local trace viewer for UI -> CLI diagnostics.
+	// Keep while cleaning dead code: the monitor can look offline when the app is
+	// stopped, but previous trace logs depend on this UI -> Go -> sidecar path.
+	// 使用動態本機埠，避免把開發機固定 monitor URL 寫進公開程式碼。
+	debugtrace.Start(debugtrace.DefaultAddr)
+	debugtrace.Record("go.startup", "", map[string]interface{}{
+		"trace_link": debugtrace.Snapshot(),
+	})
+	writeMonitorLinkSnapshot(debugtrace.Snapshot())
 	// SEC-06: 清掉上次未正常停止的 ephemeral browser profile（冪等）。
 	_ = a.CleanupEphemeralProfiles()
 	// #7: Inject Wails context into event bus so it can emit to frontend.
@@ -596,6 +604,14 @@ func (a *App) startup(ctx context.Context) {
 
 	// TASK 31: 啟動時為引用文件建立缺少的向量索引
 	go a.ensureReferenceVectorIndexes()
+
+	// Build a source code index in the background so Go code retrieval is ready
+	// before the user asks for focused repository context.
+	go func() {
+		if _, err := a.codeIndexService.Rebuild(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: code index rebuild failed: %v\n", err)
+		}
+	}()
 
 	// v3.6.1: 啟動時掃描過期暫存檔（§7.5 ScanAndCleanExpired，30 天）
 	go func() {
@@ -3704,6 +3720,9 @@ func (a *App) PreviewExternalLink(url string) interface{} {
 			Reason:   fmt.Sprintf("偵測到本機 CLI：%s", cli.Name),
 		})
 	}
+	if preview, ok := previewSharedSourcePath(url); ok {
+		return frontendDTO(preview)
+	}
 	return frontendDTO(a.linkService.Preview(url))
 }
 
@@ -3761,6 +3780,13 @@ func (a *App) RegisterExternalLink(url, label string) (interface{}, error) {
 			LinkType: external_link.LinkAdapterCandidate,
 			Label:    cli.Name,
 		}), nil
+	}
+	if link, ok, err := registerSharedSourcePath(url, label, a.linkService); ok {
+		if err != nil {
+			return nil, err
+		}
+		localsearch.InvalidateAll()
+		return frontendDTO(link), nil
 	}
 	link, err := a.linkService.Register(url, label)
 	return frontendDTO(link), err
@@ -5299,6 +5325,16 @@ func (a *App) ImportMediaVerify(path string) (interface{}, error) {
 // GetW3ATransferGuidance 取得原檔傳輸引導建議。
 func (a *App) GetW3ATransferGuidance() w3a_media.TransferGuidance {
 	return a.w3aMedia.GetGuidance()
+}
+
+// CreateDocumentW3A 為文檔建立 W3A sidecar（本地 provenance：byte + 正規化內容碼 +
+// 簽署來源軌跡）。加法接線，與既有媒體 W3A 流程互不影響。
+func (a *App) CreateDocumentW3A(path string) (interface{}, error) {
+	info, err := a.w3aMedia.CreateDocumentSidecar(path)
+	if err == nil {
+		a.eventBus.Emit("w3a:doc_created", map[string]interface{}{"path": path, "status": string(info.Status)})
+	}
+	return frontendDTO(info), err
 }
 
 // ListW3ATrustedDevelopers 列出所有信任的開發者。

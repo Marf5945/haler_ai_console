@@ -3274,6 +3274,7 @@
   }
 
   .reference-link-card,
+  .shared-link-card,
   .reference-file-card {
     @apply shrink-0;
   }
@@ -3285,6 +3286,37 @@
 
   .reference-file-card:hover {
     box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 0 0 1px rgba(69,200,187,.24), 0 12px 28px rgba(0,0,0,.34);
+  }
+
+  .shared-link-card {
+    @apply border-[#ffba55]/50;
+    background: linear-gradient(180deg, rgba(78,50,10,.92), rgba(20,24,34,.98));
+  }
+
+  .shared-source-list {
+    --shared-source-row-height: 36px;
+    --shared-source-row-gap: 0.25rem;
+    @apply grid overflow-y-auto pr-0.5;
+    gap: var(--shared-source-row-gap);
+    max-height: calc((var(--shared-source-row-height) * 4) + (var(--shared-source-row-gap) * 3));
+    grid-auto-rows: var(--shared-source-row-height);
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+
+  .shared-source-list::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+
+  .shared-source-name {
+    @apply relative grid overflow-hidden rounded-[7px] border border-[#ffba55]/24 px-2 py-1 text-[9px] font-black leading-tight text-white/78;
+    align-content: center;
+    background: rgba(68,38,5,.22);
+  }
+
+  .shared-source-name .reference-file-detail {
+    @apply truncate text-[8px] text-white/36;
   }
 
   /* Right rail learning/recording mode controls sit between reference link and file drop. */
@@ -4657,6 +4689,10 @@
     scroll-snap-align: start;
   }
 
+  .settings-persona-card-wrap {
+    @apply relative w-full;
+  }
+
   .settings-persona-card {
     @apply relative grid w-full overflow-hidden rounded-[12px] border border-white/45 p-0 text-white;
     aspect-ratio: 1 / 1;
@@ -4700,12 +4736,27 @@
 
   .settings-persona-avatar {
     @apply absolute inset-0 h-full w-full object-cover;
-    pointer-events: none;
+    pointer-events: auto;
     -webkit-user-drag: none;
     user-select: none;
     /* Dissolve the flat bottom edge of bust artwork into the card background. */
     -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%);
     mask-image: linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%);
+  }
+
+  .settings-persona-avatar-menu {
+    @apply absolute right-3 top-3 z-40 grid min-w-[104px] rounded-[8px] border border-white/28 p-1;
+    background: linear-gradient(180deg, rgba(52,30,12,.98), rgba(16,9,4,.98));
+    box-shadow: 0 14px 28px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.1);
+  }
+
+  .settings-persona-avatar-menu button {
+    @apply h-[34px] rounded-[6px] px-3 text-[13px] font-black text-[#15100a];
+    background: linear-gradient(180deg, #f8f3e7, #d9cab0);
+  }
+
+  .settings-persona-avatar-menu button:hover {
+    filter: brightness(1.05);
   }
 
   .settings-persona-card strong {
@@ -10316,4 +10367,45 @@
 }
 .floating-avatar-compact-root.floating-avatar-flyback {
   animation: floatingAvatarFlyOut 0.24s ease-in forwards;
+}
+
+/* v3.1.16 後台頭像：右鍵選單切換的全身像（DragonBones 之後接同一容器） */
+
+/* v3.1.16 後台頭像：頭像 / 半身 / 全身 三段顯示 */
+.floating-avatar-body-switch {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+}
+.floating-avatar-body-switch button {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 11px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  cursor: pointer;
+}
+.floating-avatar-body-switch .floating-avatar-body-active-btn {
+  border-color: rgba(199, 243, 109, 0.6);
+  background: linear-gradient(180deg, #c7f36d, #8fcf32);
+  color: #102506;
+  font-weight: 700;
+}
+/* 全身/半身：頭像按鈕放大成人物框，沿用 fullBody 圖，半身只露上半 */
+.floating-avatar-body-active .floating-avatar-button {
+  width: 200px;
+  height: 360px;
+  border-radius: 14px;
+  background: transparent;
+  overflow: hidden;
+  padding: 0;
+}
+.floating-avatar-body-active .floating-avatar-button .floating-avatar-img {
+  width: 100%;
+  height: 100%;
+}
+.floating-avatar-body-full .floating-avatar-button .floating-avatar-img {
+  object-fit: contain;
 }

@@ -4,8 +4,8 @@
 // 透過「prompt 內引用檔案路徑」讀圖。所以本檔負責：
 //  1. 把本回合 base64 圖片寫進「隔離暫存資料夾」（0700/0600，session 專屬）。
 //  2. 依各 CLI 的語法產生 prompt 後綴：
-//       - claude  → 要求它讀絕對路徑（Claude Code 預設有檔案讀取能力）。
-//       - gemini  → 用 @<絕對路徑> 內聯語法。
+//     - claude  → 要求它讀絕對路徑（Claude Code 預設有檔案讀取能力）。
+//     - gemini  → 用 @<絕對路徑> 內聯語法。
 //  3. 回傳 cleanup，由呼叫端 defer 在 CLI 跑完後即刪——把「落地」嚴格侷限在這一輪。
 //
 // 安全：暫存根目錄在 os.TempDir() 下、session 命名空間隔離；cleanup 一定執行

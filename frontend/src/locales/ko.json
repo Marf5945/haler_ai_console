@@ -490,17 +490,41 @@
     "fillNamePath": "이름과 경로를 입력해 주세요",
     "registerFail": "등록에 실패했어요 — 경로가 올바른지 확인해 주세요",
     "steps": {
-      "welcome": {"title": "환영합니다", "description": "인터페이스 언어를 선택한 뒤 AI 엔드포인트를 연결하세요. 건너뛸 수 있지만 일부 기능이 제한될 수 있어요."},
-      "adapter": {"title": "연결 방식 선택", "description": "API 설정을 붙여넣거나, 로컬 모델 endpoint를 연결하거나, 로컬 CLI 경로를 지정할 수 있어요."},
-      "persona": {"title": "페르소나 설정", "description": "어시스턴트 이름과 응답 스타일을 설정하세요."},
-      "tool": {"title": "도구 사용해 보기", "description": "도구 패널을 열고 도구 하나를 사용해 보세요."},
-      "complete": {"title": "완료", "description": "이제 시작할 준비가 되었어요."}
+      "welcome": {
+        "title": "환영합니다",
+        "description": "인터페이스 언어를 선택한 뒤 AI 엔드포인트를 연결하세요. 건너뛸 수 있지만 일부 기능이 제한될 수 있어요."
+      },
+      "adapter": {
+        "title": "연결 방식 선택",
+        "description": "API 설정을 붙여넣거나, 로컬 모델 endpoint를 연결하거나, 로컬 CLI 경로를 지정할 수 있어요."
+      },
+      "persona": {
+        "title": "페르소나 설정",
+        "description": "어시스턴트 이름과 응답 스타일을 설정하세요."
+      },
+      "tool": {
+        "title": "도구 사용해 보기",
+        "description": "도구 패널을 열고 도구 하나를 사용해 보세요."
+      },
+      "complete": {
+        "title": "완료",
+        "description": "이제 시작할 준비가 되었어요."
+      }
     },
     "connectionChoice": "AI 연결 선택",
     "connection": {
-      "api": {"title": "API", "hint": "API key, Base URL, model 입력"},
-      "cli": {"title": "CLI 경로", "hint": "로컬 CLI 실행 파일 검색 또는 입력"},
-      "local": {"title": "로컬 모델", "hint": "Ollama / LM Studio endpoint 검색 또는 입력"}
+      "api": {
+        "title": "API",
+        "hint": "API key, Base URL, model 입력"
+      },
+      "cli": {
+        "title": "CLI 경로",
+        "hint": "로컬 CLI 실행 파일 검색 또는 입력"
+      },
+      "local": {
+        "title": "로컬 모델",
+        "hint": "Ollama / LM Studio endpoint 검색 또는 입력"
+      }
     },
     "apiProvider": "API 제공자",
     "connectAPI": "API 연결",
@@ -677,7 +701,9 @@
     "uploadImageError": "이미지를 붙여넣거나 끌어다 놓아 주세요",
     "uploadPersonaLabel": "{name}의 정적 아바타",
     "installFail": "페르소나 팩을 설치할 수 없어요",
-    "skillInstallConfirmed": "{title} 스킬 설치를 확인했어요"
+    "skillInstallConfirmed": "{title} 스킬 설치를 확인했어요",
+    "patrolDialogueAriaLabel": "Persona-specific patrol dialogue",
+    "patrolDialoguePlaceholder": "Persona-specific dialogue or catchphrases, one per line. You can end a line with states like happy, thinking, or sleepy."
   },
   "confirm": {
     "destructiveTitle": "파괴적 작업 확인",
@@ -1004,7 +1030,9 @@
     "docOnlyRef": "(참조 전용, 도구 실행용 아님)",
     "suggestionsTitle": "추가하고 싶을 만한 항목:",
     "foundItem": "{{name}} 발견",
-    "exampleItem": "{{name}} 예시"
+    "exampleItem": "{{name}} 예시",
+    "addedSharedSource": "Shared source added",
+    "sharedSource": "Shared Source"
   },
   "cli": {
     "interactiveView": "CLI 인터랙티브 보기",
@@ -1125,7 +1153,10 @@
     "refStatusChecking": "확인 중",
     "refStatusReady": "불러옴",
     "refStatusError": "실패",
-    "refStatusAdded": "추가됨"
+    "refStatusAdded": "추가됨",
+    "sharedLink": "Shared Link",
+    "sharedLinkHint": "Includes shared spaces and shared docs",
+    "sharedLinkCount": "{count} sources"
   },
   "scheduler": {
     "dialogLabel": "예약 시간",
@@ -1386,6 +1417,9 @@
     "retry": "다시 시도"
   },
   "floatingAvatar": {
+    "bodyHead": "Head",
+    "bodyFull": "Full body",
+    "bodySwitchLabel": "Show",
     "installTitle": "Install this?",
     "installStep1": "Check the source and permissions, then press Confirm below",
     "installStep2": "Confirmed — press Send above to finish installing",

@@ -15,6 +15,7 @@ import (
 
 	"ui_console/builtin"
 	"ui_console/data/storage"
+	"ui_console/shared/controlseal"
 
 	wailsRT "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -62,6 +63,9 @@ func (a *App) HandleDocumentDrop(filePath string) (*DocumentImportResult, error)
 		"word_count":   result.Blob.Meta.WordCount,
 		"encoding":     result.Encoding,
 	})
+
+	// 背景建段落標籤快取（best-effort，不阻塞匯入；查詢時 EnsureDocSectionIndex 會沿用）。
+	go a.ensureDocSectionIndexAsync(result.Blob.Meta.DocID, result.Blob.Content)
 
 	return &DocumentImportResult{
 		DocID:       result.Blob.Meta.DocID,
@@ -301,4 +305,49 @@ func sha256Hex64(s string) string {
 // ReferenceVectorsDir 回傳引用文件的向量索引目錄路徑。
 func referenceVectorsDir() string {
 	return filepath.Join(appDataRoot(), "data", "references", "vectors")
+}
+
+
+// ──────────────────────────────────────────────
+// 段落標籤快取接線（背景建 + 可選標籤檢索）
+// ──────────────────────────────────────────────
+
+// docSectionsDir 段落 sidecar 目錄，與 documents 並排於專案 root 下。
+func docSectionsDir() string {
+	return filepath.Join(storage.ProjectRoot(appDataRoot(), "default"), "sections")
+}
+
+// ensureDocSectionIndexAsync 背景 best-effort 建/更新段落標籤快取（裸 goroutine 呼叫）。
+func (a *App) ensureDocSectionIndexAsync(docID, content string) {
+	if docID == "" || content == "" {
+		return
+	}
+	_, _ = builtin.EnsureDocSectionIndex(docSectionsDir(), docID, content)
+}
+
+// BuildDocumentSectionContext 標籤感知檢索（可選）：BM25 取 TOC + 命中段，
+// egress 走 controlseal.SanitizeForLLM 清洗。既有向量檢索 unifiedDocSearch 仍是主路徑，
+// 本方法不取代它，供需要「標籤 + 目錄」時呼叫。
+func (a *App) BuildDocumentSectionContext(docID, query string, k int) (interface{}, error) {
+	store := a.getDocumentStore()
+	if store == nil {
+		return nil, fmt.Errorf("document service 尚未初始化")
+	}
+	blob, err := store.Load(docID)
+	if err != nil {
+		return nil, err
+	}
+	idx, err := builtin.EnsureDocSectionIndex(docSectionsDir(), docID, blob.Content)
+	if err != nil {
+		return nil, err
+	}
+	toc, picks := idx.BuildContext(blob.Content, query, builtin.ContextOptions{
+		K:               k,
+		MaxSectionRunes: 1200,
+		MaxTotalRunes:   6000,
+		Sanitize: func(sx string) string {
+			return controlseal.SanitizeForLLM(controlseal.SourceDocument, sx).LLMText
+		},
+	})
+	return map[string]interface{}{"toc": toc, "picks": picks}, nil
 }

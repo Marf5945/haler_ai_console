@@ -2,6 +2,9 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 
 const defaultAvatarSize = 64;
 const edgeGap = 12;
+const compactTipGap = 8;
+const compactTipMinWidth = 80;
+const compactTipMaxWidth = 224;
 const shakePreviewDelayMs = 1200;
 const shakePreviewDistance = 80;
 const shakeVomitDelayMs = 3000;
@@ -42,6 +45,7 @@ export default function FloatingAvatarMode({
   active,
   t,
   avatarSrc,
+  fullBodyAvatarSrc = '',
   avatarExpression,
   persona,
   personas = [],
@@ -58,6 +62,7 @@ export default function FloatingAvatarMode({
   compactWindowMode = false,
   onCompactDragStart,
   onCompactDrag,
+  onCompactDragEnd,
   onCompactExpandChange,
   flyingBack = false,
   activePersonaId = '',
@@ -95,6 +100,8 @@ export default function FloatingAvatarMode({
   const [bubbleDismissed, setBubbleDismissed] = useState(false);
   const [installArmed, setInstallArmed] = useState(false);
   const [scheduleConfirmPending, setScheduleConfirmPending] = useState(false);
+  const [bodyMode, setBodyMode] = useState('head'); // 'head' | 'half' | 'full'
+  const showBody = bodyMode !== 'head';
   const rootRef = useRef(null);
   const dragRef = useRef(null);
   const clickTimerRef = useRef(null);
@@ -132,9 +139,9 @@ export default function FloatingAvatarMode({
   useEffect(() => {
     if (!compactWindowMode) return undefined;
     const hasTopBubble = (Boolean(String(bubbleText || '').trim()) && !bubbleDismissed) || shakeMessageVisible;
-    onCompactExpandChange?.(panelOpen || contextOpen || hasTopBubble || Boolean(installCandidate));
+    onCompactExpandChange?.(panelOpen || contextOpen || hasTopBubble || Boolean(installCandidate) || showBody);
     return undefined;
-  }, [compactWindowMode, panelOpen, contextOpen, bubbleText, bubbleDismissed, shakeMessageVisible, installCandidate]);
+  }, [compactWindowMode, panelOpen, contextOpen, bubbleText, bubbleDismissed, shakeMessageVisible, installCandidate, showBody, bodyMode]);
 
   useEffect(() => () => {
     if (clickTimerRef.current) window.clearTimeout(clickTimerRef.current);
@@ -179,9 +186,15 @@ export default function FloatingAvatarMode({
     left: clamp(clampedPosition.x - 82, edgeGap, Math.max(edgeGap, window.innerWidth - 230)),
     top: compactStackTop,
   };
-  // compact 模式左側提示：放在頭像左邊（相對 root 為負 left），寬度依左側可用空間。
-  const compactTipWidth = clamp(clampedPosition.x - edgeGap - 8, 80, 224);
-  const compactTipStyle = {left: -(compactTipWidth + 8), top: 0, width: compactTipWidth};
+  // compact 模式提示優先放頭像左側；若左側空間不足，留在視窗內改放頭像下方。
+  const compactTipLeftSpace = clampedPosition.x - edgeGap - compactTipGap;
+  const compactTipFitsLeft = compactTipLeftSpace >= compactTipMinWidth;
+  const compactTipWidth = compactTipFitsLeft
+    ? clamp(compactTipLeftSpace, compactTipMinWidth, compactTipMaxWidth)
+    : clamp(window.innerWidth - edgeGap * 2, compactTipMinWidth, compactTipMaxWidth);
+  const compactTipStyle = compactTipFitsLeft
+    ? {left: -(compactTipWidth + compactTipGap), top: 0, width: compactTipWidth}
+    : {left: edgeGap - clampedPosition.x, top: avatarSize + compactTipGap, width: compactTipWidth};
   const displayStatus = pendingConfirm?.title || statusTitle || t('floatingAvatar.statusIdle');
   const displayLatest = pendingConfirm?.reason || latestText || statusText || t('floatingAvatar.latestIdle');
   const speakerName = persona?.name || t('floatingAvatar.agentFallback');
@@ -282,6 +295,7 @@ export default function FloatingAvatarMode({
     const dy = pointerY - startY;
     if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
     if (compactWindowMode) {
+      onCompactDrag?.(dx, dy);
       updateDragShake(pointerX, pointerY);
       return;
     }
@@ -299,6 +313,9 @@ export default function FloatingAvatarMode({
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.currentTarget.releasePointerCapture?.(event.pointerId);
     window.setTimeout(() => { dragRef.current = null; }, 0);
+    if (compactWindowMode && drag.moved) {
+      onCompactDragEnd?.();
+    }
     if (shakeResetRef.current) window.clearTimeout(shakeResetRef.current);
     shakeResetRef.current = window.setTimeout(() => {
       setShakeState(null);
@@ -362,7 +379,7 @@ export default function FloatingAvatarMode({
       )}
       <div
         ref={rootRef}
-        className={`floating-avatar-root ${compactWindowMode ? 'floating-avatar-compact-root' : ''} ${flyingBack ? 'floating-avatar-flyback' : ''}`}
+        className={`floating-avatar-root ${compactWindowMode ? 'floating-avatar-compact-root' : ''} ${flyingBack ? 'floating-avatar-flyback' : ''} ${showBody ? `floating-avatar-body-active floating-avatar-body-${bodyMode}` : ''}`}
         style={{left: clampedPosition.x, top: clampedPosition.y, '--floating-avatar-size': `${avatarSize}px`}}
         onContextMenu={(event) => {
           event.preventDefault();
@@ -400,7 +417,8 @@ export default function FloatingAvatarMode({
           onDragLeave={() => setDropActive(false)}
           onDrop={handleDrop}
         >
-          <img src={avatarSrc} alt="" draggable={false} />
+          {/* DragonBones canvas 之後可掛在這裡；現以全身/頭像圖切換做佔位。 */}
+          <img className="floating-avatar-img" src={showBody ? (fullBodyAvatarSrc || avatarSrc) : avatarSrc} alt="" draggable={false} />
         </button>
         {dropActive && <span className="floating-avatar-drop-label">{t('floatingAvatar.releaseToAdd')}</span>}
         {!compactWindowMode && pendingConfirm && !reminderPaused && (
@@ -418,6 +436,18 @@ export default function FloatingAvatarMode({
           <nav className="floating-avatar-menu" aria-label={t('floatingAvatar.menuLabel')}>
             <button type="button" onClick={onRestore}>{t('floatingAvatar.restore')}</button>
             <button type="button" onClick={onOpenSettings}>{t('floatingAvatar.settings')}</button>
+            <div className="floating-avatar-body-switch" role="group" aria-label={t('floatingAvatar.bodySwitchLabel')}>
+              {[['head', 'bodyHead'], ['full', 'bodyFull']].map(([mode, key]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={bodyMode === mode ? 'floating-avatar-body-active-btn' : ''}
+                  onClick={() => { setBodyMode(mode); setContextOpen(false); }}
+                >
+                  {t(`floatingAvatar.${key}`)}
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               onClick={() => {

@@ -22,8 +22,8 @@ var appendMu sync.Mutex
 
 const (
 	caseBookFile    = "casebook.jsonl"
-	caseBookMaxKeep = 500     // 讀取 / 重寫時保留最近 N 筆
-	caseBookMaxFile = 1 << 20 // 1MB；超過觸發尾段重寫
+	caseBookMaxKeep = 500       // 讀取 / 重寫時保留最近 N 筆
+	caseBookMaxFile = 1 << 20   // 1MB；超過觸發尾段重寫
 	caseBookScanBuf = 1 << 20 // 單行掃描上限（截斷已保證遠小於此，這是防禦縱深）
 )
 

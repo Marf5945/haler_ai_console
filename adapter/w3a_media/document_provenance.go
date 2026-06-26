@@ -3,8 +3,8 @@
 // 與圖檔/音訊共用 W3AMediaInfo 管線，差別：
 //   - MediaScope = ScopeDocument
 //   - 文字沒有感知指紋；身分基準改「byte-hash + 正規化內容雜湊」：
-//     Fingerprint.OverallByteHash       = sha256(raw)             // 精確檔案
-//     Fingerprint.OverallPerceptualHash = "ndoc:" + sha256(norm)  // 唯一碼基準（格式微差仍同一份）
+//       Fingerprint.OverallByteHash       = sha256(raw)             // 精確檔案
+//       Fingerprint.OverallPerceptualHash = "ndoc:" + sha256(norm)  // 唯一碼基準（格式微差仍同一份）
 //     沿用本套件既有 "phash:"/"ahash:" 前綴慣例，extractHex 可剝前綴。
 //   - 創作見證：沿用 AppOperationFingerprint 記錄「人類輸入 vs AI 處理」，
 //     用 KeyManager 的金鑰（=錢包，私鑰永不離機）簽整份來源軌跡。

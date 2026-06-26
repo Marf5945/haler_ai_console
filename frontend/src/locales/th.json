@@ -487,17 +487,41 @@
     "fillNamePath": "โปรดกรอกชื่อและพาธ",
     "registerFail": "ลงทะเบียนไม่สำเร็จ — โปรดตรวจสอบว่าพาธถูกต้อง",
     "steps": {
-      "welcome": {"title": "ยินดีต้อนรับ", "description": "เลือกภาษาอินเทอร์เฟซ แล้วเชื่อมต่อ endpoint ของ AI คุณสามารถข้ามได้ แต่บางฟังก์ชันจะถูกจำกัด"},
-      "adapter": {"title": "เลือกการเชื่อมต่อ", "description": "วางการตั้งค่า API เชื่อมต่อ endpoint ของโมเดลในเครื่อง หรือระบุพาธ CLI ในเครื่อง"},
-      "persona": {"title": "ตั้งค่า Persona", "description": "ตั้งชื่อผู้ช่วยและรูปแบบการตอบกลับ"},
-      "tool": {"title": "ลองใช้เครื่องมือ", "description": "เปิดแผงเครื่องมือและลองใช้เครื่องมือหนึ่งรายการ"},
-      "complete": {"title": "เสร็จสิ้น", "description": "พร้อมเริ่มใช้งานแล้ว"}
+      "welcome": {
+        "title": "ยินดีต้อนรับ",
+        "description": "เลือกภาษาอินเทอร์เฟซ แล้วเชื่อมต่อ endpoint ของ AI คุณสามารถข้ามได้ แต่บางฟังก์ชันจะถูกจำกัด"
+      },
+      "adapter": {
+        "title": "เลือกการเชื่อมต่อ",
+        "description": "วางการตั้งค่า API เชื่อมต่อ endpoint ของโมเดลในเครื่อง หรือระบุพาธ CLI ในเครื่อง"
+      },
+      "persona": {
+        "title": "ตั้งค่า Persona",
+        "description": "ตั้งชื่อผู้ช่วยและรูปแบบการตอบกลับ"
+      },
+      "tool": {
+        "title": "ลองใช้เครื่องมือ",
+        "description": "เปิดแผงเครื่องมือและลองใช้เครื่องมือหนึ่งรายการ"
+      },
+      "complete": {
+        "title": "เสร็จสิ้น",
+        "description": "พร้อมเริ่มใช้งานแล้ว"
+      }
     },
     "connectionChoice": "เลือกการเชื่อมต่อ AI",
     "connection": {
-      "api": {"title": "API", "hint": "วาง API key, Base URL และ model"},
-      "cli": {"title": "พาธ CLI", "hint": "สแกนหรือวางไฟล์ CLI ในเครื่อง"},
-      "local": {"title": "โมเดลในเครื่อง", "hint": "สแกนหรือกรอก endpoint ของ Ollama / LM Studio"}
+      "api": {
+        "title": "API",
+        "hint": "วาง API key, Base URL และ model"
+      },
+      "cli": {
+        "title": "พาธ CLI",
+        "hint": "สแกนหรือวางไฟล์ CLI ในเครื่อง"
+      },
+      "local": {
+        "title": "โมเดลในเครื่อง",
+        "hint": "สแกนหรือกรอก endpoint ของ Ollama / LM Studio"
+      }
     },
     "apiProvider": "ผู้ให้บริการ API",
     "connectAPI": "เชื่อมต่อ API",
@@ -674,7 +698,9 @@
     "uploadImageError": "โปรดวางหรือลากรูปภาพ",
     "uploadPersonaLabel": "อวาตาร์แบบนิ่งของ {name}",
     "installFail": "ติดตั้งแพ็กเพอร์โซนาไม่ได้",
-    "skillInstallConfirmed": "ยืนยันการติดตั้งสกิล {title} แล้ว"
+    "skillInstallConfirmed": "ยืนยันการติดตั้งสกิล {title} แล้ว",
+    "patrolDialogueAriaLabel": "Persona-specific patrol dialogue",
+    "patrolDialoguePlaceholder": "Persona-specific dialogue or catchphrases, one per line. You can end a line with states like happy, thinking, or sleepy."
   },
   "confirm": {
     "destructiveTitle": "การยืนยันการดำเนินการที่ทำลายล้าง",
@@ -1001,7 +1027,9 @@
     "docOnlyRef": "(อ้างอิงเท่านั้น ไม่ใช่สำหรับการรันเครื่องมือ)",
     "suggestionsTitle": "คุณอาจต้องการเพิ่ม:",
     "foundItem": "พบ {{name}}",
-    "exampleItem": "ตัวอย่าง {{name}}"
+    "exampleItem": "ตัวอย่าง {{name}}",
+    "addedSharedSource": "Shared source added",
+    "sharedSource": "Shared Source"
   },
   "cli": {
     "interactiveView": "มุมมองโต้ตอบ CLI",
@@ -1122,7 +1150,10 @@
     "refStatusChecking": "กำลังตรวจสอบ",
     "refStatusReady": "โหลดแล้ว",
     "refStatusError": "ล้มเหลว",
-    "refStatusAdded": "เพิ่มแล้ว"
+    "refStatusAdded": "เพิ่มแล้ว",
+    "sharedLink": "Shared Link",
+    "sharedLinkHint": "Includes shared spaces and shared docs",
+    "sharedLinkCount": "{count} sources"
   },
   "scheduler": {
     "dialogLabel": "เวลาที่กำหนด",
@@ -1383,6 +1414,9 @@
     "retry": "ลองใหม่"
   },
   "floatingAvatar": {
+    "bodyHead": "Head",
+    "bodyFull": "Full body",
+    "bodySwitchLabel": "Show",
     "installTitle": "Install this?",
     "installStep1": "Check the source and permissions, then press Confirm below",
     "installStep2": "Confirmed — press Send above to finish installing",

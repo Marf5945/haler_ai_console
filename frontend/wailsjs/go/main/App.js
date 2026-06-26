@@ -86,6 +86,14 @@ export function BuildAndSaveSkillDraft(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['BuildAndSaveSkillDraft'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function BuildCodeContext(arg1, arg2) {
+  return window['go']['main']['App']['BuildCodeContext'](arg1, arg2);
+}
+
+export function BuildDocumentSectionContext(arg1, arg2, arg3) {
+  return window['go']['main']['App']['BuildDocumentSectionContext'](arg1, arg2, arg3);
+}
+
 export function BuildLLMContext(arg1, arg2, arg3) {
   return window['go']['main']['App']['BuildLLMContext'](arg1, arg2, arg3);
 }
@@ -212,6 +220,10 @@ export function CreateDAGRun(arg1, arg2) {
 
 export function CreateDestructiveReviewCard(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['CreateDestructiveReviewCard'](arg1, arg2, arg3, arg4);
+}
+
+export function CreateDocumentW3A(arg1) {
+  return window['go']['main']['App']['CreateDocumentW3A'](arg1);
 }
 
 export function CreateScheduledJob(arg1, arg2, arg3, arg4) {
@@ -1078,6 +1090,10 @@ export function ReadDocumentContent(arg1) {
   return window['go']['main']['App']['ReadDocumentContent'](arg1);
 }
 
+export function RebuildCodeIndex() {
+  return window['go']['main']['App']['RebuildCodeIndex']();
+}
+
 export function RebuildGroupSummary(arg1, arg2) {
   return window['go']['main']['App']['RebuildGroupSummary'](arg1, arg2);
 }
@@ -1352,6 +1368,10 @@ export function SchedulerHasActiveJobs() {
 
 export function ScoreHighlightGroups(arg1, arg2) {
   return window['go']['main']['App']['ScoreHighlightGroups'](arg1, arg2);
+}
+
+export function SearchCodeSections(arg1, arg2) {
+  return window['go']['main']['App']['SearchCodeSections'](arg1, arg2);
 }
 
 export function SearchLearningOperations(arg1, arg2) {

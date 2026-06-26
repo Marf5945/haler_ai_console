@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"ui_console/adapter/debugtrace"
+	"ui_console/adapter/external_link"
 	"ui_console/data/conversation"
 	"ui_console/data/storage"
 	"ui_console/orchestration/skill_step"
@@ -330,7 +331,7 @@ func (a *App) maybeHandleSearchIntentClarification(userText, sessionID, traceID 
 func (a *App) localSearchRoots() []localsearch.Root {
 	root := appDataRoot()
 	projectRoot := storage.ProjectRoot(root, "default")
-	return []localsearch.Root{
+	roots := []localsearch.Root{
 		{Path: filepath.Join(projectRoot, "memory"), Source: "memory"},
 		{Path: filepath.Join(projectRoot, "runtime"), Source: "trace"},
 		{Path: filepath.Join(root, "documents"), Source: "document"},
@@ -343,6 +344,19 @@ func (a *App) localSearchRoots() []localsearch.Root {
 		// 「名稱＋功能摘要」的形式提供，避免搜尋結果回傳 hash／main.go 等內部檔。
 		{Path: filepath.Join(root, "debug"), Source: "trace"},
 	}
+	if a.linkService != nil {
+		for _, link := range a.linkService.ListByType(external_link.LinkSharedSource) {
+			path := expandUserPath(link.URL)
+			if strings.TrimSpace(path) == "" {
+				continue
+			}
+			if _, err := os.Stat(path); err != nil {
+				continue
+			}
+			roots = append(roots, localsearch.Root{Path: path, Source: "document"})
+		}
+	}
+	return roots
 }
 
 func (a *App) localSearchItems(excludeTraceID string) []localsearch.Item {

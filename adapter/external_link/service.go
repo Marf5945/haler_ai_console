@@ -8,6 +8,7 @@
 //	llm_provider_candidate → starts API adapter setup
 //	documentation     → reference-only, NOT entered into routing / execution area
 //	mcp_server        → MCP server registration（獨立路徑，localhost 不受 HTTPS 限制）
+//	shared_source     → local/share folder or document corpus
 //	unsupported       → rejected; NOT registered
 //
 // URL rules（#47 補強 — localhost 路徑分離）：
@@ -43,7 +44,7 @@ const (
 	LinkLLMProvider      LinkType = "llm_provider_candidate"
 	LinkDocumentation    LinkType = "documentation" // reference only, no execution
 	LinkMCPServer        LinkType = "mcp_server"    // #47: MCP server（獨立路徑）
-	LinkSharedSource     LinkType = "shared_source" // local/shared document source
+	LinkSharedSource     LinkType = "shared_source" // local/share folder or document corpus
 	LinkUnsupported      LinkType = "unsupported"   // rejected
 )
 
@@ -183,15 +184,18 @@ func (s *Service) Register(url, label string) (*ExternalLink, error) {
 	return &link, nil
 }
 
-// RegisterSharedSource records a local/shared document source after the caller
-// has already validated readability and containment rules.
+// RegisterAdapterCandidate 已廢棄——adapter 註冊現在只走 adapter_registry。
+// Deprecated: adapter registration is handled exclusively by adapter_registry.
+
+// RegisterSharedSource stores a trusted local/shared path as a document source.
+// The caller owns path validation because local paths intentionally do not pass
+// the HTTPS-only URL policy used for web links.
 func (s *Service) RegisterSharedSource(path, label string) (*ExternalLink, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil, fmt.Errorf("external_link: shared source path must not be empty")
 	}
-	label = strings.TrimSpace(label)
-	if label == "" {
+	if strings.TrimSpace(label) == "" {
 		label = filepath.Base(path)
 	}
 
@@ -205,7 +209,7 @@ func (s *Service) RegisterSharedSource(path, label string) (*ExternalLink, error
 	}
 
 	link := ExternalLink{
-		ID:           fmt.Sprintf("link-%d", time.Now().UnixNano()),
+		ID:           fmt.Sprintf("shared-%d", time.Now().UnixNano()),
 		URL:          path,
 		LinkType:     LinkSharedSource,
 		Label:        label,
@@ -217,9 +221,6 @@ func (s *Service) RegisterSharedSource(path, label string) (*ExternalLink, error
 	}
 	return &link, nil
 }
-
-// RegisterAdapterCandidate 已廢棄——adapter 註冊現在只走 adapter_registry。
-// Deprecated: adapter registration is handled exclusively by adapter_registry.
 
 // ListByType returns all registered links of a given type.
 // documentation links must NOT be passed to the routing / execution area.

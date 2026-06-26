@@ -21,16 +21,17 @@ type PanelSettings struct {
 }
 
 type Persona struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Icon          string `json:"icon"`
-	AvatarURL     string `json:"avatarUrl"`
-	Identity      string `json:"identity"`
-	ReplyStrategy string `json:"replyStrategy"`
-	RoleStrength  string `json:"roleStrength"`
-	Personality   string `json:"personality"`
-	Scenario      string `json:"scenario"`
-	Description   string `json:"description"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Icon           string `json:"icon"`
+	AvatarURL      string `json:"avatarUrl"`
+	Identity       string `json:"identity"`
+	ReplyStrategy  string `json:"replyStrategy"`
+	RoleStrength   string `json:"roleStrength"`
+	Personality    string `json:"personality"`
+	Scenario       string `json:"scenario"`
+	Description    string `json:"description"`
+	PatrolDialogue string `json:"patrolDialogue"`
 }
 
 type State struct {

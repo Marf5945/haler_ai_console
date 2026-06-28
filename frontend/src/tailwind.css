@@ -12183,9 +12183,9 @@
 .floating-avatar-body-active .floating-avatar-button {
   width: 200px;
   height: 360px;
-  border-radius: 14px;
+  border-radius: 0;
   background: transparent;
-  overflow: hidden;
+  overflow: visible;
   padding: 0;
 }
 .floating-avatar-body-active .floating-avatar-button .floating-avatar-img {
@@ -12194,6 +12194,124 @@
 }
 .floating-avatar-body-full .floating-avatar-button .floating-avatar-img {
   object-fit: contain;
+}
+.animated-fullbody-avatar {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  --look-x: 0;
+  --look-y: 0;
+  --idle-sway: 4px;
+  --eye-range-x: 4px;
+  --eye-range-y: 2px;
+  --pupil-color: #17110d;
+  --pupil-shadow: rgba(255, 255, 255, .28);
+  pointer-events: none;
+  animation: fullbody-idle-breathe 4.8s ease-in-out infinite;
+  filter: drop-shadow(0 12px 18px rgba(0, 0, 0, .24));
+}
+.animated-fullbody-avatar-layer {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+}
+.animated-fullbody-avatar-layer img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+.animated-fullbody-avatar-body {
+  animation: fullbody-idle-body 5.4s ease-in-out infinite;
+}
+.animated-fullbody-avatar-part {
+  animation: fullbody-idle-part 4.6s ease-in-out infinite alternate;
+  opacity: .98;
+  will-change: transform;
+}
+.animated-fullbody-avatar-head {
+  transform: translate( calc(var(--look-x) * 2px), calc(var(--look-y) * 1px) );
+  animation-name: fullbody-idle-head;
+}
+.animated-fullbody-avatar-leftHand, .animated-fullbody-avatar-rightHand {
+  animation-duration: 5.8s;
+}
+.animated-fullbody-avatar-feet {
+  animation-duration: 6.4s;
+}
+.animated-fullbody-avatar-eyes {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+.animated-fullbody-avatar-eye {
+  position: absolute;
+  display: block;
+  border-radius: 999px;
+  background: radial-gradient(circle at 58% 32%, var(--pupil-shadow) 0 14%, transparent 15%), radial-gradient(circle at 52% 54%, var(--pupil-color) 0 46%, rgba(0, 0, 0, .45) 58%, transparent 62%);
+  opacity: .84;
+}
+.animated-fullbody-avatar-eye::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 62%;
+  height: 78%;
+  border-radius: 999px;
+  background: var(--pupil-color);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .06);
+  transform: translate( calc(-50% + (var(--look-x) * var(--eye-range-x))), calc(-50% + (var(--look-y) * var(--eye-range-y))) );
+  transition: transform .12s ease-out;
+}
+.animated-fullbody-avatar-half .animated-fullbody-avatar-layer img {
+  object-fit: cover;
+  object-position: 50% 0%;
+}
+@keyframes fullbody-idle-breathe {
+  0%, 100% {
+    transform: translateY(0) scaleX(1) scaleY(1);
+  }
+  50% {
+    transform: translateY(calc(var(--idle-sway) * -.18)) scaleX(1.006) scaleY(1.004);
+  }
+}
+@keyframes fullbody-idle-body {
+  0%, 100% {
+    transform: translateX(0) rotate(0deg);
+  }
+  50% {
+    transform: translateX(calc(var(--idle-sway) * .12)) rotate(.18deg);
+  }
+}
+@keyframes fullbody-idle-head {
+  0%, 100% {
+    transform: translate( calc(var(--look-x) * 2px), calc(var(--look-y) * 1px) ) rotate(0deg);
+  }
+  50% {
+    transform: translate( calc((var(--look-x) * 2px) + (var(--part-x) * .4)), calc((var(--look-y) * 1px) + (var(--part-y) * -.35)) ) rotate(calc(var(--part-rotate) * .45));
+  }
+}
+@keyframes fullbody-idle-part {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  100% {
+    transform: translate(var(--part-x), var(--part-y)) rotate(var(--part-rotate));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .animated-fullbody-avatar, .animated-fullbody-avatar-body, .animated-fullbody-avatar-part {
+    animation: none;
+  }
+  .animated-fullbody-avatar-eye::after {
+    transition: none;
+  }
 }
 @property --tw-rotate-x {
   syntax: "*";

@@ -1,0 +1,4 @@
+interface:
+  display_name: "WA3 Spec"
+  short_description: "Review and evolve WA3 .tdy skill contracts"
+  default_prompt: "Use $wa3-spec to review a .tdy contract, check WA3 safety rules, or evolve the WA3 specification safely."

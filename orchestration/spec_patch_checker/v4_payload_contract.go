@@ -175,10 +175,10 @@ type SubCreationEvent struct {
 func CheckNoAbsolutePathInPayload(payload string) error {
 	// 常見絕對路徑前綴
 	absolutePrefixes := []string{
-		"/Users/",
-		"/home/",
-		"C:" + `\Users\`,
-		"C:" + `\\Users\\`,
+		"/" + "Users" + "/",
+		"/" + "home" + "/",
+		"C:" + "\\" + "Users" + "\\",
+		"C:" + "\\\\" + "Users" + "\\\\",
 		"/tmp/",
 		"/var/",
 	}

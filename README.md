@@ -70,17 +70,11 @@ HaLer for AI Console 是一個本機優先的 AI 工作台，將多種 LLM 介�
 - **Bounded Replan**：執行失敗時可在低風險、同目標、read-only 條件下嘗試重新規劃尚未開始的後續步驟；Go 端負責裁決，並保留 audit log。
 - **Skill 與 Go Program Authoring**：可掃描、建立、保存與執行 skill；也能引導產生受限權限的 Go program，經驗證與 review 後再納入工作流。
 - **文件、引用與搜尋**：支援拖放匯入文件、建立本機文件庫、TF-IDF / Ollama embedding 檢索、Reference prompt context、URL provenance、local search 與可設定的 web search provider。
-- **共用來源與程式碼索引**：可登錄本機或共用資料夾、Obsidian vault 與文件來源；並能重建 Go 程式碼索引、搜尋符號段落、為高風險任務產生受控程式碼上下文。
 - **內建資料工具**：提供 CSV / JSON / Office 文件讀寫能力，並包含零第三方依賴的 xlsx 產生路徑與電料 BOM 產出技能範例。
-- **段落化文件檢索**：匯入文件後可建立段落標籤快取，依標題、詞頻與規則標籤挑出相關段落，降低大型文件進入模型前的 token 成本。
 - **Visual Learning**：包含螢幕/影像元素偵測、OCR、按鈕候選、元素字典、動作候選與 dry-run 信心計算；YOLOX 模型為選配，缺少時會回退到 OpenCV shape/text 偵測。
-- **多模態影像輔助**：支援聊天附圖、CLI adapter 圖片暫存直送，以及本地 vision organ 將影像整理成文字描述後再進入對話流程。
-- **Go 程式碼預覽**：Go Program Authoring 可在聊天入口與右側面板預覽候選程式，方便比對、審核與保存。
 - **Remote Bridge**：可設定 Telegram、Discord、LINE、Teams、QQ 或 custom webhook channel，支援遠端送出、審核回覆、分段 dispatch 與 audit。
 - **安全治理**：包含 OS-backed credential store、source trust allowlist、LLM context 過濾、Controlled Trust、draft sandbox、package import review、W3A media provenance 與模型污染風險檢查。
-- **案例庫與完成條件**：任務節點可用可機器驗證的 predicate 判定完成狀態，並把成功、阻塞、逾時、API 錯誤或輸出不符等結果寫入案例庫供後續分群查詢。
-- **文件來源證明**：W3A provenance 延伸到文件資產，使用 byte hash、正規化內容碼與本機簽章記錄人類輸入、貼上、AI 生成或改寫等操作軌跡。
-- **個人化工作區**：支援 persona / avatar、主對話與 subagent 匯出、排程任務、Status Rail、語音設定、多語系 UI 與後台浮動頭像任務模式。
+- **個人化工作區**：支援 persona / avatar、主對話與 subagent 匯出、排程任務、Status Rail、語音設定與多語系 UI。
 
 ## Encoding Policy
 
@@ -107,17 +101,11 @@ HaLer for AI Console is a local-first AI workbench that brings LLM adapters, doc
 - **Bounded Replan**: when execution fails, the app can try to rewrite only the not-yet-started tail of a task under low-risk, same-goal, read-only constraints; Go owns the final decision and writes audit logs.
 - **Skills and Go Program Authoring**: scans, builds, saves, and executes skills; guided Go program generation is validated, permission-scoped, and review-gated before entering workflows.
 - **Documents, references, and search**: imports dropped documents, maintains a local document store, supports TF-IDF / Ollama embedding retrieval, builds reference prompt context, records URL provenance, and offers local search plus configurable web search providers.
-- **Shared sources and code indexing**: registers local or shared folders, Obsidian vaults, and document sources; rebuilds a Go code index, searches symbol sections, and builds governed code context for high-impact work.
 - **Built-in data tools**: includes CSV / JSON / Office document readers and writers, a zero-third-party xlsx generation path, and an electrical-material BOM skill example.
-- **Sectioned document retrieval**: builds paragraph/heading sidecar indexes for imported documents, then selects relevant sections by headings, term frequency, and rule labels before model context is assembled.
 - **Visual Learning**: provides screen/image element detection, OCR, button candidates, an element dictionary, action candidates, and dry-run confidence scoring; the optional YOLOX model falls back to OpenCV shape/text detection when unavailable.
-- **Multimodal image assistance**: supports chat image attachments, CLI adapter image staging, and a local vision organ that turns images into text context when needed.
-- **Go code preview**: Go Program Authoring can show candidate programs from the chat flow and the side dock for review before saving or execution.
 - **Remote Bridge**: configures Telegram, Discord, LINE, Teams, QQ, or custom webhook channels for remote submission, review replies, segmented dispatch, and audit trails.
 - **Safety and governance**: includes OS-backed credential storage, source-trust allowlists, LLM context filtering, Controlled Trust, draft sandboxing, package import review, W3A media provenance, and model-pollution risk checks.
-- **Casebook and predicates**: task nodes can be checked with machine-verifiable completion predicates, then successful, blocked, timed-out, API-error, or wrong-output outcomes are recorded for later grouping.
-- **Document provenance**: extends W3A provenance to document assets with byte hashes, normalized content codes, and local signatures for human input, paste, AI generation, and rewrite operations.
-- **Personal workspace**: supports personas and avatars, main-chat and subagent export, scheduled jobs, Status Rail, voice settings, multilingual UI, and a floating avatar task mode.
+- **Personal workspace**: supports personas and avatars, main-chat and subagent export, scheduled jobs, Status Rail, voice settings, and multilingual UI.
 
 ## For Users
 

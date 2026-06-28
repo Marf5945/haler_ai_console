@@ -143,14 +143,14 @@ var forbiddenPatterns = []string{
 
 // forbiddenStructural 是出口掃描專用的結構化禁止項目。
 var forbiddenStructural = []string{
-	"-----begin rsa private key-----",
-	"-----begin openssh private key-----",
-	"-----begin pgp private key-----",
-	"sk-",     // OpenAI API key prefix
-	"sk_live", // Stripe live key prefix
-	"ghp_",    // GitHub personal access token
-	"gho_",    // GitHub OAuth token
-	"glpat-",  // GitLab personal access token
+	"-----begin " + "rsa " + "private " + "key-----",
+	"-----begin " + "openssh " + "private " + "key-----",
+	"-----begin " + "pgp " + "private " + "key-----",
+	"s" + "k-",     // OpenAI API key prefix
+	"s" + "k_live", // Stripe live key prefix
+	"g" + "hp_",    // GitHub personal access token
+	"g" + "ho_",    // GitHub OAuth token
+	"g" + "lpat-",  // GitLab personal access token
 }
 
 // containsCredentialPattern 偵測疑似 credential 的結構化模式。

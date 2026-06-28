@@ -1,0 +1,22 @@
+{
+  "name": "wa3-builder-assistant",
+  "version": "0.3.0-draft",
+  "description": "Example LangGraph assistant integration for guided WA3 draft building.",
+  "entrypoint": "wa3_builder_graph.py",
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "wa3_package_root": {
+        "type": "string",
+        "description": "Path to the WA3_SPEC package root."
+      }
+    },
+    "required": ["wa3_package_root"]
+  },
+  "capabilities": [
+    "collect_guided_answers",
+    "call_wa3_build",
+    "call_wa3_trust",
+    "report_gate_failures"
+  ]
+}

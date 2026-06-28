@@ -525,15 +525,6 @@ func appDataRoot() string {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.startHookGeneRecorder()
-	// DEBUG_TRACE_REMOVE: Temporary local trace viewer for UI -> CLI diagnostics.
-	// Keep while cleaning dead code: the monitor can look offline when the app is
-	// stopped, but previous trace logs depend on this UI -> Go -> sidecar path.
-	// 使用動態本機埠，避免把開發機固定 monitor URL 寫進公開程式碼。
-	debugtrace.Start(debugtrace.DefaultAddr)
-	debugtrace.Record("go.startup", "", map[string]interface{}{
-		"trace_link": debugtrace.Snapshot(),
-	})
-	writeMonitorLinkSnapshot(debugtrace.Snapshot())
 	// SEC-06: 清掉上次未正常停止的 ephemeral browser profile（冪等）。
 	_ = a.CleanupEphemeralProfiles()
 	// #7: Inject Wails context into event bus so it can emit to frontend.

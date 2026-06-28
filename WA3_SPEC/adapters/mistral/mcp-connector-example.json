@@ -1,0 +1,15 @@
+{
+  "name": "wa3-builder-mcp",
+  "description": "Example MCP connector declaration for a WA3 builder service.",
+  "tools": [
+    {
+      "name": "build_wa3_draft",
+      "input_schema": "builder/answers.schema.json",
+      "security_boundary": "deterministic_builder_gate"
+    },
+    {
+      "name": "classify_wa3_trust",
+      "security_boundary": "deterministic_trust_classifier"
+    }
+  ]
+}

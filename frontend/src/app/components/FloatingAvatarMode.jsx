@@ -1,4 +1,5 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
+import AnimatedFullBodyAvatar from './AnimatedFullBodyAvatar.jsx';
 
 const defaultAvatarSize = 64;
 const edgeGap = 12;
@@ -46,6 +47,7 @@ export default function FloatingAvatarMode({
   t,
   avatarSrc,
   fullBodyAvatarSrc = '',
+  fullBodyAvatarKey = '',
   avatarExpression,
   persona,
   personas = [],
@@ -417,8 +419,16 @@ export default function FloatingAvatarMode({
           onDragLeave={() => setDropActive(false)}
           onDrop={handleDrop}
         >
-          {/* DragonBones canvas 之後可掛在這裡；現以全身/頭像圖切換做佔位。 */}
-          <img className="floating-avatar-img" src={showBody ? (fullBodyAvatarSrc || avatarSrc) : avatarSrc} alt="" draggable={false} />
+          {showBody ? (
+            <AnimatedFullBodyAvatar
+              src={fullBodyAvatarSrc || avatarSrc}
+              fallbackSrc={avatarSrc}
+              pack={fullBodyAvatarKey}
+              mode={bodyMode}
+            />
+          ) : (
+            <img className="floating-avatar-img" src={avatarSrc} alt="" draggable={false} />
+          )}
         </button>
         {dropActive && <span className="floating-avatar-drop-label">{t('floatingAvatar.releaseToAdd')}</span>}
         {!compactWindowMode && pendingConfirm && !reminderPaused && (

@@ -7973,6 +7973,7 @@ function App() {
   // 進後台、一般狀態、問候語都不浮泡泡，維持乾淨頭像；人格名稱/回覆改由點開迷你框顯示。
   // 全身像來源：之後可改成 persona 的全身立繪 / DragonBones 模型；目前 fallback 用頭像。
   const floatingExpression = !floatingReminderPaused && (pendingTaskReview || schedulerConfirm) ? 'warning' : avatarExpression;
+  const floatingFullBodyAvatarKey = pixelPackForPersona(floatingPersona, floatingAvatarConfig);
   const floatingFullBodyAvatarSrc = resolvePersonaFullBodySrc(floatingPersona, floatingAvatarConfig, floatingExpression);
   const floatingBubbleText = pendingTaskReview?.reason
     || pendingTaskReview?.title
@@ -7995,6 +7996,7 @@ function App() {
         t={t}
         avatarSrc={floatingAvatarSrc}
         fullBodyAvatarSrc={floatingFullBodyAvatarSrc || floatingAvatarSrc}
+        fullBodyAvatarKey={floatingFullBodyAvatarKey}
         avatarExpression={floatingExpression}
         persona={floatingPersona}
         personas={floatingAvatarPersonas}

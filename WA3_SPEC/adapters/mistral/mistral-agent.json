@@ -1,0 +1,20 @@
+{
+  "name": "wa3-builder-agent",
+  "description": "Example Mistral Agent configuration sketch for guided WA3 draft building.",
+  "instructions": [
+    "Collect guided answers for WA3 templates.",
+    "Treat model output as untrusted suggestions.",
+    "Call the WA3 builder tool before claiming a draft .tdy was created.",
+    "Report trust enum state from the deterministic tool."
+  ],
+  "tools": [
+    {
+      "name": "build_wa3_draft",
+      "description": "Build a draft WA3 file from validated answers using a trusted backend."
+    },
+    {
+      "name": "classify_wa3_trust",
+      "description": "Return WA3 trust enum state for a generated or supplied .tdy file."
+    }
+  ]
+}

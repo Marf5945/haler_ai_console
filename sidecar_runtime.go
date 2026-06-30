@@ -20,7 +20,6 @@ func ensureSidecarScript(root string) (string, error) {
 const sidecarIndexJS = `
 const readline = require("readline");
 const {spawn} = require("child_process");
-const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const {TextDecoder} = require("util");
@@ -57,30 +56,8 @@ function writeResponse(id, result, error, traceID) {
   }
 }
 
-// DEBUG_TRACE_REMOVE: Temporary sidecar -> local trace viewer bridge.
-// Reads AI_CONSOLE_TRACE_URL so restarted apps can move the monitor port.
 function traceNode(node, traceID, data) {
-  if (!traceID) return;
-  try {
-    const endpoint = traceEndpoint();
-    if (!endpoint) return;
-    const body = JSON.stringify({node, trace_id: traceID, data});
-    const req = http.request({
-      hostname: endpoint.hostname,
-      port: endpoint.port,
-      path: endpoint.pathname.replace(/\/$/, "") + "/trace",
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(body),
-      },
-      timeout: 300,
-    });
-    req.on("error", () => {});
-    req.on("timeout", () => req.destroy());
-    req.write(body);
-    req.end();
-  } catch {}
+  return;
 }
 
 function shouldCompactTraceText(traceID) {
@@ -120,21 +97,6 @@ function traceParams(traceID, params) {
     Object.assign(copy, traceTextFields(traceID, text));
   }
   return copy;
-}
-
-function traceEndpoint() {
-  try {
-    const raw = process.env.AI_CONSOLE_TRACE_URL || "";
-    if (!raw) return null;
-    const parsed = new URL(raw);
-    return {
-      hostname: parsed.hostname || "127.0.0.1",
-      port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
-      pathname: parsed.pathname || "",
-    };
-  } catch {
-    return null;
-  }
 }
 
 function isPing(text) {

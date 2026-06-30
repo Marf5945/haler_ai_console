@@ -96,47 +96,7 @@ func ListPresets() []StylePreset {
 	return result
 }
 
-// ──────────────────────────────────────────────
-// API 呼叫 stub（實際 HTTP 呼叫由呼叫端自行實作）
-// ──────────────────────────────────────────────
-
-// GenerateAvatarRequest 是呼叫圖像生成 API 的請求結構。
-// 實際 HTTP 呼叫由呼叫端負責，此結構提供所需參數。
-type GenerateAvatarRequest struct {
-	Prompt      string `json:"prompt"`
-	APIEndpoint string `json:"api_endpoint"`
-	Width       int    `json:"width"`
-	Height      int    `json:"height"`
-}
-
-// PrepareGenerateRequest 組合圖像生成 API 請求。
-// 回傳 request 結構，呼叫端需自行處理 HTTP + credential。
-func (s *Service) PrepareGenerateRequest(personaID string, stateTrigger AvatarStateTrigger) (*GenerateAvatarRequest, error) {
-	config := s.GetCurrentAvatar(personaID)
-
-	if config.AvatarProvider != ProviderImageAPI {
-		return nil, fmt.Errorf("persona %s 未設定為 Image API provider", personaID)
-	}
-
-	preset, err := GetPresetByID(config.StylePresetID)
-	if err != nil {
-		return nil, err
-	}
-
-	prompt, err := ComposePrompt(*preset, stateTrigger)
-	if err != nil {
-		return nil, err
-	}
-
-	size := config.OutputSize
-	if size <= 0 {
-		size = 256
-	}
-
-	return &GenerateAvatarRequest{
-		Prompt:      prompt,
-		APIEndpoint: config.APIEndpoint,
-		Width:       size,
-		Height:      size,
-	}, nil
-}
+// 註：原本的「Image API 請求 + 憑證」stub 已移除。頭像產圖統一改走
+// app 層的 GenerateAvatarViaImageGen（與紀念照共用同一個 imagegen 引擎），
+// 不再有獨立的 APIEndpoint / credential 接口。上方的 style preset 與
+// ComposePrompt 仍保留，供未來模板選擇之用。

@@ -950,8 +950,8 @@
     "remoteReply": "{{channel}} reply received: {{label}}",
     "remoteComms": "Remote Comms",
     "openInteractive": "Open Interactive",
-    "interactiveLabel": "CLI Interactive View",
-    "interactiveHeader": "CLI Interactive",
+    "interactiveLabel": "Casual Chat View",
+    "interactiveHeader": "Casual Chat",
     "selectAdapter": "Select CLI adapter",
     "noAdapterSelected": "No adapter selected",
     "interactivePlaceholder": "Enter content to send to the current CLI",
@@ -1015,8 +1015,8 @@
     "exampleItem": "{{name}} example"
   },
   "cli": {
-    "interactiveView": "CLI Interactive View",
-    "interactiveTitle": "CLI Interaction",
+    "interactiveView": "Casual Chat View",
+    "interactiveTitle": "Casual Chat",
     "selectAdapter": "Select CLI Adapter",
     "noAdapter": "No adapter selected",
     "inputPlaceholder": "Enter content to send to the current CLI",

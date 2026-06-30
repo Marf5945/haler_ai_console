@@ -537,6 +537,10 @@ func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sess
 			memResp.Next = decision.Next
 			return true, memResp
 		}
+		// 紀念照：LLM 提議拍照 → 回待確認卡。
+		if handled, photoResp := a.maybeCommemorativePhoto(decision.Action, decision.Target, traceID); handled {
+			return true, photoResp
+		}
 	}
 	return false, skill_step.CLIResponse{}
 }

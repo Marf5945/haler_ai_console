@@ -57,10 +57,8 @@ type AvatarConfig struct {
 	OutputSize        int            `json:"output_size"`
 	UpdatedAt         string         `json:"updated_at"`
 
-	// Image API 設定（僅 provider=user_image_api 時使用）
+	// 風格模板 ID（user_image_api 統一改走共用產圖引擎後，僅供模板選擇參考）
 	StylePresetID string `json:"style_preset_id,omitempty"`
-	CredentialRef string `json:"credential_ref,omitempty"`
-	APIEndpoint   string `json:"api_endpoint,omitempty"`
 }
 
 // CropRect 描述裁切區域。

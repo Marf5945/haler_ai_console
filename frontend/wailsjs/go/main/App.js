@@ -42,6 +42,10 @@ export function AddW3ATrustedDeveloper(arg1, arg2, arg3) {
   return window['go']['main']['App']['AddW3ATrustedDeveloper'](arg1, arg2, arg3);
 }
 
+export function AlbumPhotoImage(arg1) {
+  return window['go']['main']['App']['AlbumPhotoImage'](arg1);
+}
+
 export function AnalyzeSessionForSub() {
   return window['go']['main']['App']['AnalyzeSessionForSub']();
 }
@@ -182,6 +186,10 @@ export function ConfirmClose(arg1, arg2) {
   return window['go']['main']['App']['ConfirmClose'](arg1, arg2);
 }
 
+export function ConfirmCommemorativePhoto(arg1, arg2) {
+  return window['go']['main']['App']['ConfirmCommemorativePhoto'](arg1, arg2);
+}
+
 export function ConfirmCredentialMigration() {
   return window['go']['main']['App']['ConfirmCredentialMigration']();
 }
@@ -242,8 +250,8 @@ export function DeactivateRemoteBridgeChannel(arg1) {
   return window['go']['main']['App']['DeactivateRemoteBridgeChannel'](arg1);
 }
 
-export function DeleteAvatarCredential(arg1) {
-  return window['go']['main']['App']['DeleteAvatarCredential'](arg1);
+export function DeleteAlbumPhoto(arg1) {
+  return window['go']['main']['App']['DeleteAlbumPhoto'](arg1);
 }
 
 export function DeleteHighlight(arg1, arg2) {
@@ -430,6 +438,10 @@ export function FinishOnboarding() {
   return window['go']['main']['App']['FinishOnboarding']();
 }
 
+export function GenerateAvatarViaImageGen(arg1, arg2) {
+  return window['go']['main']['App']['GenerateAvatarViaImageGen'](arg1, arg2);
+}
+
 export function GenerateLearningRunMetadata(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['GenerateLearningRunMetadata'](arg1, arg2, arg3, arg4);
 }
@@ -526,6 +538,10 @@ export function GetJobExecutionHistory(arg1, arg2) {
   return window['go']['main']['App']['GetJobExecutionHistory'](arg1, arg2);
 }
 
+export function GetKeepsakeConfig() {
+  return window['go']['main']['App']['GetKeepsakeConfig']();
+}
+
 export function GetLastLearningReplayPlan() {
   return window['go']['main']['App']['GetLastLearningReplayPlan']();
 }
@@ -544,10 +560,6 @@ export function GetMemoryHealth() {
 
 export function GetMemoryPipelineState() {
   return window['go']['main']['App']['GetMemoryPipelineState']();
-}
-
-export function GetMonitorLinks() {
-  return window['go']['main']['App']['GetMonitorLinks']();
 }
 
 export function GetNativeOCRStatus() {
@@ -706,10 +718,6 @@ export function HandleDocumentDrop(arg1) {
   return window['go']['main']['App']['HandleDocumentDrop'](arg1);
 }
 
-export function HasAvatarCredential(arg1) {
-  return window['go']['main']['App']['HasAvatarCredential'](arg1);
-}
-
 export function HasBlockingReviewCard() {
   return window['go']['main']['App']['HasBlockingReviewCard']();
 }
@@ -796,6 +804,10 @@ export function IsReadOnlyMode() {
 
 export function ListAdapterModelOptions(arg1) {
   return window['go']['main']['App']['ListAdapterModelOptions'](arg1);
+}
+
+export function ListAlbumPhotos() {
+  return window['go']['main']['App']['ListAlbumPhotos']();
 }
 
 export function ListArchivedSkills() {
@@ -1016,10 +1028,6 @@ export function PollStatusRail() {
 
 export function PollTelegramChatID(arg1) {
   return window['go']['main']['App']['PollTelegramChatID'](arg1);
-}
-
-export function PrepareAvatarGenerateRequest(arg1, arg2) {
-  return window['go']['main']['App']['PrepareAvatarGenerateRequest'](arg1, arg2);
 }
 
 export function PrepareCloudTTSText(arg1) {
@@ -1314,6 +1322,10 @@ export function SaveHighlight(arg1) {
   return window['go']['main']['App']['SaveHighlight'](arg1);
 }
 
+export function SaveKeepsakeConfig(arg1) {
+  return window['go']['main']['App']['SaveKeepsakeConfig'](arg1);
+}
+
 export function SaveMainAsSub(arg1) {
   return window['go']['main']['App']['SaveMainAsSub'](arg1);
 }
@@ -1438,6 +1450,10 @@ export function SetAdapterStatus(arg1, arg2) {
   return window['go']['main']['App']['SetAdapterStatus'](arg1, arg2);
 }
 
+export function SetAlbumPhotoCaption(arg1, arg2) {
+  return window['go']['main']['App']['SetAlbumPhotoCaption'](arg1, arg2);
+}
+
 export function SetAvatarProvider(arg1, arg2) {
   return window['go']['main']['App']['SetAvatarProvider'](arg1, arg2);
 }
@@ -1528,10 +1544,6 @@ export function StopSidecar() {
 
 export function StopURLVisualLearning() {
   return window['go']['main']['App']['StopURLVisualLearning']();
-}
-
-export function StoreAvatarCredential(arg1, arg2) {
-  return window['go']['main']['App']['StoreAvatarCredential'](arg1, arg2);
 }
 
 export function SubmitTaskLoopInput(arg1, arg2, arg3) {

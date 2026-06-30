@@ -954,8 +954,8 @@
     "remoteReply": "收到 {{channel}} 回覆：{{label}}",
     "remoteComms": "遠端通訊",
     "openInteractive": "打開互動",
-    "interactiveLabel": "CLI 互動檢視",
-    "interactiveHeader": "CLI 互動",
+    "interactiveLabel": "閒聊互動檢視",
+    "interactiveHeader": "閒聊互動",
     "selectAdapter": "選擇 CLI adapter",
     "noAdapterSelected": "尚未選擇 adapter",
     "interactivePlaceholder": "輸入要送給目前 CLI 的內容",
@@ -1019,8 +1019,8 @@
     "exampleItem": "{{name}} 範例"
   },
   "cli": {
-    "interactiveView": "CLI 互動檢視",
-    "interactiveTitle": "CLI 互動",
+    "interactiveView": "閒聊互動檢視",
+    "interactiveTitle": "閒聊互動",
     "selectAdapter": "選擇 CLI adapter",
     "noAdapter": "尚未選擇 adapter",
     "inputPlaceholder": "輸入要送給目前 CLI 的內容",

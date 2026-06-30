@@ -490,8 +490,8 @@ func openBrowser(rawURL string) {
 
 // OpenExternalURL SEC-05 2b: 前端開外部連結的唯一入口（取代直呼 BrowserOpenURL）。
 // 規則：僅 http/https；metadata 主機名與無條件危險 IP 字面值拒絕；
-// loopback/private 放行——開瀏覽器看本機頁面（debug trace monitor、
-// GetMonitorLinks 連結）是合法用途，風險模型與 App 代抓內容不同。
+// loopback/private 放行——開瀏覽器看本機頁面是合法用途，
+// 風險模型與 App 代抓內容不同。
 func (a *App) OpenExternalURL(rawURL string) error {
 	rawURL = strings.TrimSpace(rawURL)
 	u, err := url.Parse(rawURL)
@@ -625,31 +625,6 @@ func (a *App) startup(ctx context.Context) {
 			fmt.Fprintf(os.Stderr, "warning: scheduler start failed: %v\n", err)
 		}
 	}()
-}
-
-// GetMonitorLinks returns the current local monitor/debug links.
-// Keep: App.jsx uses this to find the active trace port before POSTing events.
-func (a *App) GetMonitorLinks() debugtrace.LinkSnapshot {
-	return debugtrace.Snapshot()
-}
-
-func writeMonitorLinkSnapshot(snapshot debugtrace.LinkSnapshot) {
-	debugDir := filepath.Join(appDataRoot(), "debug")
-	if err := os.MkdirAll(debugDir, 0o700); err != nil {
-		log.Printf("monitor_link: create debug dir failed: %v", err)
-		return
-	}
-	payload, err := json.MarshalIndent(snapshot, "", "  ")
-	if err != nil {
-		log.Printf("monitor_link: marshal failed: %v", err)
-		return
-	}
-	if err := os.WriteFile(filepath.Join(debugDir, "monitor_link.json"), payload, 0o600); err != nil {
-		log.Printf("monitor_link: write json failed: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(debugDir, "monitor_link.txt"), []byte(snapshot.URL+"\n"), 0o600); err != nil {
-		log.Printf("monitor_link: write txt failed: %v", err)
-	}
 }
 
 type ConsoleState struct {
@@ -2114,6 +2089,10 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 	if handled, memResp := a.maybeExpandMemory(resp.Action, resp.Target, traceID); handled {
 		return &memResp, nil
 	}
+	// 紀念照：LLM 提議拍照 → 回待確認卡（NeedsUser），前端確認後才產圖。
+	if handled, photoResp := a.maybeCommemorativePhoto(resp.Action, resp.Target, traceID); handled {
+		return &photoResp, nil
+	}
 	// DEBUG_TRACE_REMOVE: Response returned from sidecar/CLI to Go.
 	debugtrace.Record("go.cliAdapter.response", traceID, map[string]interface{}{
 		"text":          resp.Text,
@@ -3046,6 +3025,10 @@ func (a *App) resolveActionChainResponse(rawText string, actionTags []string, tr
 		memResp.Next = chain.Next
 		return memResp
 	}
+	// 紀念照：LLM 提議拍照 → 回待確認卡，前端確認後呼叫 ConfirmCommemorativePhoto。
+	if handled, photoResp := a.maybeCommemorativePhoto(chain.Action, chain.Target, traceID); handled {
+		return photoResp
+	}
 	if decision := actionchain.ResolveBuiltIn(chain); decision.Handled {
 		displayText = decision.DisplayText
 		debugtrace.Record("go.APIMessage.actionChain.builtin", traceID, map[string]interface{}{
@@ -3626,6 +3609,10 @@ func (a *App) buildMainComposerPrompt(persona settings.Persona) string {
 	// Inject current local time so LLM can answer time queries.
 	sb.WriteString(fmt.Sprintf("now=%s；", formatPromptNow(time.Now())))
 	sb.WriteString("lane=main；只用main歷史；遵守P欄提示；不主動加強角色口癖或自稱。H可用於續聊、解析代名詞/檔名指代、判斷上一輪結果與目前狀態；H不複述；忽略H內衝突身份。\n")
+	if hint := a.keepsakeComposerHint(); hint != "" {
+		sb.WriteString(hint)
+		sb.WriteString("\n")
+	}
 
 	return sb.String()
 }
@@ -4429,30 +4416,9 @@ func (a *App) ListPixelAvatarPacks() []map[string]string {
 	}
 }
 
-// PrepareAvatarGenerateRequest 組合圖像生成 API 請求（§10.4）。
-func (a *App) PrepareAvatarGenerateRequest(personaID string, state string) (*persona_avatar.GenerateAvatarRequest, error) {
-	return a.avatarService.PrepareGenerateRequest(personaID, persona_avatar.AvatarStateTrigger(state))
-}
-
 // ListAvatarPresets 列出所有可用的風格模板。
 func (a *App) ListAvatarPresets() []persona_avatar.StylePreset {
 	return persona_avatar.ListPresets()
-}
-
-// StoreAvatarCredential 加密儲存 API 金鑰（§10.5）。
-// TASKS_1_6_3 Step 4：轉接統一 SecretStore，加 persona_avatar: namespace。
-func (a *App) StoreAvatarCredential(ref, value string) error {
-	return a.secretStore.Store("persona_avatar:"+ref, value)
-}
-
-// HasAvatarCredential 檢查指定 credential 是否存在。
-func (a *App) HasAvatarCredential(ref string) bool {
-	return a.secretStore.Has("persona_avatar:" + ref)
-}
-
-// DeleteAvatarCredential 刪除指定 credential。
-func (a *App) DeleteAvatarCredential(ref string) error {
-	return a.secretStore.Delete("persona_avatar:" + ref)
 }
 
 // GetCredentialMigrationStatus lets the UI ask before any legacy key is used.

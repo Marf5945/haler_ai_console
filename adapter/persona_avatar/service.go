@@ -106,13 +106,7 @@ func NormalizePixelPack(personaID, pack string) string {
 func (s *Service) ResolveProvider(personaID string) AvatarProvider {
 	config := s.GetCurrentAvatar(personaID)
 
-	// 1. Image API 已設定且有 credential
-	if config.AvatarProvider == ProviderImageAPI &&
-		config.CredentialRef != "" && config.APIEndpoint != "" {
-		return ProviderImageAPI
-	}
-
-	// 2. 靜態圖片存在
+	// 1. 靜態圖片存在（user_image_api 已統一改走共用產圖引擎，產出直接存成 static）
 	if config.StaticAvatarPath != "" {
 		staticPath := config.StaticAvatarPath
 		if !filepath.IsAbs(staticPath) {

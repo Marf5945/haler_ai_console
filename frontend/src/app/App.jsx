@@ -29,9 +29,6 @@ import {
   GetConsoleState,
   GetDeviceTrustProfile,
   GetHookSummary,
-  // Keep: debug trace monitor bridge. Used by postDebugTrace() even when the
-  // local monitor port is not currently listening.
-  GetMonitorLinks,
   // SEC-05 2b: 開外部連結唯一入口（Go 端做 scheme/metadata 檢查，loopback 放行）
   GetNewSubagentCandidates,
   GetPendingDigest,
@@ -102,6 +99,10 @@ import {
   SendTopInteractionMessage,
   SetActiveConversationAgent,
   ClearInspectorHistory,
+  ConfirmCommemorativePhoto,
+  GetKeepsakeConfig,
+  SaveKeepsakeConfig,
+  GenerateAvatarViaImageGen,
   RestartSidecar,
   // 遺留能力 #1–#8: Wails 架構遷移 bindings
   ListAvailableAdapters,
@@ -1312,7 +1313,9 @@ const fullBodyAvatarUrls = {
   },
   uncle: {
     idle: new URL('../assets/persona_fullbody/uncle_bust/fullbody_idle.png', import.meta.url).href,
-    blocked: new URL('../assets/persona_fullbody/uncle_bust/fullbody.png', import.meta.url).href,
+    sleepy: new URL('../assets/persona_fullbody/uncle_bust/fullbody_idle_madao_sleepy_akimbo.png', import.meta.url).href,
+    warning: new URL('../assets/persona_fullbody/uncle_bust/fullbody_warning_madao_swimbrief_nearly_rip_step.png', import.meta.url).href,
+    blocked: new URL('../assets/persona_fullbody/uncle_bust/fullbody_warning_madao_swimbrief_nearly_rip_step.png', import.meta.url).href,
   },
   secretary: {
     idle: new URL('../assets/persona_fullbody/secretary/fullbody_idle.png', import.meta.url).href,
@@ -5914,7 +5917,16 @@ function App() {
     // credentials exist, static image opens the local preview modal, and pixel
     // avatar is the safe built-in fallback.
     if (provider === 'user_image_api') {
-      setAvatarModeNotice(t('avatar.apiKeyNotSet'));
+      // 統一接口：頭像直接走「紀念照產圖設定」(ComfyUI / 雲端)，不再另設 API。
+      setAvatarModeNotice('正在用產圖設定生成頭像…（首次較久）');
+      try {
+        await callWails(() => GenerateAvatarViaImageGen(targetPersonaID, 'idle'));
+        await loadCurrentAvatar(targetPersonaID);
+        setAvatarModeNotice('已用產圖設定生成頭像 ✓');
+        setAvatarPickerOpen(false);
+      } catch (e) {
+        setAvatarModeNotice('頭像產圖失敗：' + String(e && e.message ? e.message : e) + '（請先在 CLI 互動的「📸 拍照 → ⚙ 設定」設好 ComfyUI 或雲端）');
+      }
       return;
     }
     if (provider === 'static_image') {
@@ -10123,51 +10135,10 @@ function getBundledAvatarPackUrl(pack, state = 'idle') {
   return '';
 }
 
-let monitorLinkCache = null;
-let monitorLinkPending = null;
-
-// DEBUG_TRACE_REMOVE: Temporary browser -> local trace viewer bridge.
-// Keep while cleaning dead code: this feeds the local debug trace page that
-// records UI -> Wails -> Go -> sidecar -> CLI events.
-// Uses the monitor-link register because the trace port may move between runs.
-function postDebugTrace(node, traceId, data) {
-  resolveMonitorTraceURL()
-    .then((url) => {
-      if (!url) return null;
-      const endpoint = `${String(url || '').replace(/\/$/, '')}/trace`;
-      return fetch(endpoint, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({node, trace_id: traceId, data}),
-      });
-    })
-    .catch(() => {});
+function postDebugTrace() {
+  return undefined;
 }
 
-function resolveMonitorTraceURL() {
-  if (monitorLinkCache?.url) {
-    return Promise.resolve(monitorLinkCache.url);
-  }
-  if (!monitorLinkPending) {
-    monitorLinkPending = Promise.resolve()
-      .then(() => GetMonitorLinks?.())
-      .then((link) => {
-        monitorLinkCache = link || {url: ''};
-        return monitorLinkCache.url;
-      })
-      .catch(() => {
-        monitorLinkCache = {url: ''};
-        return monitorLinkCache.url;
-      })
-      .finally(() => {
-        monitorLinkPending = null;
-      });
-  }
-  return monitorLinkPending;
-}
-
-// DEBUG_TRACE_REMOVE: Debug-only trace correlation ID generator.
-// Keep with postDebugTrace(): trace IDs are what join UI, Go, and sidecar events.
 function makeDebugTraceID(scope) {
   return `${scope}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -10373,13 +10344,14 @@ function pixelPackForPersona(persona, config) {
   return defaultPixelPackForPersona(persona?.id);
 }
 
-// 全身像來源：persona 自填的 fullBodyAvatarUrl 優先，否則依角色 pack 取內建立繪。
-// 狀態 blocked（阻塞/停）→ 禁止姿勢；其餘 → 等待姿勢。
+// 全身像來源：persona 自填的 fullBodyAvatarUrl 優先，否則依角色 pack/state 取內建立繪。
+// 若特定狀態沒有獨立立繪，blocked 仍走禁止姿勢，其餘回到等待姿勢。
 function resolvePersonaFullBodySrc(persona, config, state) {
   const explicit = persona?.fullBodyAvatarUrl || persona?.full_body_avatar_url || '';
   if (explicit) return explicit;
   const pack = fullBodyAvatarUrls[pixelPackForPersona(persona, config)];
   if (!pack) return '';
+  if (state && pack[state]) return pack[state];
   return state === 'blocked' ? pack.blocked : pack.idle;
 }
 
@@ -11327,6 +11299,21 @@ export function PersonaSettingsDrawer({
   );
 }
 
+function KeepsakeField({ label, value, onChange, placeholder, password }) {
+  return (
+    <label style={{ display: 'block', marginBottom: 8 }}>
+      <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 3 }}>{label}</div>
+      <input
+        type={password ? 'password' : 'text'}
+        value={value || ''}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #555', background: 'transparent', color: 'inherit', boxSizing: 'border-box' }}
+      />
+    </label>
+  );
+}
+
 function TopConsole({
   activePersona, activeAvatarConfig, avatarExpression, avatarModeNotice, avatarProvider, avatarSrc,
   browserPref, greeting, haoras, subagentTabs, personaJob, personaName,
@@ -11359,6 +11346,17 @@ function TopConsole({
   const [personaInfoOpen, setPersonaInfoOpen] = useState(false);
   const [interactiveOpen, setInteractiveOpen] = useState(false);
   const [interactiveText, setInteractiveText] = useState('');
+  // 紀念照：手動拍照的確認泡泡狀態
+  const [keepsakeAsk, setKeepsakeAsk] = useState(false);
+  const [keepsakeBusy, setKeepsakeBusy] = useState(false);
+  const [keepsakeMsg, setKeepsakeMsg] = useState('');
+  // 紀念照產圖設定（ComfyUI / 雲端）
+  const [keepsakeSetOpen, setKeepsakeSetOpen] = useState(false);
+  const [keepsakeCfg, setKeepsakeCfg] = useState(null);
+  const openKeepsakeSettings = () => {
+    setKeepsakeSetOpen(true);
+    callWails(() => GetKeepsakeConfig()).then(setKeepsakeCfg).catch(() => setKeepsakeCfg({ mode: 'comfyui' }));
+  };
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptText, setPromptText] = useState('');
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
@@ -11952,6 +11950,26 @@ function TopConsole({
         <div className="interactive-popover" role="dialog" aria-label={t('remote.interactiveLabel')}>
           <header className="interactive-popover-header">
             <strong>{t('remote.interactiveHeader')}</strong>
+            <div className="interactive-header-actions">
+              <button
+                type="button"
+                className="interactive-photo-action"
+                title="拍一張紀念照"
+                onClick={() => { setKeepsakeAsk(true); setKeepsakeMsg(''); }}
+              >
+                <span aria-hidden="true">📸</span>
+                <span>拍照</span>
+              </button>
+              <button
+                type="button"
+                className="interactive-photo-action"
+                title="紀念照產圖設定"
+                onClick={openKeepsakeSettings}
+              >
+                <span aria-hidden="true">⚙</span>
+                <span>設定</span>
+              </button>
+            </div>
             <select
               aria-label={t('remote.selectAdapter')}
               className="interactive-adapter-select"
@@ -11974,18 +11992,84 @@ function TopConsole({
             value={interactiveText}
             onChange={(event) => setInteractiveText(event.target.value)}
           />
-          {cliInspectorLog && (
-            <section className="cli-inspector-log" aria-label={t('remote.cliLog')}>
-              <label>payload</label>
-              <pre>{JSON.stringify(cliInspectorLog.payload, null, 2)}</pre>
-              {cliInspectorLog.response && (
+          {keepsakeAsk && (
+            <div
+              className="keepsake-bubble"
+              style={{ position: 'relative', alignSelf: 'flex-start', margin: '4px 0 8px', maxWidth: 340, background: 'rgba(120,90,40,0.18)', border: '1px solid rgba(214,160,74,0.5)', borderRadius: 14, padding: '12px 14px' }}
+            >
+              <div style={{ marginBottom: 10 }}>
+                要拍一張紀念照嗎？{interactiveText.trim() ? `場景：「${interactiveText.trim()}」` : '（沒填場景就拍一張合照）'}
+              </div>
+              {keepsakeMsg && <div style={{ fontSize: 12, opacity: 0.9, marginBottom: 8 }}>{keepsakeMsg}</div>}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  disabled={keepsakeBusy}
+                  onClick={async () => {
+                    setKeepsakeBusy(true);
+                    setKeepsakeMsg('正在拍照…（首次產圖較久）');
+                    try {
+                      const photo = await callWails(() => ConfirmCommemorativePhoto(interactiveText.trim(), ''));
+                      setKeepsakeMsg('已拍下並存入相冊：' + (photo?.scene || '合照'));
+                    } catch (e) {
+                      setKeepsakeMsg('產圖失敗：' + String(e && e.message ? e.message : e));
+                    } finally {
+                      setKeepsakeBusy(false);
+                    }
+                  }}
+                >
+                  {keepsakeBusy ? '拍照中…' : '拍'}
+                </button>
+                <button type="button" disabled={keepsakeBusy} onClick={() => { setKeepsakeAsk(false); setKeepsakeMsg(''); }}>關閉</button>
+              </div>
+            </div>
+          )}
+          {keepsakeSetOpen && keepsakeCfg && (
+            <div
+              className="keepsake-settings"
+              style={{ margin: '4px 0 8px', background: 'rgba(40,40,48,0.55)', border: '1px solid rgba(214,160,74,0.4)', borderRadius: 12, padding: '12px 14px' }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: 10 }}>紀念照產圖設定</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <button
+                  type="button"
+                  onClick={() => setKeepsakeCfg({ ...keepsakeCfg, mode: 'comfyui' })}
+                  style={{ flex: 1, padding: '6px', borderRadius: 8, cursor: 'pointer', color: 'inherit', background: 'transparent', border: (keepsakeCfg.mode || 'comfyui') === 'comfyui' ? '2px solid #d6a04a' : '1px solid #555' }}
+                >
+                  本機 ComfyUI
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setKeepsakeCfg({ ...keepsakeCfg, mode: 'cloud' })}
+                  style={{ flex: 1, padding: '6px', borderRadius: 8, cursor: 'pointer', color: 'inherit', background: 'transparent', border: keepsakeCfg.mode === 'cloud' ? '2px solid #d6a04a' : '1px solid #555' }}
+                >
+                  綁定雲端
+                </button>
+              </div>
+              {(keepsakeCfg.mode || 'comfyui') === 'comfyui' ? (
                 <>
-                  <label>response</label>
-                  <pre>{JSON.stringify(cliInspectorLog.response, null, 2)}</pre>
+                  <KeepsakeField label="ComfyUI 位址" value={keepsakeCfg.comfyui_url} onChange={(x) => setKeepsakeCfg({ ...keepsakeCfg, comfyui_url: x })} placeholder="http://127.0.0.1:8188" />
+                  <KeepsakeField label="動漫模型 checkpoint（必填）" value={keepsakeCfg.checkpoint} onChange={(x) => setKeepsakeCfg({ ...keepsakeCfg, checkpoint: x })} placeholder="anything-v5.safetensors" />
+                </>
+              ) : (
+                <>
+                  <KeepsakeField label="雲端端點" value={keepsakeCfg.cloud_endpoint} onChange={(x) => setKeepsakeCfg({ ...keepsakeCfg, cloud_endpoint: x })} placeholder="https://api.openai.com/v1/images/generations" />
+                  <KeepsakeField label="API 金鑰" value={keepsakeCfg.cloud_api_key} onChange={(x) => setKeepsakeCfg({ ...keepsakeCfg, cloud_api_key: x })} placeholder="sk-..." password />
+                  <KeepsakeField label="模型" value={keepsakeCfg.cloud_model} onChange={(x) => setKeepsakeCfg({ ...keepsakeCfg, cloud_model: x })} placeholder="dall-e-3" />
                 </>
               )}
-              {cliInspectorLog.error && <p className="cli-inspector-error">{cliInspectorLog.error}</p>}
-            </section>
+              <KeepsakeField label="畫風前綴（可空，預設動漫風）" value={keepsakeCfg.style_preset} onChange={(x) => setKeepsakeCfg({ ...keepsakeCfg, style_preset: x })} placeholder="anime, 2D illustration, cel shading" />
+              <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => { callWails(() => SaveKeepsakeConfig(keepsakeCfg)).catch(() => {}); setKeepsakeSetOpen(false); }}
+                  style={{ background: '#d6a04a', color: '#1b1b1f', border: 'none', borderRadius: 8, padding: '6px 16px', cursor: 'pointer', fontWeight: 600 }}
+                >
+                  儲存
+                </button>
+                <button type="button" onClick={() => setKeepsakeSetOpen(false)} style={{ background: 'transparent', color: 'inherit', border: '1px solid #555', borderRadius: 8, padding: '6px 16px', cursor: 'pointer' }}>關閉</button>
+              </div>
+            </div>
           )}
           <div className="interactive-popover-actions">
             <button type="button" onClick={() => { setInteractiveOpen(false); callWails(() => ClearInspectorHistory()).catch(() => {}); }}>{t('remote.cancel')}</button>

@@ -976,8 +976,8 @@
     "remoteReply": "{{channel}} 返信を受信しました: {{label}}",
     "remoteComms": "リモート通信",
     "openInteractive": "インタラクティブを開く",
-    "interactiveLabel": "CLI インタラクティブビュー",
-    "interactiveHeader": "CLI インタラクティブ",
+    "interactiveLabel": "雑談インタラクションビュー",
+    "interactiveHeader": "雑談インタラクション",
     "selectAdapter": "CLI アダプターを選択",
     "noAdapterSelected": "アダプター未選択",
     "interactivePlaceholder": "現在の CLI に送信する内容を入力",
@@ -1041,8 +1041,8 @@
     "sharedSource": "Shared Source"
   },
   "cli": {
-    "interactiveView": "CLI インタラクティブビュー",
-    "interactiveTitle": "CLI インタラクション",
+    "interactiveView": "雑談インタラクションビュー",
+    "interactiveTitle": "雑談インタラクション",
     "selectAdapter": "CLI アダプターを選択",
     "noAdapter": "アダプター未選択",
     "inputPlaceholder": "現在の CLI に送信する内容を入力",

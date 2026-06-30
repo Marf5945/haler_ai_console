@@ -967,8 +967,8 @@
     "remoteReply": "ได้รับการตอบกลับจาก {{channel}}: {{label}}",
     "remoteComms": "การสื่อสารระยะไกล",
     "openInteractive": "เปิดแบบโต้ตอบ",
-    "interactiveLabel": "มุมมองโต้ตอบ CLI",
-    "interactiveHeader": "CLI โต้ตอบ",
+    "interactiveLabel": "มุมมองสนทนาเล่น",
+    "interactiveHeader": "สนทนาเล่น",
     "selectAdapter": "เลือกอะแดปเตอร์ CLI",
     "noAdapterSelected": "ยังไม่ได้เลือกอะแดปเตอร์",
     "interactivePlaceholder": "ป้อนเนื้อหาที่จะส่งไปยัง CLI ปัจจุบัน",
@@ -1032,8 +1032,8 @@
     "sharedSource": "Shared Source"
   },
   "cli": {
-    "interactiveView": "มุมมองโต้ตอบ CLI",
-    "interactiveTitle": "การโต้ตอบ CLI",
+    "interactiveView": "มุมมองสนทนาเล่น",
+    "interactiveTitle": "สนทนาเล่น",
     "selectAdapter": "เลือกอะแดปเตอร์ CLI",
     "noAdapter": "ยังไม่ได้เลือกอะแดปเตอร์",
     "inputPlaceholder": "ป้อนเนื้อหาที่จะส่งไปยัง CLI ปัจจุบัน",

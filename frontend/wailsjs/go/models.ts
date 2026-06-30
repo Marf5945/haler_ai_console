@@ -361,33 +361,6 @@ export namespace dag {
 
 }
 
-export namespace debugtrace {
-
-	export class LinkSnapshot {
-	    url: string;
-	    addr: string;
-	    started: boolean;
-	    version: number;
-	    updated_at: string;
-	    last_error?: string;
-
-	    static createFrom(source: any = {}) {
-	        return new LinkSnapshot(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.url = source["url"];
-	        this.addr = source["addr"];
-	        this.started = source["started"];
-	        this.version = source["version"];
-	        this.updated_at = source["updated_at"];
-	        this.last_error = source["last_error"];
-	    }
-	}
-
-}
-
 export namespace go_program {
 
 	export class Toolchain {
@@ -686,6 +659,32 @@ export namespace llm_context {
 
 export namespace main {
 
+	export class AlbumPhotoView {
+	    id: string;
+	    createdAt: string;
+	    personaName: string;
+	    scene: string;
+	    caption: string;
+	    memoryTag: string;
+	    seed: number;
+	    model: string;
+
+	    static createFrom(source: any = {}) {
+	        return new AlbumPhotoView(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.createdAt = source["createdAt"];
+	        this.personaName = source["personaName"];
+	        this.scene = source["scene"];
+	        this.caption = source["caption"];
+	        this.memoryTag = source["memoryTag"];
+	        this.seed = source["seed"];
+	        this.model = source["model"];
+	    }
+	}
 	export class ConsoleState {
 	    greeting: string;
 	    statusRail: statusrail.View;
@@ -1161,6 +1160,40 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class KeepsakeConfig {
+	    mode: string;
+	    comfyui_url: string;
+	    checkpoint: string;
+	    cloud_endpoint: string;
+	    cloud_api_key: string;
+	    cloud_model: string;
+	    style_preset: string;
+	    negative: string;
+	    width: number;
+	    height: number;
+	    steps: number;
+	    suggest_every: number;
+
+	    static createFrom(source: any = {}) {
+	        return new KeepsakeConfig(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mode = source["mode"];
+	        this.comfyui_url = source["comfyui_url"];
+	        this.checkpoint = source["checkpoint"];
+	        this.cloud_endpoint = source["cloud_endpoint"];
+	        this.cloud_api_key = source["cloud_api_key"];
+	        this.cloud_model = source["cloud_model"];
+	        this.style_preset = source["style_preset"];
+	        this.negative = source["negative"];
+	        this.width = source["width"];
+	        this.height = source["height"];
+	        this.steps = source["steps"];
+	        this.suggest_every = source["suggest_every"];
+	    }
 	}
 	export class LearningDigestPrepareResult {
 	    has_updates: boolean;
@@ -1961,8 +1994,6 @@ export namespace persona_avatar {
 	    output_size: number;
 	    updated_at: string;
 	    style_preset_id?: string;
-	    credential_ref?: string;
-	    api_endpoint?: string;
 
 	    static createFrom(source: any = {}) {
 	        return new AvatarConfig(source);
@@ -1979,8 +2010,6 @@ export namespace persona_avatar {
 	        this.output_size = source["output_size"];
 	        this.updated_at = source["updated_at"];
 	        this.style_preset_id = source["style_preset_id"];
-	        this.credential_ref = source["credential_ref"];
-	        this.api_endpoint = source["api_endpoint"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -2002,24 +2031,6 @@ export namespace persona_avatar {
 		}
 	}
 
-	export class GenerateAvatarRequest {
-	    prompt: string;
-	    api_endpoint: string;
-	    width: number;
-	    height: number;
-
-	    static createFrom(source: any = {}) {
-	        return new GenerateAvatarRequest(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.prompt = source["prompt"];
-	        this.api_endpoint = source["api_endpoint"];
-	        this.width = source["width"];
-	        this.height = source["height"];
-	    }
-	}
 	export class StylePreset {
 	    style_preset_id: string;
 	    name: string;
@@ -3656,4 +3667,3 @@ export namespace w3a_media {
 	}
 
 }
-

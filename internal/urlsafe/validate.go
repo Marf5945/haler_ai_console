@@ -229,7 +229,7 @@ func PolicyForLLMEndpoint(providerID, baseURL string) URLPolicy {
 
 // ScreenExternalOpenTarget 供「交給系統瀏覽器開頁」路徑（OpenExternalURL）使用：
 // 只擋 metadata 主機名與無條件危險 IP 字面值；loopback/private 放行——
-// 開瀏覽器看本機頁面（如 debug trace monitor）是合法用途，風險模型與 App 代抓不同。
+// 開瀏覽器看使用者指定的本機頁面是合法用途，風險模型與 App 代抓不同。
 func ScreenExternalOpenTarget(hostname string) error {
 	if err := screenHostname(hostname); err != nil {
 		return err

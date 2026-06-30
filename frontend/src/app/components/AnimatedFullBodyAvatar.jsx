@@ -196,12 +196,10 @@ export default function AnimatedFullBodyAvatar({
       {Object.entries(config.layers).map(([name, layer]) => (
         <span
           key={name}
-          className={`animated-fullbody-avatar-layer animated-fullbody-avatar-part animated-fullbody-avatar-${name}`}
+          className={`animated-fullbody-avatar-layer animated-fullbody-avatar-rig animated-fullbody-avatar-${name}`}
           style={layerStyle(layer)}
           data-layer={name}
-        >
-          <img src={imageSrc} alt="" draggable={false} />
-        </span>
+        />
       ))}
       <span className="animated-fullbody-avatar-eyes" aria-hidden="true">
         {(config.eyes || []).map((eye) => (

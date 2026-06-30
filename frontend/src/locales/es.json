@@ -971,8 +971,8 @@
     "remoteReply": "Respuesta de {{channel}} recibida: {{label}}",
     "remoteComms": "Comunicaciones Remotas",
     "openInteractive": "Abrir Interactivo",
-    "interactiveLabel": "Vista Interactiva de CLI",
-    "interactiveHeader": "CLI Interactivo",
+    "interactiveLabel": "Vista de charla casual",
+    "interactiveHeader": "Charla casual",
     "selectAdapter": "Seleccionar adaptador CLI",
     "noAdapterSelected": "Ningún adaptador seleccionado",
     "interactivePlaceholder": "Introduce el contenido para enviar al CLI actual",
@@ -1036,8 +1036,8 @@
     "sharedSource": "Shared Source"
   },
   "cli": {
-    "interactiveView": "Vista Interactiva de CLI",
-    "interactiveTitle": "Interacción de CLI",
+    "interactiveView": "Vista de charla casual",
+    "interactiveTitle": "Charla casual",
     "selectAdapter": "Seleccionar Adaptador CLI",
     "noAdapter": "Ningún adaptador seleccionado",
     "inputPlaceholder": "Introduce el contenido para enviar al CLI actual",

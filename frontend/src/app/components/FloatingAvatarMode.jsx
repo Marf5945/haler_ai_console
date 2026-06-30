@@ -10,6 +10,8 @@ const shakePreviewDelayMs = 1200;
 const shakePreviewDistance = 80;
 const shakeVomitDelayMs = 3000;
 const shakeVomitDistance = 500;
+const fullBodyAvatarWidth = 200;
+const fullBodyAvatarHeight = 360;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -104,6 +106,8 @@ export default function FloatingAvatarMode({
   const [scheduleConfirmPending, setScheduleConfirmPending] = useState(false);
   const [bodyMode, setBodyMode] = useState('head'); // 'head' | 'half' | 'full'
   const showBody = bodyMode !== 'head';
+  const avatarFrameWidth = showBody ? fullBodyAvatarWidth : avatarSize;
+  const avatarFrameHeight = showBody ? fullBodyAvatarHeight : avatarSize;
   const rootRef = useRef(null);
   const dragRef = useRef(null);
   const clickTimerRef = useRef(null);
@@ -111,13 +115,22 @@ export default function FloatingAvatarMode({
   const shakeRef = useRef({startedAt: 0, lastPoint: null, distance: 0, previewFired: false, vomitFired: false});
 
   const clampedPosition = useMemo(() => {
-    const maxX = Math.max(edgeGap, window.innerWidth - avatarSize - edgeGap);
-    const maxY = Math.max(edgeGap, window.innerHeight - avatarSize - edgeGap);
+    const maxX = Math.max(edgeGap, window.innerWidth - avatarFrameWidth - edgeGap);
+    const maxY = Math.max(edgeGap, window.innerHeight - avatarFrameHeight - edgeGap);
     return {
       x: clamp(Number(position?.x ?? maxX), edgeGap, maxX),
       y: clamp(Number(position?.y ?? maxY), edgeGap, maxY),
     };
-  }, [position?.x, position?.y]);
+  }, [avatarFrameHeight, avatarFrameWidth, position?.x, position?.y]);
+
+  useEffect(() => {
+    if (!active) return;
+    const rawX = Number(position?.x ?? clampedPosition.x);
+    const rawY = Number(position?.y ?? clampedPosition.y);
+    if (rawX !== clampedPosition.x || rawY !== clampedPosition.y) {
+      onPositionChange?.(clampedPosition);
+    }
+  }, [active, clampedPosition, onPositionChange, position?.x, position?.y]);
 
   useEffect(() => {
     if (!active) return undefined;
@@ -167,23 +180,23 @@ export default function FloatingAvatarMode({
   const selectedSet = new Set(selectedCandidateIDs || []);
   const visibleCandidates = (candidates || []).slice(0, 5);
   const panelLeft = clampedPosition.x < window.innerWidth - 390
-    ? clampedPosition.x + avatarSize + 14
+    ? clampedPosition.x + avatarFrameWidth + 14
     : clampedPosition.x - 342;
   const panelTop = clamp(clampedPosition.y - 18, edgeGap, Math.max(edgeGap, window.innerHeight - 410));
   const stackLeft = clamp(clampedPosition.x - 44, edgeGap, Math.max(edgeGap, window.innerWidth - 240));
-  const stackTop = clamp(clampedPosition.y + avatarSize + 10, edgeGap, Math.max(edgeGap, window.innerHeight - 230));
-  const leftTipLeft = clampedPosition.x > 250 ? clampedPosition.x - 236 : clampedPosition.x + avatarSize + 16;
-  const rightTipLeft = clampedPosition.x < window.innerWidth - 360 ? clampedPosition.x + avatarSize + 16 : clampedPosition.x - 304;
+  const stackTop = clamp(clampedPosition.y + avatarFrameHeight + 10, edgeGap, Math.max(edgeGap, window.innerHeight - 230));
+  const leftTipLeft = clampedPosition.x > 250 ? clampedPosition.x - 236 : clampedPosition.x + avatarFrameWidth + 16;
+  const rightTipLeft = clampedPosition.x < window.innerWidth - 360 ? clampedPosition.x + avatarFrameWidth + 16 : clampedPosition.x - 304;
   // compact 浮窗模式：面板要落在放大後的視窗內（非整個螢幕座標）。
   const compactPanelTop = clamp(clampedPosition.y - 10, edgeGap, Math.max(edgeGap, window.innerHeight - 430));
-  const compactPanelLeft = clamp(clampedPosition.x + avatarSize + 18, edgeGap, Math.max(edgeGap, window.innerWidth - 340));
+  const compactPanelLeft = clamp(clampedPosition.x + avatarFrameWidth + 18, edgeGap, Math.max(edgeGap, window.innerWidth - 340));
   const compactPanelStyle = {
     left: compactPanelLeft,
     top: compactPanelTop,
     width: Math.min(328, Math.max(220, window.innerWidth - compactPanelLeft - edgeGap)),
     maxHeight: Math.max(180, window.innerHeight - compactPanelTop - edgeGap),
   };
-  const compactStackTop = clampedPosition.y + avatarSize + 12;
+  const compactStackTop = clampedPosition.y + avatarFrameHeight + 12;
   const compactStackStyle = {
     left: clamp(clampedPosition.x - 82, edgeGap, Math.max(edgeGap, window.innerWidth - 230)),
     top: compactStackTop,
@@ -196,7 +209,7 @@ export default function FloatingAvatarMode({
     : clamp(window.innerWidth - edgeGap * 2, compactTipMinWidth, compactTipMaxWidth);
   const compactTipStyle = compactTipFitsLeft
     ? {left: -(compactTipWidth + compactTipGap), top: 0, width: compactTipWidth}
-    : {left: edgeGap - clampedPosition.x, top: avatarSize + compactTipGap, width: compactTipWidth};
+    : {left: edgeGap - clampedPosition.x, top: avatarFrameHeight + compactTipGap, width: compactTipWidth};
   const displayStatus = pendingConfirm?.title || statusTitle || t('floatingAvatar.statusIdle');
   const displayLatest = pendingConfirm?.reason || latestText || statusText || t('floatingAvatar.latestIdle');
   const speakerName = persona?.name || t('floatingAvatar.agentFallback');
@@ -301,8 +314,8 @@ export default function FloatingAvatarMode({
       updateDragShake(pointerX, pointerY);
       return;
     }
-    const maxX = Math.max(edgeGap, window.innerWidth - avatarSize - edgeGap);
-    const maxY = Math.max(edgeGap, window.innerHeight - avatarSize - edgeGap);
+    const maxX = Math.max(edgeGap, window.innerWidth - avatarFrameWidth - edgeGap);
+    const maxY = Math.max(edgeGap, window.innerHeight - avatarFrameHeight - edgeGap);
     onPositionChange?.({
       x: clamp(drag.originX + dx, edgeGap, maxX),
       y: clamp(drag.originY + dy, edgeGap, maxY),
@@ -382,7 +395,13 @@ export default function FloatingAvatarMode({
       <div
         ref={rootRef}
         className={`floating-avatar-root ${compactWindowMode ? 'floating-avatar-compact-root' : ''} ${flyingBack ? 'floating-avatar-flyback' : ''} ${showBody ? `floating-avatar-body-active floating-avatar-body-${bodyMode}` : ''}`}
-        style={{left: clampedPosition.x, top: clampedPosition.y, '--floating-avatar-size': `${avatarSize}px`}}
+        style={{
+          left: clampedPosition.x,
+          top: clampedPosition.y,
+          width: avatarFrameWidth,
+          height: avatarFrameHeight,
+          '--floating-avatar-size': `${avatarSize}px`,
+        }}
         onContextMenu={(event) => {
           event.preventDefault();
           noteAction();

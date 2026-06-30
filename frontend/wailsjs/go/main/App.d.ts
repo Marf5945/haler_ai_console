@@ -45,6 +45,8 @@ export function AddVLReviewCard(arg1:string,arg2:string,arg3:string,arg4:string,
 
 export function AddW3ATrustedDeveloper(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function AlbumPhotoImage(arg1:string):Promise<string>;
+
 export function AnalyzeSessionForSub():Promise<main.SessionAnalysis>;
 
 export function AppendTabOrder(arg1:string):Promise<void>;
@@ -115,6 +117,8 @@ export function ConfirmAndExecuteSkillExecution(arg1:string,arg2:string,arg3:str
 
 export function ConfirmClose(arg1:boolean,arg2:string):Promise<void>;
 
+export function ConfirmCommemorativePhoto(arg1:string,arg2:string):Promise<main.AlbumPhotoView>;
+
 export function ConfirmCredentialMigration():Promise<credential.MigrationStatus>;
 
 export function ConfirmLearningTextEvent(arg1:string,arg2:string):Promise<void>;
@@ -145,7 +149,7 @@ export function CreateSubagent(arg1:string):Promise<main.CreatedSubagent>;
 
 export function DeactivateRemoteBridgeChannel(arg1:string):Promise<void>;
 
-export function DeleteAvatarCredential(arg1:string):Promise<void>;
+export function DeleteAlbumPhoto(arg1:string):Promise<void>;
 
 export function DeleteHighlight(arg1:string,arg2:string):Promise<void>;
 
@@ -239,6 +243,8 @@ export function FinalizeNativeSubExport(arg1:string,arg2:string,arg3:string,arg4
 
 export function FinishOnboarding():Promise<void>;
 
+export function GenerateAvatarViaImageGen(arg1:string,arg2:string):Promise<void>;
+
 export function GenerateLearningRunMetadata(arg1:string,arg2:string,arg3:string,arg4:string):Promise<any>;
 
 export function GetActiveLearningRun():Promise<any>;
@@ -287,6 +293,8 @@ export function GetHookSummary(arg1:string):Promise<any>;
 
 export function GetJobExecutionHistory(arg1:string,arg2:number):Promise<Array<scheduler.JobExecution>>;
 
+export function GetKeepsakeConfig():Promise<main.KeepsakeConfig>;
+
 export function GetLastLearningReplayPlan():Promise<any>;
 
 export function GetLearningReplayPlan(arg1:string):Promise<any>;
@@ -296,8 +304,6 @@ export function GetMediaW3AInfo(arg1:string):Promise<any>;
 export function GetMemoryHealth():Promise<health.MemoryHealth>;
 
 export function GetMemoryPipelineState():Promise<memory.PipelineState>;
-
-export function GetMonitorLinks():Promise<debugtrace.LinkSnapshot>;
 
 export function GetNativeOCRStatus():Promise<visual_learning.OCRStatus>;
 
@@ -377,8 +383,6 @@ export function GoBackOnboarding():Promise<onboarding.State>;
 
 export function HandleDocumentDrop(arg1:string):Promise<main.DocumentImportResult>;
 
-export function HasAvatarCredential(arg1:string):Promise<boolean>;
-
 export function HasBlockingReviewCard():Promise<boolean>;
 
 export function HasBlockingVLReview():Promise<boolean>;
@@ -422,6 +426,8 @@ export function IsProjectBackupEncryptedHandler(arg1:string):Promise<Record<stri
 export function IsReadOnlyMode():Promise<boolean>;
 
 export function ListAdapterModelOptions(arg1:string):Promise<Array<string>>;
+
+export function ListAlbumPhotos():Promise<Array<main.AlbumPhotoView>>;
 
 export function ListArchivedSkills():Promise<any>;
 
@@ -532,8 +538,6 @@ export function PauseScheduledJob(arg1:string):Promise<void>;
 export function PollStatusRail():Promise<statusrail.View>;
 
 export function PollTelegramChatID(arg1:string):Promise<any>;
-
-export function PrepareAvatarGenerateRequest(arg1:string,arg2:string):Promise<persona_avatar.GenerateAvatarRequest>;
 
 export function PrepareCloudTTSText(arg1:string):Promise<voice.CloudTTSEgressPreview>;
 
@@ -681,6 +685,8 @@ export function SaveDocumentFromAgent(arg1:string,arg2:string,arg3:string):Promi
 
 export function SaveHighlight(arg1:string):Promise<void>;
 
+export function SaveKeepsakeConfig(arg1:main.KeepsakeConfig):Promise<void>;
+
 export function SaveMainAsSub(arg1:string):Promise<string>;
 
 export function SavePanelSettings(arg1:settings.PanelSettings):Promise<settings.State>;
@@ -743,6 +749,8 @@ export function SetAdapterModelChoice(arg1:string,arg2:string):Promise<void>;
 
 export function SetAdapterStatus(arg1:string,arg2:string):Promise<void>;
 
+export function SetAlbumPhotoCaption(arg1:string,arg2:string):Promise<main.AlbumPhotoView>;
+
 export function SetAvatarProvider(arg1:string,arg2:string):Promise<void>;
 
 export function SetBrowserPreference(arg1:string,arg2:string):Promise<browser_pref.RuntimeNoticeResult>;
@@ -788,8 +796,6 @@ export function StopLearningMode():Promise<any>;
 export function StopSidecar():Promise<void>;
 
 export function StopURLVisualLearning():Promise<any>;
-
-export function StoreAvatarCredential(arg1:string,arg2:string):Promise<void>;
 
 export function SubmitTaskLoopInput(arg1:string,arg2:string,arg3:string):Promise<dag.DAGRun>;
 

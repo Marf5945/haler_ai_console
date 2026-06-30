@@ -970,8 +970,8 @@
     "remoteReply": "{{channel}} 응답 수신: {{label}}",
     "remoteComms": "원격 통신",
     "openInteractive": "인터랙티브 열기",
-    "interactiveLabel": "CLI 인터랙티브 보기",
-    "interactiveHeader": "CLI 인터랙티브",
+    "interactiveLabel": "잡담 인터랙션 보기",
+    "interactiveHeader": "잡담 인터랙션",
     "selectAdapter": "CLI 어댑터 선택",
     "noAdapterSelected": "선택된 어댑터 없음",
     "interactivePlaceholder": "현재 CLI로 보낼 내용을 입력하세요",
@@ -1035,8 +1035,8 @@
     "sharedSource": "Shared Source"
   },
   "cli": {
-    "interactiveView": "CLI 인터랙티브 보기",
-    "interactiveTitle": "CLI 인터랙션",
+    "interactiveView": "잡담 인터랙션 보기",
+    "interactiveTitle": "잡담 인터랙션",
     "selectAdapter": "CLI 어댑터 선택",
     "noAdapter": "선택된 어댑터 없음",
     "inputPlaceholder": "현재 CLI로 보낼 내용을 입력하세요",

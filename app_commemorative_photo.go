@@ -26,6 +26,7 @@ import (
 	"ui_console/data/album"
 	"ui_console/data/memory"
 	"ui_console/data/storage"
+	"ui_console/domain/keepsake_recall"
 	"ui_console/internal/urlsafe"
 	"ui_console/orchestration/skill_step"
 	"ui_console/shared/actionchain"
@@ -168,6 +169,7 @@ func buildKeepsakeAdapter(cfg KeepsakeConfig) (imagegen.Adapter, string, error) 
 // AlbumPhotoView 是回給前端的相冊一筆（不含圖位元組，圖另以 AlbumPhotoImage 取）。
 type AlbumPhotoView struct {
 	ID          string `json:"id"`
+	Code        string `json:"code"`
 	CreatedAt   string `json:"createdAt"`
 	PersonaName string `json:"personaName"`
 	Scene       string `json:"scene"`
@@ -180,6 +182,7 @@ type AlbumPhotoView struct {
 func toAlbumView(p album.Photo) AlbumPhotoView {
 	return AlbumPhotoView{
 		ID:          p.ID,
+		Code:        p.Code,
 		CreatedAt:   p.CreatedAt,
 		PersonaName: p.PersonaName,
 		Scene:       p.Scene,
@@ -273,6 +276,41 @@ func (a *App) ConfirmCommemorativePhoto(scene, contextDigest string) (AlbumPhoto
 		return AlbumPhotoView{}, err
 	}
 	return toAlbumView(saved), nil
+}
+
+// recallKeepsakePhoto 讓上方互動彈窗回話前，看看使用者這句話有沒有講到這個
+// 人格已保留的某張紀念照；有的話回傳（可能要附的圖片, 要塞進 prompt 的描述）。
+// 只有 adapter/model 通過 brainIsMultimodal 判斷可以讀圖時才會真的附圖，
+// 否則 imgs 為空、note 仍然會給文字描述，讓非 vision 模型也能「靠描述回想」。
+// 這段回憶是永久的：只要照片沒被使用者刪掉（DeleteAlbumPhoto），關程式、
+// 切人格都不會讓它消失——跟上方互動另一套「30 句、關彈窗即清空」的短期
+// 記憶（shared/inspectormemory）是完全不同的兩種保留策略。
+func (a *App) recallKeepsakePhoto(personaID, userText, adapterID, model string) ([]composerImage, string) {
+	personaID = strings.TrimSpace(personaID)
+	userText = strings.TrimSpace(userText)
+	if personaID == "" || userText == "" {
+		return nil, ""
+	}
+	store := album.NewStoreForProject(appDataRoot(), keepsakeProjectID)
+	photos, err := store.List()
+	if err != nil || len(photos) == 0 {
+		return nil, ""
+	}
+	match := keepsake_recall.Find(photos, personaID, userText)
+	if match == nil {
+		return nil, ""
+	}
+
+	hasImage := brainIsMultimodal(adapterID, model)
+	var imgs []composerImage
+	if hasImage {
+		if raw, readErr := os.ReadFile(store.ImagePath(*match)); readErr == nil && len(raw) > 0 {
+			imgs = []composerImage{{MIME: "image/png", DataB64: base64.StdEncoding.EncodeToString(raw)}}
+		} else {
+			hasImage = false // 讀檔失敗就退回純文字描述，不假裝有附圖
+		}
+	}
+	return imgs, keepsake_recall.DescriptionNote(*match, hasImage)
 }
 
 // anchorKeepsakeMemory 把「產生了一張紀念照」寫進記憶管線，讓之後對話記得這段背景。

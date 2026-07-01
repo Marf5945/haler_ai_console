@@ -22,6 +22,7 @@ type PanelSettings struct {
 
 type Persona struct {
 	ID             string `json:"id"`
+	Code           string `json:"code"` // 亂數 6 碼；見 persona_code.go，系統產生，前端不可寫入
 	Name           string `json:"name"`
 	Icon           string `json:"icon"`
 	AvatarURL      string `json:"avatarUrl"`
@@ -43,6 +44,7 @@ type State struct {
 	AdapterModelChoices      map[string]string    `json:"adapterModelChoices,omitempty"`
 	EmbeddingConfig          EmbeddingConfig      `json:"embeddingConfig,omitempty"`
 	RemovedDefaultPersonaIDs []string             `json:"removedDefaultPersonaIds,omitempty"`
+	InstallEpoch             string               `json:"installEpoch,omitempty"` // 見 persona_code.go / shared/installepoch
 }
 
 // EmbeddingConfig — Phase B M2：使用者選的 embedding 模型。
@@ -143,6 +145,12 @@ func (s *Service) SavePersona(persona Persona) State {
 			if persona.Icon == "" {
 				persona.Icon = s.data.Personas[index].Icon
 			}
+			// 編號是系統管理的，一般編輯/存檔一律沿用既有編號，不讓前端覆蓋；
+			// 萬一舊資料真的沒有編號（理論上不會發生），補一個。
+			persona.Code = s.data.Personas[index].Code
+			if persona.Code == "" {
+				persona.Code = assignNewPersonaCode(s.data.Personas)
+			}
 			s.data.Personas[index] = persona
 			s.data.ActivePersonaID = persona.ID
 			_ = s.saveLocked()
@@ -152,6 +160,8 @@ func (s *Service) SavePersona(persona Persona) State {
 	if len(s.data.Personas) >= MaxPersonas {
 		return cloneState(s.data)
 	}
+	// 新增/複製進來的人格一律拿新編號，不沿用外部帶進來的任何舊編號。
+	persona.Code = assignNewPersonaCode(s.data.Personas)
 	s.data.Personas = append(s.data.Personas, persona)
 	s.data.ActivePersonaID = persona.ID
 	_ = s.saveLocked()
@@ -364,6 +374,7 @@ func (s *Service) load() error {
 	}
 	// 零值表示首次啟動——使用預設並寫入磁碟
 	if next.ActivePersonaID == "" && len(next.Personas) == 0 {
+		ensurePersonaCodes(&s.data)
 		_ = s.store.SaveRaw(s.data)
 		return nil
 	}
@@ -384,6 +395,9 @@ func (s *Service) load() error {
 	}
 	// Panel 欄位由 UISettingsService 管理，load 時忽略舊 JSON 中的 panel 資料。
 	next.Panel = PanelSettings{}
+	if ensurePersonaCodes(&next) {
+		_ = s.store.SaveRaw(next)
+	}
 	s.data = next
 	return nil
 }

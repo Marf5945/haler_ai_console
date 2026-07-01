@@ -1,10 +1,10 @@
 // document_provenance.go — §9A 文檔來源證明（第一刀：本地層 + Anchor 介面 no-op）。
 //
-// 與圖檔/音訊共用 W3AMediaInfo 管線，差別：
+// 與圖檔/音訊共用 WA3MediaInfo 管線，差別：
 //   - MediaScope = ScopeDocument
 //   - 文字沒有感知指紋；身分基準改「byte-hash + 正規化內容雜湊」：
-//       Fingerprint.OverallByteHash       = sha256(raw)             // 精確檔案
-//       Fingerprint.OverallPerceptualHash = "ndoc:" + sha256(norm)  // 唯一碼基準（格式微差仍同一份）
+//     Fingerprint.OverallByteHash       = sha256(raw)             // 精確檔案
+//     Fingerprint.OverallPerceptualHash = "ndoc:" + sha256(norm)  // 唯一碼基準（格式微差仍同一份）
 //     沿用本套件既有 "phash:"/"ahash:" 前綴慣例，extractHex 可剝前綴。
 //   - 創作見證：沿用 AppOperationFingerprint 記錄「人類輸入 vs AI 處理」，
 //     用 KeyManager 的金鑰（=錢包，私鑰永不離機）簽整份來源軌跡。
@@ -14,7 +14,7 @@
 // 驗證流程一律不得依賴它。
 //
 // 零外部依賴：只用 stdlib（crypto/ed25519 等）。
-package w3a_media
+package wa3_media
 
 import (
 	"crypto/ed25519"
@@ -106,7 +106,7 @@ func NewDocOp(op string, charStart, charEnd, count int) AppOperationFingerprint 
 
 // provenancePayload 取要簽的穩定位元組：scope + 兩個雜湊 + 操作軌跡。
 // 故意排除簽章與 Asset（簽章不簽自己；Asset 屬可後填的線上層）。
-func provenancePayload(info *W3AMediaInfo) ([]byte, error) {
+func provenancePayload(info *WA3MediaInfo) ([]byte, error) {
 	type sigPayload struct {
 		Scope       MediaScope                `json:"scope"`
 		ByteHash    string                    `json:"byte_hash"`
@@ -121,20 +121,20 @@ func provenancePayload(info *W3AMediaInfo) ([]byte, error) {
 	})
 }
 
-// BuildDocumentProvenance 第一刀主入口：從原始位元組 + 操作軌跡建出文檔 W3AMediaInfo。
+// BuildDocumentProvenance 第一刀主入口：從原始位元組 + 操作軌跡建出文檔 WA3MediaInfo。
 //   - 算 byte + 正規化內容碼
 //   - 用 km 的金鑰簽整份來源軌跡（DeveloperSignature）
 //   - 填 AssetIdentity 預留欄位（UID/AnchorRef 留空，OwnerPublicKey + 對內容碼的自簽先填）
-func BuildDocumentProvenance(km *KeyManager, raw []byte, ops []AppOperationFingerprint) (*W3AMediaInfo, error) {
+func BuildDocumentProvenance(km *KeyManager, raw []byte, ops []AppOperationFingerprint) (*WA3MediaInfo, error) {
 	if km == nil {
 		return nil, fmt.Errorf("document provenance: nil key manager")
 	}
 	byteHash, contentCode := DocumentContentCode(raw)
 
-	info := &W3AMediaInfo{
+	info := &WA3MediaInfo{
 		Version:    "1.0",
 		MediaScope: ScopeDocument,
-		Status:     StatusW3AAppProcessed, // 由本 app 產生 + 簽署
+		Status:     StatusWA3AppProcessed, // 由本 app 產生 + 簽署
 		Fingerprint: DualLayerFingerprint{
 			OverallByteHash:       byteHash,
 			OverallPerceptualHash: DocContentCodePrefix + contentCode,
@@ -179,7 +179,7 @@ func BuildDocumentProvenance(km *KeyManager, raw []byte, ops []AppOperationFinge
 
 // VerifyDocumentProvenance 驗證文檔來源軌跡簽章是否有效（重算 payload 後驗章）。
 // 注意：這只證明「此金鑰簽過這份軌跡」，不證明內容真為人工（見討論）。
-func VerifyDocumentProvenance(info *W3AMediaInfo) (bool, error) {
+func VerifyDocumentProvenance(info *WA3MediaInfo) (bool, error) {
 	if info == nil || info.DeveloperSignature == nil {
 		return false, nil
 	}
@@ -230,7 +230,7 @@ func (LocalNoopAnchor) Lookup(code string) (AnchorReceipt, bool, error) {
 
 // ApplyAnchorReceipt 未來連網登錄成功後，把回執填回 Asset 預留欄位。
 // no-op anchor 不會帶回 UID，故此呼叫對第一刀無副作用。
-func ApplyAnchorReceipt(info *W3AMediaInfo, r AnchorReceipt) {
+func ApplyAnchorReceipt(info *WA3MediaInfo, r AnchorReceipt) {
 	if info == nil {
 		return
 	}
@@ -252,7 +252,7 @@ func ApplyAnchorReceipt(info *W3AMediaInfo, r AnchorReceipt) {
 }
 
 // DocumentUniqueCode 取要拿去錨定/比對的唯一碼（剝掉 ndoc: 前綴）。
-func DocumentUniqueCode(info *W3AMediaInfo) string {
+func DocumentUniqueCode(info *WA3MediaInfo) string {
 	if info == nil {
 		return ""
 	}
@@ -260,12 +260,12 @@ func DocumentUniqueCode(info *W3AMediaInfo) string {
 }
 
 // ──────────────────────────────────────────────
-// Service 接線：為文檔建立 .w3a.json sidecar（平行於 CreateSidecar 的媒體版）
+// Service 接線：為文檔建立 .wa3.json sidecar（平行於 CreateSidecar 的媒體版）
 // ──────────────────────────────────────────────
 
 // CreateDocumentSidecar 讀檔 → byte+正規化內容碼 → 簽署來源軌跡（沿用 recorder 的操作）
 // → 寫 sidecar。加法接線，不影響既有媒體流程。
-func (s *Service) CreateDocumentSidecar(filePath string) (*W3AMediaInfo, error) {
+func (s *Service) CreateDocumentSidecar(filePath string) (*WA3MediaInfo, error) {
 	raw, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("read document: %w", err)

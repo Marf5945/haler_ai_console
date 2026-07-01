@@ -1,26 +1,26 @@
-// w3a_media/verification.go — §9A.10 主驗證流程（10 步判定 → 7 種狀態）。
+// wa3_media/verification.go — §9A.10 主驗證流程（10 步判定 → 7 種狀態）。
 //
 // ┌─────────────────────────────────────────────────────────────┐
 // │ 媒體驗證的核心決策引擎，整合所有子模組產生最終狀態。        │
 // │                                                             │
 // │ 判定流程（10 步）：                                         │
-// │  1. 讀取 sidecar .w3a.json                                  │
+// │  1. 讀取 sidecar .wa3.json                                  │
 // │  2. 計算 byte hash                                          │
 // │  3. byte hash 匹配 → exact_original                         │
 // │  4. 計算 perceptual hash                                    │
 // │  5. 檢查 app operation fingerprint + developer signature    │
-// │  6. 有效簽章 → w3a_app_processed                            │
+// │  6. 有效簽章 → wa3_app_processed                            │
 // │  7. 感知匹配但無簽章 → platform_processed_copy              │
 // │  8. 執行 pollution detection → model_pollution_risk         │
 // │  9. 有 sidecar 但指紋不匹配 → content_modified              │
-// │  10. 無任何 W3A 證據 → unverified                           │
+// │  10. 無任何 WA3 證據 → unverified                           │
 // │                                                             │
 // │ 硬規則強制執行：                                            │
 // │  - platform_processed_copy 不保留延伸權（§9A.8）            │
 // │  - 感知匹配不恢復延伸權（§9A.11）                           │
 // │  - model_pollution_risk 不進訓練語料（§9A.9）               │
 // └─────────────────────────────────────────────────────────────┘
-package w3a_media
+package wa3_media
 
 import (
 	"fmt"
@@ -42,15 +42,15 @@ const (
 // 主驗證函式
 // ──────────────────────────────────────────────
 
-// VerifyMedia 執行完整 W3A 媒體驗證流程。
+// VerifyMedia 執行完整 WA3 媒體驗證流程。
 // filePath: 目標媒體檔案路徑
 // sidecar: 已載入的 sidecar 資訊（可為 nil）
 // trustList: 本機信任清單（用於驗證開發者簽章）
-func VerifyMedia(filePath string, sidecar *W3AMediaInfo, trustList *TrustList) (*W3AMediaInfo, error) {
+func VerifyMedia(filePath string, sidecar *WA3MediaInfo, trustList *TrustList) (*WA3MediaInfo, error) {
 	scope := detectMediaScope(filePath)
 	now := time.Now()
 
-	info := &W3AMediaInfo{
+	info := &WA3MediaInfo{
 		Version:    "1.0",
 		MediaScope: scope,
 		FilePath:   filePath,
@@ -102,7 +102,7 @@ func VerifyMedia(filePath string, sidecar *W3AMediaInfo, trustList *TrustList) (
 		}
 
 		if sigValid {
-			info.Status = StatusW3AAppProcessed
+			info.Status = StatusWA3AppProcessed
 			info.Operations = sidecar.Operations
 			info.DeveloperSignature = sidecar.DeveloperSignature
 			// 繼續執行 pollution check
@@ -135,7 +135,7 @@ func VerifyMedia(filePath string, sidecar *W3AMediaInfo, trustList *TrustList) (
 		info.Status = StatusContentModified
 	}
 
-	// Step 10: 無任何 W3A 證據 → unverified（已是預設值）
+	// Step 10: 無任何 WA3 證據 → unverified（已是預設值）
 
 	return info, nil
 }

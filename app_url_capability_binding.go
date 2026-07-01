@@ -425,6 +425,9 @@ func (a *App) maybeHandleBareURL(text, sessionID, traceID string) (*skill_step.C
 }
 
 func (a *App) maybeHandleLocalPathResource(text, sessionID, traceID string) (*skill_step.CLIResponse, bool) {
+	if _, ok := inferGoProgramAuthoringRequest(text); ok {
+		return nil, false
+	}
 	path, ok := extractExistingLocalPath(text)
 	if !ok {
 		return nil, false

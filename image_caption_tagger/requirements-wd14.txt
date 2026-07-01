@@ -1,0 +1,8 @@
+# Pinned on 2026-06-30 after checking available PyPI versions.
+# Install with:
+#   python3 -m pip install --only-binary=:all: -r image_caption_tagger/requirements-wd14.txt
+pillow==12.2.0
+numpy==2.5.0
+onnxruntime==1.27.0
+huggingface-hub==1.21.0
+pip-audit==2.10.1

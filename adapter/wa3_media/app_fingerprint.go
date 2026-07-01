@@ -1,11 +1,11 @@
-// w3a_media/app_fingerprint.go — §9A.4–§9A.5 App 操作指紋 + 開發者簽章。
+// wa3_media/app_fingerprint.go — §9A.4–§9A.5 App 操作指紋 + 開發者簽章。
 //
 // ┌─────────────────────────────────────────────────────────────┐
-// │ Console 作為完整 W3A-aware app，需要：                      │
+// │ Console 作為完整 WA3-aware app，需要：                      │
 // │  1. 產生 Ed25519 金鑰對（本機儲存，不進 export）            │
 // │  2. 對每次媒體操作產生 AppOperationFingerprint              │
 // │  3. 用開發者金鑰簽署操作指紋                                │
-// │  4. 驗證其他 W3A-aware app 的簽章                           │
+// │  4. 驗證其他 WA3-aware app 的簽章                           │
 // │                                                             │
 // │ 硬規則：                                                    │
 // │  - 未簽名的操作指紋 → 僅作為 low-trust hint（§9A.5）       │
@@ -14,7 +14,7 @@
 // │                                                             │
 // │ 使用 Go 標準庫 crypto/ed25519，零外部依賴                   │
 // └─────────────────────────────────────────────────────────────┘
-package w3a_media
+package wa3_media
 
 import (
 	"crypto/ed25519"
@@ -50,7 +50,7 @@ type KeyManager struct {
 // NewKeyManager 建立金鑰管理器。
 func NewKeyManager(hookRoot string) *KeyManager {
 	return &KeyManager{
-		filePath: filepath.Join(hookRoot, "w3a_app_keypair.json"),
+		filePath: filepath.Join(hookRoot, "wa3_app_keypair.json"),
 	}
 }
 

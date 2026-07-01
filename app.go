@@ -27,7 +27,7 @@ import (
 	"ui_console/adapter/persona_avatar"
 	"ui_console/adapter/remote_bridge"
 	"ui_console/adapter/visual_learning"
-	"ui_console/adapter/w3a_media"
+	"ui_console/adapter/wa3_media"
 	"ui_console/builtin"
 	"ui_console/data/conversation"
 	"ui_console/data/memory"
@@ -55,6 +55,7 @@ import (
 	"ui_console/shared/executil"
 	"ui_console/shared/health"
 	"ui_console/shared/hookgene"
+	"ui_console/shared/inspectormemory"
 	"ui_console/shared/localsearch"
 	"ui_console/shared/onboarding"
 	"ui_console/shared/package_import"
@@ -190,9 +191,9 @@ type App struct {
 	pendingLearningTextMu sync.Mutex
 	pendingLearningText   map[string]pendingLearningTextEvent
 
-	// v3.6.2 W3A Media Provenance（§9A）— 媒體原件來源追蹤
+	// v3.6.2 WA3 Media Provenance（§9A）— 媒體原件來源追蹤
 	// 7 種驗證狀態、雙層指紋、操作指紋簽章、模型污染偵測、sidecar 管理。
-	w3aMedia *w3a_media.Service
+	wa3Media *wa3_media.Service
 
 	// v3.6.3 Remote Bridge Communication（§12A）— 遠端橋接通訊
 	// 管理 Telegram / Discord / LINE 三內建通道的註冊、啟用、模式切換、憑證與稽核。
@@ -225,9 +226,9 @@ type App struct {
 	bgPromptResolved bool // Phase G：關閉時是否已決定背景喚醒模式（避免重複詢問）
 	activeAgentID    string
 
-	// 上方互動歷史只存記憶體，不進下方主聊天 SentenceStore。
-	inspectorMu      sync.Mutex
-	inspectorHistory []string // 格式："user: xxx" / "assistant: xxx"
+	// 上方互動歷史只存記憶體，不進下方主聊天 SentenceStore。詳見
+	// shared/inspectormemory 套件（30 句上限、關彈窗/切人格即清空、不落盤）。
+	inspectorMemory *inspectormemory.Service
 
 	referencePromptMu      sync.Mutex
 	referencePromptTargets map[string][]string
@@ -245,8 +246,6 @@ type App struct {
 	hookGeneRecorder *hookgene.Recorder
 	hookGeneStarted  bool
 }
-
-const inspectorHistoryLimit = 30
 
 func NewApp() *App {
 	greetings := []string{
@@ -323,6 +322,7 @@ func NewApp() *App {
 		resolveCache:           make(map[string]*skill_step.ResolveResult),
 		globalSessionID:        fmt.Sprintf("session-%d", time.Now().UnixNano()),
 		referencePromptTargets: make(map[string][]string),
+		inspectorMemory:        inspectormemory.New(),
 		pendingToolQuestions:   make(map[string]pendingToolQuestion),
 		toolBackgroundContexts: make(map[string][]toolBackgroundAnswer),
 		clarRoots:              make(map[string]*clarificationRoot),
@@ -366,8 +366,8 @@ func NewApp() *App {
 		vlSafeExporter:      visual_learning.NewSafeExporter(filepath.Join(hookRoot, "data", "visual_learning")),
 		pendingLearningText: make(map[string]pendingLearningTextEvent),
 
-		// v3.6.2 W3A Media Provenance（§9A）
-		w3aMedia: w3a_media.NewService(hookRoot),
+		// v3.6.2 WA3 Media Provenance（§9A）
+		wa3Media: wa3_media.NewService(hookRoot),
 
 		// v3.6.3 Remote Bridge Communication（§12A）— 注入共用 SecretStore
 		remoteBridge: remote_bridge.NewService(hookRoot, sharedSecretStore),
@@ -525,6 +525,7 @@ func appDataRoot() string {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.startHookGeneRecorder()
+	debugtrace.Record("go.startup", "", nil)
 	// SEC-06: 清掉上次未正常停止的 ephemeral browser profile（冪等）。
 	_ = a.CleanupEphemeralProfiles()
 	// #7: Inject Wails context into event bus so it can emit to frontend.
@@ -1147,7 +1148,13 @@ func (a *App) RemoveTTSPack() (voice.TTSPackStatus, error) {
 }
 
 func (a *App) SavePersona(persona settings.Persona) settings.State {
+	prevActiveID := a.settingsService.State().ActivePersonaID
 	_ = a.settingsService.SavePersona(persona)
+	// 換人格要把上方互動的短期記憶清掉，不能延續到別的人格身上；
+	// 紀念照那種永久記憶掛在 persona_id 上，不受這裡影響。
+	if persona.ID != "" && persona.ID != prevActiveID && a.inspectorMemory != nil {
+		a.inspectorMemory.Clear()
+	}
 	return a.GetSettingsState()
 }
 
@@ -3302,14 +3309,15 @@ func (a *App) SendInspectorAPIMessage(adapterID, sessionID, userText, traceID st
 	}
 	// SEC-05 2a: Safe Client，policy 由 PolicyForLLMEndpoint 集中決定。
 	client := urlsafe.NewSafeClient(urlsafe.PolicyForLLMEndpoint(cfg.ProviderID, cfg.BaseURL), "llm_inspector", 45*time.Second)
-	prompt := a.buildInspectorPrompt(a.getActivePersona(), userText)
-	reqBody := openAIChatRequest{
-		Model: model,
-		Messages: []openAIChatMessage{
-			{Role: "user", Content: prompt},
-		},
+	persona := a.getActivePersona()
+	prompt := a.buildInspectorPrompt(persona, userText)
+	// 人格紀念照回憶：有講到已保留的照片就把描述（能讀圖的模型再加上圖片本身）
+	// 一併帶進這句 prompt，讓人格能「認得」那張照片。
+	keepsakeImgs, keepsakeNote := a.recallKeepsakePhoto(persona.ID, userText, adapterID, model)
+	if keepsakeNote != "" {
+		prompt = prompt + "\n" + keepsakeNote + "\n"
 	}
-	body, err := json.Marshal(reqBody)
+	body, err := buildOpenAIRequestBody(model, prompt, keepsakeImgs)
 	if err != nil {
 		return nil, err
 	}
@@ -3433,9 +3441,7 @@ func stripInspectorInternalSuffix(text string) string {
 
 // ClearInspectorHistory 清除閒聊歷史。前端關閉互動視窗時呼叫。
 func (a *App) ClearInspectorHistory() {
-	a.inspectorMu.Lock()
-	defer a.inspectorMu.Unlock()
-	a.inspectorHistory = nil
+	a.inspectorMemory.Clear()
 	log.Printf("ClearInspectorHistory: cleared")
 }
 
@@ -3582,11 +3588,8 @@ func (a *App) buildInspectorPrompt(persona settings.Persona, userText string) st
 	}
 	sb.WriteString("這是短互動回覆；只使用本區短歷史；直接回答，不輸出系統欄位、通道名稱或標記；三句內。\n")
 
-	// 上方歷史只取 inspectorHistory，不讀下方主聊天。
-	a.inspectorMu.Lock()
-	history := make([]string, len(a.inspectorHistory))
-	copy(history, a.inspectorHistory)
-	a.inspectorMu.Unlock()
+	// 上方歷史只取 inspectorMemory，不讀下方主聊天。
+	history := a.inspectorMemory.Snapshot()
 
 	if len(history) > 0 {
 		sb.WriteString("H:\n")
@@ -3648,14 +3651,9 @@ func compactHistoryLine(line string) string {
 	}
 }
 
-// appendInspectorHistory 保留上方互動最近 30 句，且不落盤。
+// appendInspectorHistory 保留上方互動最近 N 句，且不落盤（詳見 shared/inspectormemory）。
 func (a *App) appendInspectorHistory(role, text string) {
-	a.inspectorMu.Lock()
-	defer a.inspectorMu.Unlock()
-	a.inspectorHistory = append(a.inspectorHistory, role+": "+text)
-	if len(a.inspectorHistory) > inspectorHistoryLimit {
-		a.inspectorHistory = a.inspectorHistory[len(a.inspectorHistory)-inspectorHistoryLimit:]
-	}
+	a.inspectorMemory.Append(role, text)
 }
 
 // PreviewExternalLink validates and classifies a URL without registering it.
@@ -5252,70 +5250,70 @@ func (a *App) RetryRemoteBridgeSegment(dispatchID string, partIndex int, content
 }
 
 // ──────────────────────────────────────────────────────────────
-// §9A W3A Media Provenance Wails Bindings（8 個）
+// §9A WA3 Media Provenance Wails Bindings（8 個）
 // ──────────────────────────────────────────────────────────────
-// 所有方法委派給 a.w3aMedia（w3a_media.Service）執行。
+// 所有方法委派給 a.wa3Media（wa3_media.Service）執行。
 // 成功操作透過 eventBus 通知前端更新 UI。
 // ──────────────────────────────────────────────────────────────
 
-// VerifyMediaFile 對媒體檔案執行完整 W3A 驗證。
+// VerifyMediaFile 對媒體檔案執行完整 WA3 驗證。
 func (a *App) VerifyMediaFile(path string) (interface{}, error) {
-	info, err := a.w3aMedia.VerifyMediaFile(path)
+	info, err := a.wa3Media.VerifyMediaFile(path)
 	if err == nil {
-		a.eventBus.Emit("w3a:verified", map[string]interface{}{"path": path, "status": string(info.Status)})
+		a.eventBus.Emit("wa3:verified", map[string]interface{}{"path": path, "status": string(info.Status)})
 	}
 	return frontendDTO(info), err
 }
 
-// GetMediaW3AInfo 取得媒體的 W3A 資訊。
-func (a *App) GetMediaW3AInfo(path string) (interface{}, error) {
-	info, err := a.w3aMedia.GetMediaW3AInfo(path)
+// GetMediaWA3Info 取得媒體的 WA3 資訊。
+func (a *App) GetMediaWA3Info(path string) (interface{}, error) {
+	info, err := a.wa3Media.GetMediaWA3Info(path)
 	return frontendDTO(info), err
 }
 
 // ExportMediaWithSidecar 匯出媒體檔案，同時複製 sidecar。
 func (a *App) ExportMediaWithSidecar(srcPath, destPath string) error {
-	err := a.w3aMedia.ExportMedia(srcPath, destPath)
+	err := a.wa3Media.ExportMedia(srcPath, destPath)
 	if err == nil {
-		a.eventBus.Emit("w3a:exported", map[string]interface{}{"src": srcPath, "dest": destPath})
+		a.eventBus.Emit("wa3:exported", map[string]interface{}{"src": srcPath, "dest": destPath})
 	}
 	return err
 }
 
 // ImportMediaVerify 匯入媒體並驗證，回傳含 UX 提示的結果。
 func (a *App) ImportMediaVerify(path string) (interface{}, error) {
-	result, err := a.w3aMedia.ImportAndVerify(path)
+	result, err := a.wa3Media.ImportAndVerify(path)
 	if err == nil {
-		a.eventBus.Emit("w3a:imported", map[string]interface{}{"path": path, "has_sidecar": result.HasSidecar, "status": string(result.Info.Status)})
+		a.eventBus.Emit("wa3:imported", map[string]interface{}{"path": path, "has_sidecar": result.HasSidecar, "status": string(result.Info.Status)})
 	}
 	return frontendDTO(result), err
 }
 
-// GetW3ATransferGuidance 取得原檔傳輸引導建議。
-func (a *App) GetW3ATransferGuidance() w3a_media.TransferGuidance {
-	return a.w3aMedia.GetGuidance()
+// GetWA3TransferGuidance 取得原檔傳輸引導建議。
+func (a *App) GetWA3TransferGuidance() wa3_media.TransferGuidance {
+	return a.wa3Media.GetGuidance()
 }
 
-// CreateDocumentW3A 為文檔建立 W3A sidecar（本地 provenance：byte + 正規化內容碼 +
-// 簽署來源軌跡）。加法接線，與既有媒體 W3A 流程互不影響。
-func (a *App) CreateDocumentW3A(path string) (interface{}, error) {
-	info, err := a.w3aMedia.CreateDocumentSidecar(path)
+// CreateDocumentWA3 為文檔建立 WA3 sidecar（本地 provenance：byte + 正規化內容碼 +
+// 簽署來源軌跡）。加法接線，與既有媒體 WA3 流程互不影響。
+func (a *App) CreateDocumentWA3(path string) (interface{}, error) {
+	info, err := a.wa3Media.CreateDocumentSidecar(path)
 	if err == nil {
-		a.eventBus.Emit("w3a:doc_created", map[string]interface{}{"path": path, "status": string(info.Status)})
+		a.eventBus.Emit("wa3:doc_created", map[string]interface{}{"path": path, "status": string(info.Status)})
 	}
 	return frontendDTO(info), err
 }
 
-// ListW3ATrustedDevelopers 列出所有信任的開發者。
-func (a *App) ListW3ATrustedDevelopers() interface{} {
-	return frontendDTO(a.w3aMedia.ListTrustedDevelopers())
+// ListWA3TrustedDevelopers 列出所有信任的開發者。
+func (a *App) ListWA3TrustedDevelopers() interface{} {
+	return frontendDTO(a.wa3Media.ListTrustedDevelopers())
 }
 
-// AddW3ATrustedDeveloper 新增信任的開發者。
-func (a *App) AddW3ATrustedDeveloper(appID, pubKey, displayName string) error {
-	err := a.w3aMedia.AddTrustedDeveloper(appID, pubKey, displayName)
+// AddWA3TrustedDeveloper 新增信任的開發者。
+func (a *App) AddWA3TrustedDeveloper(appID, pubKey, displayName string) error {
+	err := a.wa3Media.AddTrustedDeveloper(appID, pubKey, displayName)
 	if err == nil {
-		a.eventBus.Emit("w3a:trust_updated", map[string]interface{}{"action": "add", "app_id": appID})
+		a.eventBus.Emit("wa3:trust_updated", map[string]interface{}{"action": "add", "app_id": appID})
 	}
 	return err
 }

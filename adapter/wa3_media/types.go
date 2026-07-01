@@ -1,17 +1,17 @@
-// w3a_media/types.go — §9A W3A Media Provenance 核心型別。
+// wa3_media/types.go — §9A WA3 Media Provenance 核心型別。
 //
 // ┌─────────────────────────────────────────────────────────────┐
-// │ 本檔案是 W3A Media 模組的「資料字典」，定義所有跨檔案       │
+// │ 本檔案是 WA3 Media 模組的「資料字典」，定義所有跨檔案       │
 // │ 共用的型別與常數。                                          │
 // │                                                             │
 // │ 架構層次：                                                  │
 // │  1. VerificationStatus  — 7 種驗證狀態（§9A.10）            │
 // │  2. MediaScope          — 適用媒體類型                      │
 // │  3. DualLayerFingerprint — 整體 + 段落雙層指紋（§9A.3）     │
-// │  4. AppOperationFingerprint — W3A-aware app 操作記錄（§9A.4）│
+// │  4. AppOperationFingerprint — WA3-aware app 操作記錄（§9A.4）│
 // │  5. DeveloperSignature  — 開發者簽章（§9A.5）               │
 // │  6. PollutionReport     — 模型污染偵測報告（§9A.9）         │
-// │  7. W3AMediaInfo        — 頂層資訊結構（含驗證 + 指紋 + 政策）│
+// │  7. WA3MediaInfo        — 頂層資訊結構（含驗證 + 指紋 + 政策）│
 // │  8. TrainingEligibility — 訓練資料政策判定（§9A.14）        │
 // │                                                             │
 // │ 設計約束：                                                  │
@@ -19,7 +19,7 @@
 // │  - 感知指紋匹配不得恢復延伸權（§9A.11）                     │
 // │  - platform_processed_copy 不得視為 training-safe（§9A.8）  │
 // └─────────────────────────────────────────────────────────────┘
-package w3a_media
+package wa3_media
 
 import "time"
 
@@ -27,12 +27,12 @@ import "time"
 // 驗證狀態（§9A.10）
 // ──────────────────────────────────────────────
 
-// VerificationStatus 媒體的 W3A 驗證結果，共 7 種。
+// VerificationStatus 媒體的 WA3 驗證結果，共 7 種。
 type VerificationStatus string
 
 const (
 	StatusExactOriginal      VerificationStatus = "exact_original"
-	StatusW3AAppProcessed    VerificationStatus = "w3a_app_processed"
+	StatusWA3AppProcessed    VerificationStatus = "wa3_app_processed"
 	StatusPlatformProcessed  VerificationStatus = "platform_processed_copy"
 	StatusUnauthorizedCopy   VerificationStatus = "unauthorized_copy"
 	StatusContentModified    VerificationStatus = "content_modified"
@@ -45,8 +45,8 @@ func (v VerificationStatus) Label() string {
 	switch v {
 	case StatusExactOriginal:
 		return "原始檔案"
-	case StatusW3AAppProcessed:
-		return "W3A 應用處理"
+	case StatusWA3AppProcessed:
+		return "WA3 應用處理"
 	case StatusPlatformProcessed:
 		return "平台處理版本"
 	case StatusUnauthorizedCopy:
@@ -65,7 +65,7 @@ func (v VerificationStatus) Label() string {
 // IsExtensionValid 判斷該狀態是否保有延伸權（§9A.10 表格）。
 func (v VerificationStatus) IsExtensionValid() bool {
 	switch v {
-	case StatusExactOriginal, StatusW3AAppProcessed:
+	case StatusExactOriginal, StatusWA3AppProcessed:
 		return true
 	default:
 		return false
@@ -73,13 +73,13 @@ func (v VerificationStatus) IsExtensionValid() bool {
 }
 
 // IsTrainingSafe 判斷該狀態是否可能為訓練安全原檔（§9A.14）。
-// 注意：exact_original 與 w3a_app_processed 僅為「可能」安全，
+// 注意：exact_original 與 wa3_app_processed 僅為「可能」安全，
 // 仍需搭配其他政策判定。
 func (v VerificationStatus) IsTrainingSafe() bool {
 	switch v {
 	case StatusExactOriginal:
 		return true
-	case StatusW3AAppProcessed:
+	case StatusWA3AppProcessed:
 		return true // 須搭配 app trust 判定
 	default:
 		return false
@@ -128,7 +128,7 @@ type DualLayerFingerprint struct {
 // App 操作指紋（§9A.4）
 // ──────────────────────────────────────────────
 
-// AppOperationFingerprint W3A-aware app 的操作記錄。
+// AppOperationFingerprint WA3-aware app 的操作記錄。
 // 最低粒度：操作類型 / 時間範圍 / 影響區域 / 操作摘要數量。
 type AppOperationFingerprint struct {
 	Operation     string `json:"op"`                        // 例如 "brush_draw", "manual_audio_cut"
@@ -141,7 +141,7 @@ type AppOperationFingerprint struct {
 // 開發者簽章（§9A.5）
 // ──────────────────────────────────────────────
 
-// DeveloperSignature 由 W3A-aware app 開發者金鑰簽署操作指紋。
+// DeveloperSignature 由 WA3-aware app 開發者金鑰簽署操作指紋。
 type DeveloperSignature struct {
 	AppID     string `json:"app_id"`
 	PublicKey string `json:"public_key"` // Ed25519 公鑰（hex 編碼）
@@ -198,9 +198,9 @@ type TrainingEligibility struct {
 // 頂層資訊結構
 // ──────────────────────────────────────────────
 
-// W3AMediaInfo 整合所有 W3A 驗證資訊的頂層結構。
-// 對應 sidecar .w3a.json 的完整內容。
-type W3AMediaInfo struct {
+// WA3MediaInfo 整合所有 WA3 驗證資訊的頂層結構。
+// 對應 sidecar .wa3.json 的完整內容。
+type WA3MediaInfo struct {
 	Version            string                    `json:"version"`
 	MediaScope         MediaScope                `json:"media_scope"`
 	FilePath           string                    `json:"file_path,omitempty"`
@@ -221,10 +221,10 @@ type W3AMediaInfo struct {
 
 // ImportResult 媒體匯入驗證結果（含 UX 提示）。
 type ImportResult struct {
-	Info           W3AMediaInfo `json:"info"`
+	Info           WA3MediaInfo `json:"info"`
 	HasSidecar     bool         `json:"has_sidecar"`
 	SidecarPath    string       `json:"sidecar_path,omitempty"`
-	Capabilities   []string     `json:"capabilities"`   // W3A 功能清單（給前端選單用）
+	Capabilities   []string     `json:"capabilities"`   // WA3 功能清單（給前端選單用）
 	Recommendation string       `json:"recommendation"` // 建議操作
 }
 

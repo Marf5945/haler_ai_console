@@ -1130,6 +1130,7 @@
     "recording": "Demoing",
     "schedule": "Schedule",
     "citeFile": "Cite File",
+    "citeFileHint": "Includes standalone files",
     "useTools": "Use Tools",
     "unnamedFile": "Unnamed File",
     "refStatusImporting": "Processing",

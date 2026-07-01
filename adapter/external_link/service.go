@@ -236,6 +236,32 @@ func (s *Service) ListByType(lt LinkType) []ExternalLink {
 	return result
 }
 
+// Remove deletes a registered link by ID or URL within a specific link type.
+func (s *Service) Remove(lt LinkType, idOrURL string) error {
+	idOrURL = strings.TrimSpace(idOrURL)
+	if idOrURL == "" {
+		return fmt.Errorf("external_link: link id or URL must not be empty")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	next := s.links[:0]
+	removed := false
+	for _, l := range s.links {
+		if l.LinkType == lt && (l.ID == idOrURL || l.URL == idOrURL) {
+			removed = true
+			continue
+		}
+		next = append(next, l)
+	}
+	if !removed {
+		return fmt.Errorf("external_link: %s link %q was not found", lt, idOrURL)
+	}
+	s.links = next
+	return s.store.SaveRaw(s.links)
+}
+
 // ──────────────────────────────────────────────
 // #47 MCP Server localhost 偵測
 // ──────────────────────────────────────────────

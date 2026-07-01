@@ -1134,6 +1134,7 @@
     "recording": "示範中",
     "schedule": "排程",
     "citeFile": "引用文件",
+    "citeFileHint": "以下為獨立檔案",
     "useTools": "使用工具",
     "unnamedFile": "未命名文件",
     "refStatusImporting": "處理中",

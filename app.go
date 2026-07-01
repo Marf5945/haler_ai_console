@@ -3776,6 +3776,18 @@ func (a *App) ListExternalLinksByType(linkType string) interface{} {
 	return frontendDTO(a.linkService.ListByType(external_link.LinkType(linkType)))
 }
 
+// RemoveExternalLink removes a registered external link by ID or URL.
+func (a *App) RemoveExternalLink(linkType, idOrURL string) error {
+	lt := external_link.LinkType(linkType)
+	if err := a.linkService.Remove(lt, idOrURL); err != nil {
+		return err
+	}
+	if lt == external_link.LinkSharedSource {
+		localsearch.InvalidateAll()
+	}
+	return nil
+}
+
 func (a *App) ListReferenceFiles() ([]ReferenceFile, error) {
 	referenceDir := filepath.Join(appDataRoot(), "data", "references", "files")
 	if err := os.MkdirAll(referenceDir, 0o700); err != nil {

@@ -29,6 +29,12 @@
     background: transparent;
   }
 
+  html.floating-avatar-window-active.floating-avatar-window-keyed,
+  html.floating-avatar-window-active.floating-avatar-window-keyed body,
+  html.floating-avatar-window-active.floating-avatar-window-keyed #root {
+    background: #050505;
+  }
+
   button, textarea {
     font: inherit;
   }
@@ -3294,18 +3300,58 @@
     @apply shrink-0;
   }
 
+  .shared-link-card,
   .reference-file-card {
     @apply border-[#45c8bb]/58;
     background: linear-gradient(180deg, rgba(28,91,102,.92), rgba(9,26,43,.98));
   }
 
+  .shared-link-card:hover,
   .reference-file-card:hover {
     box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 0 0 1px rgba(69,200,187,.24), 0 12px 28px rgba(0,0,0,.34);
   }
 
-  .shared-link-card {
-    @apply border-[#ffba55]/50;
-    background: linear-gradient(180deg, rgba(78,50,10,.92), rgba(20,24,34,.98));
+  .shared-link-card,
+  .reference-file-card {
+    @apply relative overflow-visible;
+    cursor: default;
+  }
+
+  .shared-link-card > span:nth-child(2),
+  .reference-file-card > span:nth-child(2) {
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap;
+    font-size: clamp(12px, 1vw, 16px);
+    line-height: 1;
+  }
+
+  .rail-hint-popover {
+    @apply pointer-events-none absolute right-0 top-[calc(100%+8px)] z-40 grid min-w-[190px] gap-1 rounded-[8px] border px-3 py-2 text-left opacity-0 shadow-2xl transition;
+    border-color: rgba(15,23,42,.12);
+    background: rgba(248,250,252,.98);
+    color: #111827;
+    transform: translateY(-4px);
+  }
+
+  .rail-hint-popover::before {
+    @apply absolute right-4 top-[-5px] h-2.5 w-2.5 rotate-45 border-l border-t;
+    content: "";
+    border-color: rgba(15,23,42,.12);
+    background: rgba(248,250,252,.98);
+  }
+
+  .rail-hint-popover strong {
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] font-black leading-tight;
+  }
+
+  .rail-hint-popover small {
+    @apply text-[11px] font-bold leading-snug;
+    color: #475569;
+  }
+
+  .shared-link-card:hover .rail-hint-popover,
+  .reference-file-card:hover .rail-hint-popover {
+    opacity: 1;
+    transform: translateY(0);
   }
 
   .shared-source-list {
@@ -3332,6 +3378,23 @@
 
   .shared-source-name .reference-file-detail {
     @apply truncate text-[8px] text-white/36;
+  }
+
+  .shared-source-name[data-draggable="true"] {
+    cursor: grab;
+    user-select: none;
+  }
+
+  .shared-source-name[data-draggable="true"]:active {
+    cursor: grabbing;
+  }
+
+  .shared-source-dragging {
+    opacity: .54;
+    border-color: rgba(255,186,85,.68);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.10),
+      0 0 0 1px rgba(255,186,85,.16);
   }
 
   /* Right rail learning/recording mode controls sit between reference link and file drop. */

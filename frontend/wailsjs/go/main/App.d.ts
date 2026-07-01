@@ -199,6 +199,10 @@ export function EnterDegradedMode(arg1:string):Promise<any>;
 
 export function EnterFloatingAvatarNative():Promise<void>;
 
+export function EnterFloatingAvatarOverlay(arg1:string,arg2:string,arg3:string,arg4:number,arg5:number):Promise<void>;
+
+export function EnterFloatingAvatarOverlayImage(arg1:Array<number>,arg2:string,arg3:number,arg4:number):Promise<void>;
+
 export function EscapeExternalTokens(arg1:string):Promise<string>;
 
 export function ExecuteNativeLearningReplayStep(arg1:string):Promise<any>;
@@ -210,6 +214,8 @@ export function ExecuteSkillMessage(arg1:string,arg2:string,arg3:string,arg4:str
 export function ExitDegradedMode():Promise<any>;
 
 export function ExitFloatingAvatarNative():Promise<void>;
+
+export function ExitFloatingAvatarOverlay():Promise<void>;
 
 export function ExportDocumentToPath(arg1:string):Promise<string>;
 
@@ -278,6 +284,8 @@ export function GetDegradedState():Promise<any>;
 export function GetDeviceTrustProfile(arg1:string):Promise<any>;
 
 export function GetEmbeddingConfig():Promise<settings.EmbeddingConfig>;
+
+export function GetFloatingAvatarOverlayPosition():Promise<Record<string, number>>;
 
 export function GetGoProgramAuthoringDetail(arg1:string):Promise<main.GoProgramAuthoringDetail>;
 
@@ -608,6 +616,8 @@ export function RegisterURLOccurrence(arg1:string,arg2:string,arg3:string,arg4:s
 export function RejectPackageInstall(arg1:string,arg2:string):Promise<void>;
 
 export function RemoveAllowlistEntry(arg1:string):Promise<void>;
+
+export function RemoveExternalLink(arg1:string,arg2:string):Promise<void>;
 
 export function RemoveReferenceFile(arg1:string):Promise<void>;
 

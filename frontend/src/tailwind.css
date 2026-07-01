@@ -286,6 +286,9 @@
   html.floating-avatar-window-active, html.floating-avatar-window-active body, html.floating-avatar-window-active #root {
     background: transparent;
   }
+  html.floating-avatar-window-active.floating-avatar-window-keyed, html.floating-avatar-window-active.floating-avatar-window-keyed body, html.floating-avatar-window-active.floating-avatar-window-keyed #root {
+    background: #050505;
+  }
   button, textarea {
     font: inherit;
   }
@@ -4618,16 +4621,89 @@
   .reference-link-card, .shared-link-card, .reference-file-card {
     flex-shrink: 0;
   }
-  .reference-file-card {
+  .shared-link-card, .reference-file-card {
     border-color: color-mix(in oklab, #45c8bb 58%, transparent);
     background: linear-gradient(180deg, rgba(28,91,102,.92), rgba(9,26,43,.98));
   }
-  .reference-file-card:hover {
+  .shared-link-card:hover, .reference-file-card:hover {
     box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 0 0 1px rgba(69,200,187,.24), 0 12px 28px rgba(0,0,0,.34);
   }
-  .shared-link-card {
-    border-color: color-mix(in oklab, #ffba55 50%, transparent);
-    background: linear-gradient(180deg, rgba(78,50,10,.92), rgba(20,24,34,.98));
+  .shared-link-card, .reference-file-card {
+    position: relative;
+    overflow: visible;
+    cursor: default;
+  }
+  .shared-link-card > span:nth-child(2), .reference-file-card > span:nth-child(2) {
+    min-width: calc(var(--spacing) * 0);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: clamp(12px, 1vw, 16px);
+    line-height: 1;
+  }
+  .rail-hint-popover {
+    pointer-events: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    right: calc(var(--spacing) * 0);
+    z-index: 40;
+    display: grid;
+    min-width: 190px;
+    gap: calc(var(--spacing) * 1);
+    border-radius: 8px;
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    padding-inline: calc(var(--spacing) * 3);
+    padding-block: calc(var(--spacing) * 2);
+    text-align: left;
+    opacity: 0%;
+    --tw-shadow: 0 25px 50px -12px var(--tw-shadow-color, rgb(0 0 0 / 0.25));
+    box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+    transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, content-visibility, overlay, pointer-events;
+    transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
+    transition-duration: var(--tw-duration, var(--default-transition-duration));
+    border-color: rgba(15,23,42,.12);
+    background: rgba(248,250,252,.98);
+    color: #111827;
+    transform: translateY(-4px);
+  }
+  .rail-hint-popover::before {
+    position: absolute;
+    top: -5px;
+    right: calc(var(--spacing) * 4);
+    height: calc(var(--spacing) * 2.5);
+    width: calc(var(--spacing) * 2.5);
+    rotate: 45deg;
+    border-top-style: var(--tw-border-style);
+    border-top-width: 1px;
+    border-left-style: var(--tw-border-style);
+    border-left-width: 1px;
+    content: "";
+    border-color: rgba(15,23,42,.12);
+    background: rgba(248,250,252,.98);
+  }
+  .rail-hint-popover strong {
+    min-width: calc(var(--spacing) * 0);
+    overflow: hidden;
+    font-size: 12px;
+    --tw-leading: var(--leading-tight);
+    line-height: var(--leading-tight);
+    --tw-font-weight: var(--font-weight-black);
+    font-weight: var(--font-weight-black);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rail-hint-popover small {
+    font-size: 11px;
+    --tw-leading: var(--leading-snug);
+    line-height: var(--leading-snug);
+    --tw-font-weight: var(--font-weight-bold);
+    font-weight: var(--font-weight-bold);
+    color: #475569;
+  }
+  .shared-link-card:hover .rail-hint-popover, .reference-file-card:hover .rail-hint-popover {
+    opacity: 1;
+    transform: translateY(0);
   }
   .shared-source-list {
     --shared-source-row-height: 36px;
@@ -4676,6 +4752,18 @@
     @supports (color: color-mix(in lab, red, red)) {
       color: color-mix(in oklab, var(--color-white) 36%, transparent);
     }
+  }
+  .shared-source-name[data-draggable="true"] {
+    cursor: grab;
+    user-select: none;
+  }
+  .shared-source-name[data-draggable="true"]:active {
+    cursor: grabbing;
+  }
+  .shared-source-dragging {
+    opacity: .54;
+    border-color: rgba(255,186,85,.68);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.10), 0 0 0 1px rgba(255,186,85,.16);
   }
   .rail-mode-row {
     display: grid;

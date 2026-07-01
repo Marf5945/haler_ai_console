@@ -57,6 +57,7 @@ import {
   ListExternalLinksByType,
   PreviewExternalLink,
   RegisterExternalLink,
+  RemoveExternalLink,
   RejectPackageInstall,
   ReorderPersonas,
   ResumeScheduledJob,
@@ -289,6 +290,8 @@ import {
   RouteVoiceCommand,
   EnterFloatingAvatarNative,
   ExitFloatingAvatarNative,
+  EnterFloatingAvatarOverlayImage,
+  ExitFloatingAvatarOverlay,
 } from '../../wailsjs/go/main/App';
 import {
   OnFileDrop,
@@ -306,6 +309,7 @@ import {
   WindowSetMinSize,
   WindowSetPosition,
   WindowSetSize,
+  WindowHide,
   WindowShow,
   WindowUnminimise,
 } from '../../wailsjs/runtime/runtime';
@@ -379,13 +383,15 @@ const taskProgressDebugEnabled = typeof window !== 'undefined'
     || window.localStorage?.getItem('task_progress_debug') === '1');
 
 const MAIN_WINDOW_MIN_SIZE = {width: 1180, height: 560};
-const FLOATING_AVATAR_SIZE = 80;
+const FLOATING_AVATAR_SIZE = 96;
 const FLOATING_AVATAR_INSET = 16;
 const FLOATING_AVATAR_WINDOW_SIZE = FLOATING_AVATAR_SIZE + FLOATING_AVATAR_INSET * 2;
 // 後台頭像單擊展開迷你框時，需要把頭像浮窗放大到能容納面板的尺寸。
 const FLOATING_AVATAR_PANEL_W = 720;
 const FLOATING_AVATAR_PANEL_H = 540;
 const FLOATING_AVATAR_LEFT_TIP_ROOM = 260;
+const IS_WINDOWS_RUNTIME = typeof window !== 'undefined' && /\bWindows\b/i.test(window.navigator?.userAgent || '');
+const ENABLE_NATIVE_FLOATING_AVATAR_WINDOW = !IS_WINDOWS_RUNTIME;
 
 function firstFiniteNumber(...values) {
   for (const value of values) {
@@ -1579,6 +1585,7 @@ function App() {
   const [referenceFiles, setReferenceFiles] = useState([]);
   const [referenceExportDialog, setReferenceExportDialog] = useState(null);
   const [searchSummaryExportDialog, setSearchSummaryExportDialog] = useState(null);
+  const [sharedSourceActionDialog, setSharedSourceActionDialog] = useState(null);
   const [referenceLinkOpen, setReferenceLinkOpen] = useState(false);
   const [referenceLinkValue, setReferenceLinkValue] = useState('');
   const referenceInternalDragRef = useRef(false);
@@ -1939,6 +1946,41 @@ function App() {
     if (!key) return;
     setReferenceFiles((current) => current.filter((f) => referenceFileKey(f) !== key));
   };
+
+  const openSharedSourceActionDialog = (link) => {
+    if (!link) return;
+    const sourcePath = String(link?.url || link?.URL || '');
+    const sourceID = String(link?.id || link?.ID || '');
+    const label = String(link?.label || link?.Label || fileBaseName(sourcePath) || t('rightRail.sharedLink'));
+    setSharedSourceActionDialog({
+      id: sourceID,
+      url: sourcePath,
+      name: label,
+      detail: sourcePath,
+    });
+  };
+
+  const handleSharedSourceAction = async (action) => {
+    if (!sharedSourceActionDialog) return;
+    const target = sharedSourceActionDialog;
+    setSharedSourceActionDialog(null);
+    if (action !== 'remove') return;
+    const key = target.id || target.url;
+    if (!key) return;
+    try {
+      await callWails(() => RemoveExternalLink('shared_source', key));
+      setExtSharedLinks((current) => (current || []).filter((link) => {
+        const id = String(link?.id || link?.ID || '');
+        const url = String(link?.url || link?.URL || '');
+        return id !== key && url !== key;
+      }));
+      await refreshExternalLinks();
+      setToolResult({toolId: 'reference-link', ok: true, message: '共用來源已移除'});
+    } catch (error) {
+      setToolResult({toolId: 'reference-link', ok: false, message: error?.message || String(error)});
+      refreshExternalLinks();
+    }
+  };
   // v3.6: Avatar 後端狀態
   const [currentAvatar, setCurrentAvatar] = useState(null);
   const [avatarConfigs, setAvatarConfigs] = useState({});
@@ -2037,12 +2079,28 @@ function App() {
   }, [floatingAvatarCompactWindow, floatingAvatarPosition]);
 
   useEffect(() => {
-    document.documentElement.classList.toggle('floating-avatar-window-active', floatingAvatarMode);
-    document.body.classList.toggle('floating-avatar-window-active', floatingAvatarMode);
+    const nativeWindowActive = floatingAvatarMode && ENABLE_NATIVE_FLOATING_AVATAR_WINDOW;
+    document.documentElement.classList.toggle('floating-avatar-window-active', nativeWindowActive);
+    document.body.classList.toggle('floating-avatar-window-active', nativeWindowActive);
+    document.documentElement.classList.toggle('floating-avatar-window-keyed', nativeWindowActive && IS_WINDOWS_RUNTIME);
+    document.body.classList.toggle('floating-avatar-window-keyed', nativeWindowActive && IS_WINDOWS_RUNTIME);
     return () => {
       document.documentElement.classList.remove('floating-avatar-window-active');
+      document.documentElement.classList.remove('floating-avatar-window-keyed');
       document.body.classList.remove('floating-avatar-window-active');
+      document.body.classList.remove('floating-avatar-window-keyed');
     };
+  }, [floatingAvatarMode]);
+
+  useEffect(() => {
+    if (!floatingAvatarMode) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      restoreFromFloatingAvatar('auto');
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [floatingAvatarMode]);
 
   useEffect(() => {
@@ -7662,6 +7720,36 @@ function App() {
 
   async function enterFloatingAvatarMode() {
     if (floatingAvatarTransitionRef.current) return;
+    if (!ENABLE_NATIVE_FLOATING_AVATAR_WINDOW) {
+      floatingAvatarTransitionRef.current = true;
+      try {
+        const windowPosition = await WindowGetPosition().catch(() => ({x: 0, y: 0}));
+        const avatarPosition = floatingAvatarPositionRef.current || floatingAvatarPosition || {
+          x: Math.max(12, window.innerWidth - FLOATING_AVATAR_WINDOW_SIZE),
+          y: Math.max(12, window.innerHeight - FLOATING_AVATAR_WINDOW_SIZE - 16),
+        };
+        const overlayX = Math.round((windowPosition?.x ?? 0) + Number(avatarPosition?.x || 0));
+        const overlayY = Math.round((windowPosition?.y ?? 0) + Number(avatarPosition?.y || 0));
+        await showFloatingAvatarOverlayAt(overlayX, overlayY);
+        floatingAvatarCompactWindowRef.current = false;
+        setFloatingAvatarCompactWindow(false);
+        setFloatingAvatarFlyingBack(false);
+        floatingAvatarDragWindowRef.current = null;
+        floatingAvatarWindowRef.current = {restore: null, compactPosition: null};
+        floatingAvatarModeRef.current = true;
+        setFloatingAvatarMode(true);
+        setSchedulerBgPrompt(false);
+        setManualAvatarState('happy');
+        WindowHide();
+        setToolResult({toolId: 'scheduler', ok: true, message: t('floatingAvatar.entered')});
+      } catch (error) {
+        console.warn('floating avatar overlay failed', error);
+        setToolResult({toolId: 'scheduler', ok: false, message: t('floatingAvatar.backgroundFail', {error: error?.message || error})});
+      } finally {
+        floatingAvatarTransitionRef.current = false;
+      }
+      return;
+    }
     floatingAvatarTransitionRef.current = true;
     try {
       const [windowSize, windowPosition] = await Promise.all([
@@ -7715,6 +7803,12 @@ function App() {
 
   async function restoreFloatingAvatarWindow() {
     if (floatingAvatarTransitionRef.current) return;
+    if (!ENABLE_NATIVE_FLOATING_AVATAR_WINDOW && floatingAvatarModeRef.current) {
+      await callWails(() => ExitFloatingAvatarOverlay()).catch((e) => console.warn('ExitFloatingAvatarOverlay failed', e));
+      WindowShow();
+      WindowUnminimise();
+      return;
+    }
     const restore = floatingAvatarWindowRef.current?.restore;
     const wasCompact = floatingAvatarCompactWindowRef.current || Boolean(restore);
     if (!wasCompact) return;
@@ -7937,6 +8031,11 @@ function App() {
     setToolResult({toolId: 'floating-avatar', ok: true, message: t('floatingAvatar.reminderPausedNotice')});
   }
 
+  async function showFloatingAvatarOverlayAt(x, y) {
+    const imageData = await imageSrcToBytes(floatingAvatarSrc);
+    await callWails(() => EnterFloatingAvatarOverlayImage(imageData, 'head', Math.round(x), Math.round(y)));
+  }
+
   async function switchFloatingAvatarAgent(personaId) {
     const persona = settingsState.personas.find((item) => item.id === personaId);
     if (!persona) return;
@@ -7983,10 +8082,16 @@ function App() {
   const floatingLatestText = messages[messages.length - 1] || state.greeting || '';
   // 只在「需要主動提醒」時才浮出上方泡泡（待確認/排程確認）。
   // 進後台、一般狀態、問候語都不浮泡泡，維持乾淨頭像；人格名稱/回覆改由點開迷你框顯示。
-  // 全身像來源：之後可改成 persona 的全身立繪 / DragonBones 模型；目前 fallback 用頭像。
   const floatingExpression = !floatingReminderPaused && (pendingTaskReview || schedulerConfirm) ? 'warning' : avatarExpression;
-  const floatingFullBodyAvatarKey = pixelPackForPersona(floatingPersona, floatingAvatarConfig);
-  const floatingFullBodyAvatarSrc = resolvePersonaFullBodySrc(floatingPersona, floatingAvatarConfig, floatingExpression);
+  useEffect(() => {
+    const off = EventsOn('floating_avatar:menu_action', async (payload) => {
+      const action = payload?.action || 'restore';
+      if (action === 'restore') {
+        await restoreFromFloatingAvatar('auto');
+      }
+    });
+    return () => off?.();
+  }, []);
   const floatingBubbleText = pendingTaskReview?.reason
     || pendingTaskReview?.title
     || schedulerConfirm?.reason
@@ -7995,7 +8100,7 @@ function App() {
 
   return (
     <div
-      className={`console-shell ${activePanel === 'settings' ? 'settings-open' : ''} ${floatingAvatarMode ? 'floating-avatar-shell-active' : ''}`}
+      className={`console-shell ${activePanel === 'settings' ? 'settings-open' : ''} ${floatingAvatarMode && ENABLE_NATIVE_FLOATING_AVATAR_WINDOW ? 'floating-avatar-shell-active' : ''}`}
       data-theme={panelTheme}
       data-lang={_i18nLang}
       dir={_i18nDir}
@@ -8007,8 +8112,6 @@ function App() {
         active={floatingAvatarMode}
         t={t}
         avatarSrc={floatingAvatarSrc}
-        fullBodyAvatarSrc={floatingFullBodyAvatarSrc || floatingAvatarSrc}
-        fullBodyAvatarKey={floatingFullBodyAvatarKey}
         avatarExpression={floatingExpression}
         persona={floatingPersona}
         personas={floatingAvatarPersonas}
@@ -8643,6 +8746,7 @@ function App() {
           onReferenceInternalDrag={handleReferenceInternalDrag}
           onReferenceCardDoubleClick={handleReferenceCardDoubleClick}
           onReferenceFailedRemove={handleReferenceFailedRemove}
+          onSharedSourceDragOut={openSharedSourceActionDialog}
           onScheduleOpen={openSchedulerPanel}
           onRecordingToggle={() => {
             if (recordingEnabled) {
@@ -9048,6 +9152,19 @@ function App() {
             {label: t('adapter.remove'), disabled: true, onClick: () => {}},
             {label: t('adapter.copyAction'), onClick: () => handleSearchSummaryExportAction('copy')},
             {label: t('common.cancel'), onClick: () => handleSearchSummaryExportAction('cancel')},
+          ]}
+        />
+      )}
+      {sharedSourceActionDialog && (
+        <DragActionModal
+          ariaLabel="共用來源拖曳操作"
+          icon="◎"
+          title={sharedSourceActionDialog.name}
+          detail={sharedSourceActionDialog.detail || '共用來源'}
+          actions={[
+            {label: t('adapter.remove'), onClick: () => handleSharedSourceAction('remove')},
+            {label: t('adapter.copyAction'), disabled: true, onClick: () => {}},
+            {label: t('common.cancel'), onClick: () => handleSharedSourceAction('cancel')},
           ]}
         />
       )}
@@ -10021,6 +10138,10 @@ function referenceFileKey(file) {
   return String(file?.path || file?.name || '');
 }
 
+function sharedSourceKey(link) {
+  return String(link?.id || link?.ID || link?.url || link?.URL || '');
+}
+
 function normalizeReferenceImportPaths(paths = []) {
   return Array.from(paths || [])
     .map((path) => (typeof path === 'string' ? path : path?.path))
@@ -10320,6 +10441,15 @@ function bytesToDataUrl(bytes = [], mimeType = 'image/png') {
     binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
   }
   return `data:${mimeType};base64,${window.btoa(binary)}`;
+}
+
+async function imageSrcToBytes(src) {
+  if (!src) return [];
+  const response = await fetch(src);
+  if (!response.ok) {
+    throw new Error(`avatar image fetch failed: ${response.status}`);
+  }
+  return Array.from(new Uint8Array(await response.arrayBuffer()));
 }
 
 function resolveAvatarProvider(config) {
@@ -13883,6 +14013,7 @@ function RightRail({
   onReferenceLinkOpen,
   onReferenceCardDoubleClick,
   onReferenceFailedRemove,
+  onSharedSourceDragOut,
   onScheduleOpen,
   onToolFavorite,
   onToolPopupToggle,
@@ -13890,6 +14021,8 @@ function RightRail({
   const t = useI18n(s => s.t);
   const [draggedReferenceKey, setDraggedReferenceKey] = useState('');
   const draggedReferenceKeyRef = useRef('');
+  const [draggedSharedSourceKey, setDraggedSharedSourceKey] = useState('');
+  const draggedSharedSourceKeyRef = useRef('');
 
   function handleReferenceDragStart(event, file) {
     const fileKey = referenceFileKey(file);
@@ -13944,6 +14077,35 @@ function RightRail({
     setDraggedReferenceKey('');
   }
 
+  function handleSharedSourceDragStart(event, link) {
+    const key = sharedSourceKey(link);
+    if (!key) {
+      event.preventDefault();
+      return;
+    }
+    draggedSharedSourceKeyRef.current = key;
+    setDraggedSharedSourceKey(key);
+    event.dataTransfer.effectAllowed = 'move';
+    try { event.dataTransfer.clearData(); } catch (_) {}
+    try { event.dataTransfer.setData('application/x-ai-console-shared-source-key', key); } catch (_) {}
+  }
+
+  function finishSharedSourceDrag(event, link) {
+    const key = draggedSharedSourceKeyRef.current;
+    draggedSharedSourceKeyRef.current = '';
+    setDraggedSharedSourceKey('');
+    if (!key) return;
+    const leftWindow =
+      event.clientX <= 0 ||
+      event.clientY <= 0 ||
+      event.clientX >= window.innerWidth ||
+      event.clientY >= window.innerHeight;
+    const droppedOutside = leftWindow || (event.clientX === 0 && event.clientY === 0);
+    if (droppedOutside) {
+      onSharedSourceDragOut?.(link);
+    }
+  }
+
   function handleReferenceDrop(event) {
     // 只把內部 reference 排序拖曳吃掉；外部檔案仍要進圖片/引用分流。
     if (draggedReferenceKeyRef.current) {
@@ -13994,31 +14156,6 @@ function RightRail({
         <span>▤</span>
         <span>{t('rightRail.citeLink')}</span>
       </button>
-      <button
-        className="tool-card shared-link-card"
-        type="button"
-        onClick={onReferenceLinkOpen}
-        aria-label={`${t('rightRail.sharedLink')} - ${t('rightRail.sharedLinkHint')}`}
-      >
-        <span>⇄</span>
-        <span>{t('rightRail.sharedLink')}</span>
-      </button>
-      {Array.isArray(sharedLinks) && sharedLinks.length > 0 && (
-        <div className="shared-source-list" aria-label={t('rightRail.sharedLink')}>
-          {sharedLinks.map((link, index) => {
-            const sourcePath = link?.url || link?.URL || '';
-            const label = link?.label || link?.Label || fileBaseName(sourcePath) || t('rightRail.sharedLink');
-            return (
-              <div className="shared-source-name" key={link?.id || sourcePath || index} title={sourcePath}>
-                <span className="reference-file-title">
-                  {twoLineFileName(label, t('rightRail.sharedLink')).map((line, lineIndex) => <span key={lineIndex}>{line}</span>)}
-                </span>
-                {sourcePath && <small className="reference-file-detail">{sourcePath}</small>}
-              </div>
-            );
-          })}
-        </div>
-      )}
       <button className="tool-card tool-amber tool-schedule-card" type="button" onClick={onScheduleOpen}>
         <span>◴</span>
         <span>{t('rightRail.schedule')}</span>
@@ -14053,75 +14190,117 @@ function RightRail({
           <small>{isRecordingEnabled ? t('rightRail.recording') : t('rightRail.close')}</small>
         </button>
       </div>
-	      <div
-	        className="tool-card reference-file-card"
-	        onDragOver={(event) => {
-	          event.preventDefault();
-	          event.dataTransfer.dropEffect = 'copy';
-	        }}
-	        onDrop={(event) => {
-	          handleReferenceDrop(event);
-	        }}
-	      >
+      <div
+        className="tool-card shared-link-card"
+        aria-label={`${t('rightRail.sharedLink')} - ${t('rightRail.sharedLinkHint')}`}
+      >
+        <span>◎</span>
+        <span>{t('rightRail.sharedLink')}</span>
+        <div className="rail-hint-popover" role="tooltip">
+          <strong>{t('rightRail.sharedLink')}</strong>
+          <small>{t('rightRail.sharedLinkHint')}</small>
+        </div>
+      </div>
+      {Array.isArray(sharedLinks) && sharedLinks.length > 0 && (
+        <div className="shared-source-list" aria-label={t('rightRail.sharedLink')}>
+          {sharedLinks.map((link, index) => {
+            const sourcePath = link?.url || link?.URL || '';
+            const label = link?.label || link?.Label || fileBaseName(sourcePath) || t('rightRail.sharedLink');
+            const sourceKey = sharedSourceKey(link) || `${sourcePath}-${index}`;
+            const isDragging = draggedSharedSourceKey === sourceKey;
+            return (
+              <div
+                className={`shared-source-name${isDragging ? ' shared-source-dragging' : ''}`}
+                data-draggable="true"
+                draggable
+                key={sourceKey}
+                title={sourcePath}
+                onDragStart={(event) => handleSharedSourceDragStart(event, link)}
+                onDragEnd={(event) => finishSharedSourceDrag(event, link)}
+              >
+                <span className="reference-file-title">
+                  {twoLineFileName(label, t('rightRail.sharedLink')).map((line, lineIndex) => <span key={lineIndex}>{line}</span>)}
+                </span>
+                {sourcePath && <small className="reference-file-detail">{sourcePath}</small>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div
+        className="tool-card reference-file-card"
+        aria-label={`${t('rightRail.citeFile')} - ${t('rightRail.citeFileHint')}`}
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
+        }}
+        onDrop={(event) => {
+          handleReferenceDrop(event);
+        }}
+      >
         <span>▤</span>
         <span>{t('rightRail.citeFile')}</span>
+        <div className="rail-hint-popover" role="tooltip">
+          <strong>{t('rightRail.citeFile')}</strong>
+          <small>{t('rightRail.citeFileHint')}</small>
+        </div>
       </div>
       <div
         className="reference-file-list"
-	        onDragOver={(event) => {
-	          if (!draggedReferenceKeyRef.current) return;
-	          event.preventDefault();
-	          event.stopPropagation();
-	          event.dataTransfer.dropEffect = 'move';
-	        }}
-	        onDrop={handleReferenceDrop}
+        onDragOver={(event) => {
+          if (!draggedReferenceKeyRef.current) return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = 'move';
+        }}
+        onDrop={handleReferenceDrop}
       >
         {referenceFiles.map((file, index) => {
           const fileKey = referenceFileKey(file) || `${file.path}-${index}`;
           const isDragging = draggedReferenceKey === fileKey;
           return (
-          <div
-            className={`reference-file-name${isDragging ? ' reference-file-dragging' : ''}`}
-            data-status={file.status || 'ready'}
-            data-draggable="true"
-            draggable
-            key={fileKey}
-	            title={file.detail || file.path}
-	            onDragStart={(event) => handleReferenceDragStart(event, file)}
-	            onDragOver={(event) => handleReferenceDragOver(event, file)}
-	            onDrop={handleReferenceDrop}
-            onDragEnd={(event) => {
-              // §M3+ 失敗 entry 拖到 window 外 → 移除（同 ToolPopup 的 leftWindow pattern）
-              const leftWindow =
-                event.clientX <= 0 ||
-                event.clientY <= 0 ||
-                event.clientX >= window.innerWidth ||
-                event.clientY >= window.innerHeight;
-              const droppedOutside = leftWindow || (event.clientX === 0 && event.clientY === 0);
-              const isFailed = file?.status === 'error' || file?.source !== 'library';
-              finishReferenceDrag(event);
-              if (droppedOutside && isFailed) {
-                onReferenceFailedRemove?.(referenceFileKey(file));
-              }
-            }}
-            onDoubleClick={(event) => {
-              event.preventDefault();
-              const rect = event.currentTarget.getBoundingClientRect();
-              onReferenceCardDoubleClick?.(file, rect);
-            }}
-          >
-            <div className="reference-file-main">
-              <span className="reference-file-title">
-                {twoLineFileName(file.name, t('rightRail.unnamedFile')).map((line, lineIndex) => <span key={lineIndex}>{line}</span>)}
-              </span>
-              <small className="reference-file-status">{referenceFileStatusLabel(file.status, t)}</small>
-              {file.addedVia === 'floating_avatar' && (
-                <small className="reference-file-source-badge">{t('floatingAvatar.addedViaFloating')}</small>
-              )}
+            <div
+              className={`reference-file-name${isDragging ? ' reference-file-dragging' : ''}`}
+              data-status={file.status || 'ready'}
+              data-draggable="true"
+              draggable
+              key={fileKey}
+              title={file.detail || file.path}
+              onDragStart={(event) => handleReferenceDragStart(event, file)}
+              onDragOver={(event) => handleReferenceDragOver(event, file)}
+              onDrop={handleReferenceDrop}
+              onDragEnd={(event) => {
+                // §M3+ 失敗 entry 拖到 window 外 → 移除（同 ToolPopup 的 leftWindow pattern）
+                const leftWindow =
+                  event.clientX <= 0 ||
+                  event.clientY <= 0 ||
+                  event.clientX >= window.innerWidth ||
+                  event.clientY >= window.innerHeight;
+                const droppedOutside = leftWindow || (event.clientX === 0 && event.clientY === 0);
+                const isFailed = file?.status === 'error' || file?.source !== 'library';
+                finishReferenceDrag(event);
+                if (droppedOutside && isFailed) {
+                  onReferenceFailedRemove?.(referenceFileKey(file));
+                }
+              }}
+              onDoubleClick={(event) => {
+                event.preventDefault();
+                const rect = event.currentTarget.getBoundingClientRect();
+                onReferenceCardDoubleClick?.(file, rect);
+              }}
+            >
+              <div className="reference-file-main">
+                <span className="reference-file-title">
+                  {twoLineFileName(file.name, t('rightRail.unnamedFile')).map((line, lineIndex) => <span key={lineIndex}>{line}</span>)}
+                </span>
+                <small className="reference-file-status">{referenceFileStatusLabel(file.status, t)}</small>
+                {file.addedVia === 'floating_avatar' && (
+                  <small className="reference-file-source-badge">{t('floatingAvatar.addedViaFloating')}</small>
+                )}
+              </div>
+              {shouldShowReferenceFileDetail(file) && <small className="reference-file-detail">{file.detail}</small>}
+              {fileExtLabel(file.name) && <span className="reference-file-ext-badge">{fileExtLabel(file.name)}</span>}
             </div>
-            {shouldShowReferenceFileDetail(file) && <small className="reference-file-detail">{file.detail}</small>}
-            {fileExtLabel(file.name) && <span className="reference-file-ext-badge">{fileExtLabel(file.name)}</span>}
-          </div>
           );
         })}
       </div>

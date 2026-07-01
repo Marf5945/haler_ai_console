@@ -350,6 +350,14 @@ export function EnterFloatingAvatarNative() {
   return window['go']['main']['App']['EnterFloatingAvatarNative']();
 }
 
+export function EnterFloatingAvatarOverlay(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['EnterFloatingAvatarOverlay'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function EnterFloatingAvatarOverlayImage(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['EnterFloatingAvatarOverlayImage'](arg1, arg2, arg3, arg4);
+}
+
 export function EscapeExternalTokens(arg1) {
   return window['go']['main']['App']['EscapeExternalTokens'](arg1);
 }
@@ -372,6 +380,10 @@ export function ExitDegradedMode() {
 
 export function ExitFloatingAvatarNative() {
   return window['go']['main']['App']['ExitFloatingAvatarNative']();
+}
+
+export function ExitFloatingAvatarOverlay() {
+  return window['go']['main']['App']['ExitFloatingAvatarOverlay']();
 }
 
 export function ExportDocumentToPath(arg1) {
@@ -508,6 +520,10 @@ export function GetDeviceTrustProfile(arg1) {
 
 export function GetEmbeddingConfig() {
   return window['go']['main']['App']['GetEmbeddingConfig']();
+}
+
+export function GetFloatingAvatarOverlayPosition() {
+  return window['go']['main']['App']['GetFloatingAvatarOverlayPosition']();
 }
 
 export function GetGoProgramAuthoringDetail(arg1) {
@@ -1168,6 +1184,10 @@ export function RejectPackageInstall(arg1, arg2) {
 
 export function RemoveAllowlistEntry(arg1) {
   return window['go']['main']['App']['RemoveAllowlistEntry'](arg1);
+}
+
+export function RemoveExternalLink(arg1, arg2) {
+  return window['go']['main']['App']['RemoveExternalLink'](arg1, arg2);
 }
 
 export function RemoveReferenceFile(arg1) {

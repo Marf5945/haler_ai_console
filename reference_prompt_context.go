@@ -241,7 +241,7 @@ func unifiedDocSearch(query string, store *builtin.Store, refVecDir string, vec 
 	// 2. 搜 references/files 向量索引
 	refResults, err := builtin.SearchDocumentsInDir(refVecDir, query, vec, limit*2,
 		func(docID string) (string, string, string) {
-			return docID, "", "" // 引用文件沒有 format/w3aID
+			return docID, "", "" // 引用文件沒有 format/wa3ID
 		}, "reference")
 	if err == nil {
 		all = append(all, refResults...)

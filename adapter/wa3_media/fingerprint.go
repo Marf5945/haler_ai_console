@@ -1,4 +1,4 @@
-// w3a_media/fingerprint.go — §9A.11 雙層指紋計算（Byte Hash + Perceptual Hash）。
+// wa3_media/fingerprint.go — §9A.11 雙層指紋計算（Byte Hash + Perceptual Hash）。
 //
 // ┌─────────────────────────────────────────────────────────────┐
 // │ 媒體驗證的核心：兩層指紋各司其職                            │
@@ -23,7 +23,7 @@
 // │                                                             │
 // │ 零外部依賴：僅使用 Go 標準庫（crypto/sha256, image, math）  │
 // └─────────────────────────────────────────────────────────────┘
-package w3a_media
+package wa3_media
 
 import (
 	"crypto/sha256"

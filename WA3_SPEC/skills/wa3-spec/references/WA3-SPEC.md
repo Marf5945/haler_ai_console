@@ -1,6 +1,6 @@
 # WA3（權威規格）
 
-**版本：** v0.3（draft，working；新增 Runtime / Canvas Sandbox / Skill Host 規格；本版併入擴充命名空間 `ㄝ` 與相容性規則）
+**版本：** v0.3（draft，working；新增 Runtime / Canvas Sandbox / Skill Host 規格；本版併入擴充命名空間 `ㄝ` 與相容性規則；本版併入媒體溯源面 §32，原 **W3A** 更名為 **WA3**，並與 `.tdy` 契約統一為單一 WA3 skill）
 **一句定義：** WA3 是「可攜式 Agent Skill 契約」——同一份資料、同一組功能入口、同一個 app 身分，可在不同使用者的 Agent / Runtime 中長出不同介面殼，但安全語意永遠由 core 強制。
 **輸出檔：** 協議實際發布的是**一份 `.tdy` 單檔**（範例見 §11）。本文件是「規格」，不是發布物。
 
@@ -122,7 +122,7 @@ parser 讀到任一結構位置 token，**先分類命名空間，再決定接�
 - renderer 在渲染前向 core 宣告 capability（支援哪些 block 型別/widget）；不支援的 block 依 `fallback` 鏈降級，**`ㄇㄢ`(文字) 為強制保底**，任何 renderer 必支援。
 - 降級不得犧牲安全：降級後 mutating 動作仍受確認約束；無確認能力 → 該動作呈唯讀。
 
-**Renderer 必遵（R1–R6）：** entity 值當不可信純文字渲染（不可當標記）；mutating 動作必經 core 確認；不得自組 HTTP 請求（一律走 core.operate）；不得讀/快取 token；無確認能力不得渲染 mutating 動作；尊重 `readonly/隱藏` 狀態。
+**Renderer 必遵（R1–R9）：** entity 值當不可信純文字渲染（不可當標記）；mutating 動作必經 core 確認；不得自組 HTTP 請求（一律走 core.operate）；不得讀/快取 token；無確認能力不得渲染 mutating 動作；尊重 `readonly/隱藏` 狀態；裝飾層（scanlines、particles、glow、scrims、device frames、progress rings、pseudo-elements）不得攔截 verified control 的 pointer、keyboard 或 assistive activation；submit/confirm/cancel 等確認控制在實際 viewport 內 MUST 可見且可觸達，fixed nav、safe-area、device frame、toast 或 modal effect 不得覆蓋或推出可用區域；preview persistence（memory、localStorage、fixture、mock provider）是 renderer/runtime 選擇，MUST 標示為 preview/mock，不得從 `*.dsdy` 推導成 storage、provider、backend 或 trust 語意。
 
 **compile → design binding → render 具名流程：** Runtime SHOULD 先 verify，再 compile 出不含 secret/backend/method 的 Agent Interface Plan，接著依 `design_templates/catalog.json` 或使用者選定的 `*.dsdy` 建立 render-session binding。每個渲染控制 MUST 回指一個已宣告 action id；設計模板只提供 component role / action role slot，不提供真 action id、target、permission 或 trust。mutating 控制即使被客製成任意外觀，仍 MUST 走 core 確認。詳細檢查清單見 `docs/RENDER_PIPELINE.md`。
 
@@ -200,11 +200,13 @@ Design template MAY extract:
   actions.
 - operable WA3 block type 到抽象 UI surface 的 mapping。
 - interaction guidance，例如 confirmation placement、reduced motion、stable dimensions。
+- display-only reachability constraints for overlays、drawers、modals、bottom nav、fixed headers、scanlines、glow layers、particles、device frames、safe-area padding、decorative layers, and control stacking, including that submit/confirm/cancel controls remain reachable by pointer、keyboard and assistive technology.
 
 Design template MUST NOT extract:
 
 - 真實文案內容、真實按鈕標籤、真實 action id。
 - backend target、provider、permission、policy、secret、token、credential。
+- storage/localStorage、mock provider、real provider、backend route、trust、permission 或 persistence 語意。若來源介面有暫存/預覽狀態，design template 只能把它描述成 renderer/runtime preview display guidance，不得授權任何資料寫入或 provider call。
 - remote assets、第三方字型、logo、可執行 HTML/JS/CSS。
 - 任何讓 renderer 能直接 operate、fetch、install、讀 local path 或推導安全狀態的資訊。
 
@@ -442,6 +444,7 @@ Builder v1 的價值不是「會產檔」本身，而是讓不會手寫 `.tdy` �
 - 真實網站不符合內建模板時 MUST 使用 `template_id: "custom_generic"`，並把候選結構放入 `custom_template`；該結構在使用者確認前不得視為可發布契約。
 - Backend handle、scope、provider permission、`mutates`、`confirm`、publish target 與 credential setup 一律是 human-only 決策。LLM 不得自行把 `system_suggested` 升為 `user_confirmed`。
 - 抽取只可取資料形狀、動作候選、輸入/輸出、區塊與呈現偏好；不得抽取 secret、cookie、token、session、直鏈、rendered editor URL、第三方程式碼、logo、字型或 provider 權限。
+- 若抽取目標是 `*.dsdy` 設計參考，Agent SHOULD 捕捉 modal、drawer、overlay、bottom nav、fixed header、safe-area、裝飾層與確認彈窗的 display-only reachability guidance，包含 decorative layers 不攔截互動、verified controls 位於可操作層、submit/confirm/cancel 在 pointer/keyboard/assistive technology 下皆可觸達。這些觀察不得轉成 storage/localStorage、provider、backend route、permission、policy 或 trust 語意。
 - `custom_generic` 仍必須通過相同 deterministic gates：schema ownership、`E-VALUE-SECRET`、risk/confirm gate、canonical、lint 與自驗。若 action target 不是相對路徑、含 `..` 或像 URL，builder MUST 拒絕。
 - 詳細使用者流程與 mapping 見 `docs/EXTRACT_CONTRACT.md`。
 
@@ -1932,6 +1935,30 @@ UI 至少呈現「碼 + 一句人類可讀原因」，不得只是靜默拒絕�
 *WA3 v0.3 addendum B — 撤銷可止血、注入卡在出口、執行期可去重、版本可協商；新增只往外長與往 `ㄝ` 擴充長，安全語意永遠在 core。*
 
 ---
+
+---
+
+## 32. WA3 媒體溯源面（Media Provenance Surface）
+
+**背景與更名。** WA3 與媒體溯源功能原先拆成兩塊開發：媒體端舊稱 **W3A**，契約規格端稱 WA3。自本版起 **W3A 一律更名為 WA3 並退役**，兩者合併為**同一個 WA3 skill**，共用同一套信任模型（Ed25519 canonical 簽章、RL/KR 撤銷、fail-closed）。舊名 `W3A` 與舊 sidecar 副檔名 `.w3a.json` 不得再使用。
+
+**兩個面向，一份契約。** WA3 現涵蓋兩個面向：
+
+1. **可攜式技能契約（`.tdy`）**——本規格 §0–§31 定義的讀取／驗證／建立／渲染／演進。
+2. **媒體溯源**——驗證媒體檔與其持久 `.wa3.json` sidecar，由 host app 的 `wa3_media` runtime 實作（對應 AI Console 應用規格 §9A）。
+
+兩個面向是同一份 WA3 信任契約套用在不同產物上，刻意是一個 skill，而非兩個。
+
+**媒體面實作與綁定（informative）。** 媒體面為 Go 原生、零外部依賴的 runtime（`adapter/wa3_media`，舊 `adapter/w3a_media`），透過 host 的 Wails binding 對外暴露：`VerifyMediaFile`、`GetMediaWA3Info`、`DetectPollution`、`ExportWithSidecar`、`ImportAndVerify`、`GetWA3TransferGuidance`、`ListWA3TrustedDevelopers`、`AddWA3TrustedDeveloper`。此面向為 runtime／binding 程式碼，不解析或簽章 `.tdy`；它沿用 WA3 的信任詞彙，使單一 skill 能同時推理契約驗證與媒體驗證。
+
+**共用安全語意（normative）。**
+
+1. 信任來自**已簽章的產物**——媒體是 `.wa3.json` sidecar，契約是 canonical 簽章——**永不來自傳輸通道**。
+2. **fail closed**：簽章驗證、指紋比對或信任分類失敗或缺漏時，拒絕視為已驗證。
+3. **cache 命中不等於信任**；感知指紋比對**不得**恢復延伸權；`platform_processed_copy` 永遠不算 training-safe。
+4. 撤銷（RL/KR）與開發者信任清單須在採信開發者簽章前查核，與 `.tdy` 一致。
+
+**內建到系統。** 合併後的 WA3 skill 以歸檔格式內建於 host 的 `data/skills/wa3-spec/`（`skill_manifest.json` + `README.md` + `cli_md/`），與其他已歸檔 skill 並列由系統載入。
 
 ---
 

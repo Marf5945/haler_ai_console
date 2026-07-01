@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-func cacheOriginalFile(store *Store, sourcePath string) (displayName, cachedPath, originalHash, w3aID string, err error) {
+func cacheOriginalFile(store *Store, sourcePath string) (displayName, cachedPath, originalHash, wa3ID string, err error) {
 	originalHash, err = hashFile(sourcePath)
 	if err != nil {
 		return "", "", "", "", err
@@ -27,7 +27,7 @@ func cacheOriginalFile(store *Store, sourcePath string) (displayName, cachedPath
 	}
 	_ = copySidecarIfPresent(sourcePath, cachedPath)
 
-	return displayName, cachedPath, originalHash, "w3a-doc-" + shortHash(originalHash), nil
+	return displayName, cachedPath, originalHash, "wa3-doc-" + shortHash(originalHash), nil
 }
 
 func hashFile(path string) (string, error) {
@@ -83,19 +83,19 @@ func copyRegularFileOverwrite(sourcePath, targetPath string) error {
 }
 
 func copySidecarIfPresent(sourcePath, targetPath string) error {
-	sourceSidecar := sourcePath + ".w3a.json"
+	sourceSidecar := sourcePath + ".wa3.json"
 	if _, err := os.Stat(sourceSidecar); err != nil {
 		return nil
 	}
-	return copyRegularFile(sourceSidecar, targetPath+".w3a.json")
+	return copyRegularFile(sourceSidecar, targetPath+".wa3.json")
 }
 
 func copySidecarIfPresentOverwrite(sourcePath, targetPath string) error {
-	sourceSidecar := sourcePath + ".w3a.json"
+	sourceSidecar := sourcePath + ".wa3.json"
 	if _, err := os.Stat(sourceSidecar); err != nil {
 		return nil
 	}
-	return copyRegularFileOverwrite(sourceSidecar, targetPath+".w3a.json")
+	return copyRegularFileOverwrite(sourceSidecar, targetPath+".wa3.json")
 }
 
 func uniqueCacheName(dir, baseName string) string {

@@ -98,7 +98,7 @@ type DocumentSearchResult struct {
 	ChunkID     string  `json:"chunk_id"`
 	Snippet     string  `json:"snippet"`
 	Score       float64 `json:"score"`
-	W3AID       string  `json:"w3a_id"`
+	WA3ID       string  `json:"wa3_id"`
 	Source      string  `json:"source"` // "document" 或 "reference"
 }
 
@@ -380,7 +380,7 @@ func SearchDocuments(store *Store, query string, vec Vectorizer, limit int) ([]D
 		}
 		for _, m := range metas {
 			if m.DocID == docID {
-				return m.DisplayName, m.Format, m.W3AID
+				return m.DisplayName, m.Format, m.WA3ID
 			}
 		}
 		return docID, "", ""
@@ -486,7 +486,7 @@ func SearchDocumentsInDir(vectorsDir, query string, vec Vectorizer, limit int, m
 		if !indexMetaCompatible(queryVec.Meta, index.VectorMeta) {
 			continue
 		}
-		displayName, format, w3aID := metaLookup(index.DocID)
+		displayName, format, wa3ID := metaLookup(index.DocID)
 		for _, chunk := range index.Chunks {
 			score, cerr := queryVec.Cosine(chunk.Vec)
 			if cerr != nil || score <= 0 {
@@ -499,7 +499,7 @@ func SearchDocumentsInDir(vectorsDir, query string, vec Vectorizer, limit int, m
 				ChunkID:     chunk.ChunkID,
 				Snippet:     snippet(chunk.Text),
 				Score:       score,
-				W3AID:       w3aID,
+				WA3ID:       wa3ID,
 				Source:      source,
 			})
 		}

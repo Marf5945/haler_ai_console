@@ -1,7 +1,7 @@
-// w3a_media/service.go — §9A W3A Media Provenance 主服務。
+// wa3_media/service.go — §9A WA3 Media Provenance 主服務。
 //
 // ┌─────────────────────────────────────────────────────────────┐
-// │ 整合所有 W3A Media 子模組的統一入口，供 app.go Wails        │
+// │ 整合所有 WA3 Media 子模組的統一入口，供 app.go Wails        │
 // │ binding 呼叫。                                              │
 // │                                                             │
 // │ 組合元件：                                                  │
@@ -11,14 +11,14 @@
 // │                                                             │
 // │ 主要 API（對應 Wails binding）：                            │
 // │  1. VerifyMediaFile   → 完整驗證流程                        │
-// │  2. GetMediaW3AInfo   → 讀取/計算 W3A 資訊                  │
+// │  2. GetMediaWA3Info   → 讀取/計算 WA3 資訊                  │
 // │  3. DetectPollution   → 模型污染偵測                        │
 // │  4. ExportWithSidecar → 匯出媒體 + sidecar                  │
 // │  5. ImportAndVerify   → 匯入驗證 + UX 提示                  │
 // │  6. GetTransferGuidance → 傳輸引導                          │
 // │  7. ListTrusted / AddTrusted → 信任清單管理                 │
 // └─────────────────────────────────────────────────────────────┘
-package w3a_media
+package wa3_media
 
 import (
 	"fmt"
@@ -29,14 +29,14 @@ import (
 // 主服務
 // ──────────────────────────────────────────────
 
-// Service W3A Media Provenance 主服務。
+// Service WA3 Media Provenance 主服務。
 type Service struct {
 	keyManager *KeyManager
 	trustList  *TrustList
 	recorder   *OperationRecorder
 }
 
-// NewService 建立 W3A Media 服務。
+// NewService 建立 WA3 Media 服務。
 func NewService(hookRoot string) *Service {
 	return &Service{
 		keyManager: NewKeyManager(hookRoot),
@@ -49,8 +49,8 @@ func NewService(hookRoot string) *Service {
 // API 1: 完整驗證
 // ──────────────────────────────────────────────
 
-// VerifyMediaFile 對媒體檔案執行完整 W3A 驗證流程。
-func (s *Service) VerifyMediaFile(filePath string) (*W3AMediaInfo, error) {
+// VerifyMediaFile 對媒體檔案執行完整 WA3 驗證流程。
+func (s *Service) VerifyMediaFile(filePath string) (*WA3MediaInfo, error) {
 	// 嘗試讀取 sidecar
 	sidecar, _ := ReadSidecar(filePath)
 
@@ -67,12 +67,12 @@ func (s *Service) VerifyMediaFile(filePath string) (*W3AMediaInfo, error) {
 }
 
 // ──────────────────────────────────────────────
-// API 2: 取得/建立 W3A 資訊
+// API 2: 取得/建立 WA3 資訊
 // ──────────────────────────────────────────────
 
-// GetMediaW3AInfo 取得媒體的 W3A 資訊。
+// GetMediaWA3Info 取得媒體的 WA3 資訊。
 // 若 sidecar 存在則讀取，否則計算新的指紋。
-func (s *Service) GetMediaW3AInfo(filePath string) (*W3AMediaInfo, error) {
+func (s *Service) GetMediaWA3Info(filePath string) (*WA3MediaInfo, error) {
 	// 先嘗試讀取 sidecar
 	sidecar, _ := ReadSidecar(filePath)
 	if sidecar != nil {
@@ -88,7 +88,7 @@ func (s *Service) GetMediaW3AInfo(filePath string) (*W3AMediaInfo, error) {
 
 	pHash, _ := ComputePerceptualHash(filePath, scope)
 
-	info := &W3AMediaInfo{
+	info := &WA3MediaInfo{
 		Version:    "1.0",
 		MediaScope: scope,
 		FilePath:   filePath,
@@ -135,7 +135,7 @@ func (s *Service) ImportAndVerify(filePath string) (*ImportResult, error) {
 		return nil, err
 	}
 
-	// 組裝 W3A 功能說明（給前端選單用）
+	// 組裝 WA3 功能說明（給前端選單用）
 	capabilities := []string{
 		"查看媒體驗證狀態（7 種等級）",
 		"檢查媒體是否為原始檔案",
@@ -144,9 +144,9 @@ func (s *Service) ImportAndVerify(filePath string) (*ImportResult, error) {
 		"判定是否適合作為訓練資料",
 	}
 
-	recommendation := "此媒體無 W3A 驗證資訊。"
+	recommendation := "此媒體無 WA3 驗證資訊。"
 	if hasSidecar {
-		recommendation = fmt.Sprintf("偵測到 W3A sidecar，驗證結果：%s", info.Status.Label())
+		recommendation = fmt.Sprintf("偵測到 WA3 sidecar，驗證結果：%s", info.Status.Label())
 	}
 
 	return &ImportResult{
@@ -190,9 +190,9 @@ func (s *Service) RemoveTrustedDeveloper(appID string) error {
 // 內部：為匯出的媒體建立 sidecar
 // ──────────────────────────────────────────────
 
-// CreateSidecar 為媒體檔案建立新的 .w3a.json sidecar。
+// CreateSidecar 為媒體檔案建立新的 .wa3.json sidecar。
 // 計算指紋並用 Console 的金鑰簽署。
-func (s *Service) CreateSidecar(filePath string) (*W3AMediaInfo, error) {
+func (s *Service) CreateSidecar(filePath string) (*WA3MediaInfo, error) {
 	scope := detectMediaScope(filePath)
 
 	byteHash, err := ComputeByteHash(filePath)
@@ -206,7 +206,7 @@ func (s *Service) CreateSidecar(filePath string) (*W3AMediaInfo, error) {
 	ops := s.recorder.GetAll()
 
 	// 建立 info
-	info := &W3AMediaInfo{
+	info := &WA3MediaInfo{
 		Version:    "1.0",
 		MediaScope: scope,
 		FilePath:   filePath,
@@ -224,7 +224,7 @@ func (s *Service) CreateSidecar(filePath string) (*W3AMediaInfo, error) {
 		sig, err := s.keyManager.SignOperation(ops[len(ops)-1])
 		if err == nil {
 			info.DeveloperSignature = sig
-			info.Status = StatusW3AAppProcessed
+			info.Status = StatusWA3AppProcessed
 		}
 	}
 

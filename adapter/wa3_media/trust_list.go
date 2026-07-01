@@ -1,7 +1,7 @@
-// w3a_media/trust_list.go — §9A.5 本機開發者信任清單 + 線上登錄 stub。
+// wa3_media/trust_list.go — §9A.5 本機開發者信任清單 + 線上登錄 stub。
 //
 // ┌─────────────────────────────────────────────────────────────┐
-// │ 開發者信任清單管理已知 W3A-aware app 的公鑰。               │
+// │ 開發者信任清單管理已知 WA3-aware app 的公鑰。               │
 // │                                                             │
 // │ 本機信任模式：                                              │
 // │  - 使用者手動新增信任的 app 開發者                          │
@@ -10,11 +10,11 @@
 // │                                                             │
 // │ 線上登錄 stub（§9A.5 接口保留）：                           │
 // │  - VerifyOnlineRegistry() 目前回傳 registry_unavailable     │
-// │  - 未來可接 W3A 線上伺服器，不需改呼叫端                   │
+// │  - 未來可接 WA3 線上伺服器，不需改呼叫端                   │
 // │                                                             │
 // │ 持久化：lazy-load + mutex + JSON（參考 source_trust 模式）  │
 // └─────────────────────────────────────────────────────────────┘
-package w3a_media
+package wa3_media
 
 import (
 	"encoding/json"
@@ -40,7 +40,7 @@ type TrustList struct {
 // NewTrustList 建立信任清單管理器。
 func NewTrustList(hookRoot string) *TrustList {
 	return &TrustList{
-		filePath: filepath.Join(hookRoot, "w3a_trust_list.json"),
+		filePath: filepath.Join(hookRoot, "wa3_trust_list.json"),
 	}
 }
 
@@ -63,7 +63,7 @@ func (tl *TrustList) save() error {
 	if err != nil {
 		return err
 	}
-	// SEC-W07（2026-05-24）：trust list 是「本機使用者信任哪些 W3A app」的隱私決策，
+	// SEC-W07（2026-05-24）：trust list 是「本機使用者信任哪些 WA3 app」的隱私決策，
 	// 預設不對其他帳號 / process 公開（公鑰本身不敏感，但「信任名單」是 metadata）。
 	return os.WriteFile(tl.filePath, data, 0o600)
 }
@@ -142,12 +142,12 @@ func (tl *TrustList) List() []TrustedDeveloper {
 // 線上登錄 stub（§9A.5 接口保留）
 // ──────────────────────────────────────────────
 
-// VerifyOnlineRegistry 查詢線上 W3A 開發者登錄系統。
+// VerifyOnlineRegistry 查詢線上 WA3 開發者登錄系統。
 // 目前為 stub：永遠回傳 registry_unavailable。
 // 未來接線上伺服器時只需修改此函式實作，呼叫端不需變動。
 func VerifyOnlineRegistry(appID string) (RegistryStatus, error) {
-	// TODO: 當 W3A 線上登錄伺服器上線後，在此發送 HTTP GET
-	//       GET https://registry.w3a.org/v1/apps/{appID}/status
+	// TODO: 當 WA3 線上登錄伺服器上線後，在此發送 HTTP GET
+	//       GET https://registry.wa3.org/v1/apps/{appID}/status
 	//       回傳 RegistryVerified / RegistryUnknown
 	return RegistryUnavailable, nil
 }

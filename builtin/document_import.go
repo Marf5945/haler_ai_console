@@ -202,7 +202,7 @@ func ImportFromDrop(store *Store, guard *PathGuard, filePath string, vec Vectori
 		}, nil
 	}
 
-	displayName, cachedPath, originalHash, w3aID, err := cacheOriginalFile(store, filePath)
+	displayName, cachedPath, originalHash, wa3ID, err := cacheOriginalFile(store, filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +217,7 @@ func ImportFromDrop(store *Store, guard *PathGuard, filePath string, vec Vectori
 			ContentHash:  contentHashValue,
 			OriginalHash: originalHash,
 			OriginalPath: cachedPath,
-			W3AID:        w3aID,
+			WA3ID:        wa3ID,
 			SourceHint:   fmt.Sprintf("drag_import from %s", filepath.Base(filePath)),
 			Tags:         []string{"cached_original"},
 		},

@@ -1,0 +1,48 @@
+{
+  "schema_version": "skill_manifest.v1",
+  "skill_id": "wa3-spec",
+  "display_name": "WA3",
+  "description": "Unified WA3 skill: portable .tdy skill-contract spec (review/author/build/render/evolve) plus in-app media provenance (verify media files and .wa3.json sidecars via the wa3_media runtime). One Ed25519 / trust / fail-closed safety model.",
+  "version": "0.3.0",
+  "description_doc": "README.md",
+  "source": {
+    "source_type": "folder_scan",
+    "original_path_hash": ""
+  },
+  "tags": {
+    "purpose_tag": ["verify", "review", "author", "transform"],
+    "action_tag": ["驗證", "簽章", "審核", "建立", "渲染", "WA3", "媒體驗證", "sidecar", "tdy"],
+    "domain_tag": ["WA3", "tdy", "契約", "媒體", "溯源", "provenance", "sidecar", "Ed25519", "信任", "trust"],
+    "risk_tag": ["medium"]
+  },
+  "permissions": {
+    "network": "none",
+    "filesystem": "workspace_write",
+    "execution": "none"
+  },
+  "resources": {
+    "examples": [],
+    "programs": [],
+    "cli_md": ["spec", "safety"]
+  },
+  "routing": {
+    "action_patterns": [
+      "驗證WA3契約",
+      "驗證.tdy",
+      "建立WA3契約",
+      "驗證媒體溯源",
+      "檢查媒體簽章",
+      "讀取.wa3.json sidecar",
+      "偵測模型污染"
+    ],
+    "target_aliases": ["WA3", "tdy", ".tdy", "契約", "媒體驗證", "溯源", "provenance", "sidecar", "wa3_media"],
+    "minimum_auto_score": 0.82
+  },
+  "lifecycle": {
+    "status": "enabled",
+    "visible_in_toolbar": true,
+    "route_as_candidate": true,
+    "auto_execute": false,
+    "user_confirmed": true
+  }
+}

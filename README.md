@@ -74,7 +74,7 @@ HaLer for AI Console 是一個本機優先的 AI 工作台，將多種 LLM 介�
 - **Visual Learning**：包含螢幕/影像元素偵測、OCR、按鈕候選、元素字典、動作候選與 dry-run 信心計算；YOLOX 模型為選配，缺少時會回退到 OpenCV shape/text 偵測。
 - **紀念照與相冊**：可由對話或手動按鈕觸發「拍照」確認卡，使用本機 ComfyUI 或相容雲端產圖服務生成角色紀念照，並保存到本機相冊供檢視、改標題與刪除。
 - **Remote Bridge**：可設定 Telegram、Discord、LINE、Teams、QQ 或 custom webhook channel，支援遠端送出、審核回覆、分段 dispatch 與 audit。
-- **安全治理**：包含 OS-backed credential store、source trust allowlist、LLM context 過濾、Controlled Trust、draft sandbox、package import review、W3A media provenance 與模型污染風險檢查。
+- **安全治理**：包含 OS-backed credential store、source trust allowlist、LLM context 過濾、Controlled Trust、draft sandbox、package import review、WA3 media provenance 與模型污染風險檢查。
 - **個人化工作區**：支援 persona / avatar、主對話與 subagent 匯出、排程任務、Status Rail、語音設定與多語系 UI。
 
 ## Encoding Policy
@@ -106,7 +106,7 @@ HaLer for AI Console is a local-first AI workbench that brings LLM adapters, doc
 - **Visual Learning**: provides screen/image element detection, OCR, button candidates, an element dictionary, action candidates, and dry-run confidence scoring; the optional YOLOX model falls back to OpenCV shape/text detection when unavailable.
 - **Keepsake photos and album**: offers a confirmation-gated photo flow from chat or manual controls, generates persona keepsake images through local ComfyUI or a compatible cloud image service, and stores them in a local album for viewing, captioning, and deletion.
 - **Remote Bridge**: configures Telegram, Discord, LINE, Teams, QQ, or custom webhook channels for remote submission, review replies, segmented dispatch, and audit trails.
-- **Safety and governance**: includes OS-backed credential storage, source-trust allowlists, LLM context filtering, Controlled Trust, draft sandboxing, package import review, W3A media provenance, and model-pollution risk checks.
+- **Safety and governance**: includes OS-backed credential storage, source-trust allowlists, LLM context filtering, Controlled Trust, draft sandboxing, package import review, WA3 media provenance, and model-pollution risk checks.
 - **Personal workspace**: supports personas and avatars, main-chat and subagent export, scheduled jobs, Status Rail, voice settings, and multilingual UI.
 
 ## For Users

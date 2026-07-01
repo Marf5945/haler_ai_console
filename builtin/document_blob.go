@@ -14,9 +14,9 @@ type DocMeta struct {
 	CreatedAt       time.Time `json:"created_at"`        // 建立時間
 	UpdatedAt       time.Time `json:"updated_at"`        // 最後更新時間
 	ContentHash     string    `json:"content_hash"`      // 內容的 SHA-256，用於去重和校驗
-	OriginalHash    string    `json:"original_hash"`     // 原始檔 byte SHA-256，用於 W3A / 原檔校驗
+	OriginalHash    string    `json:"original_hash"`     // 原始檔 byte SHA-256，用於 WA3 / 原檔校驗
 	OriginalPath    string    `json:"original_path"`     // project-managed 原始檔副本位置
-	W3AID           string    `json:"w3a_id"`            // 文件級 W3A 快取編號
+	WA3ID           string    `json:"wa3_id"`            // 文件級 WA3 快取編號
 	WordCount       int       `json:"word_count"`        // 字數（中文算字元數，英文算空白分隔）
 	ChunkCount      int       `json:"chunk_count"`       // 可搜尋 chunks 數量
 	VectorIndexedAt time.Time `json:"vector_indexed_at"` // 最近一次向量索引時間

@@ -370,6 +370,9 @@ func isListSkillsRequest(text string) bool {
 	if t == "" {
 		return false
 	}
+	if _, ok := inferGoProgramAuthoringRequest(text); ok {
+		return false
+	}
 	if !strings.Contains(t, "skill") && !strings.Contains(t, "技能") {
 		return false
 	}

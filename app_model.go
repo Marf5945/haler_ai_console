@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"ui_console/adapter/adapter_registry"
-	"ui_console/adapter/w3a_media"
+	"ui_console/adapter/wa3_media"
 	"ui_console/data/conversation"
 	"ui_console/data/memory"
 	"ui_console/internal/urlsafe"
@@ -361,10 +361,10 @@ func pingOpenAIModelsEndpoint(endpoint string, timeout time.Duration) bool {
 }
 
 // DetectModelPollution 對媒體執行模型污染偵測。
-func (a *App) DetectModelPollution(path string) (*w3a_media.PollutionReport, error) {
-	report, err := a.w3aMedia.DetectMediaPollution(path)
+func (a *App) DetectModelPollution(path string) (*wa3_media.PollutionReport, error) {
+	report, err := a.wa3Media.DetectMediaPollution(path)
 	if err == nil && report.IsPollutionRisk {
-		a.eventBus.Emit("w3a:pollution_detected", map[string]interface{}{"path": path, "score": report.WeightedTotal})
+		a.eventBus.Emit("wa3:pollution_detected", map[string]interface{}{"path": path, "score": report.WeightedTotal})
 	}
 	return report, err
 }

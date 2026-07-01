@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"ui_console/data/storage"
+	"ui_console/shared/shortcode"
 )
 
 const (
@@ -34,6 +35,7 @@ const (
 // Photo 是一張紀念照的完整中繼資料。
 type Photo struct {
 	ID            string `json:"id"`             // 唯一 ID（時間序 + 短亂數）
+	Code          string `json:"code"`           // 亂數 6 碼，供使用者/人格對話時引用這張照片
 	CreatedAt     string `json:"created_at"`     // RFC3339
 	PersonaID     string `json:"persona_id"`     // 產生當下啟用的人格
 	PersonaName   string `json:"persona_name"`   // 顯示用名稱
@@ -99,10 +101,19 @@ func (s *Store) Add(p Photo, png []byte) (Photo, error) {
 		p.ID = NewPhotoID(now)
 	}
 	if strings.TrimSpace(p.CreatedAt) == "" {
-		p.CreatedAt = now.UTC().Format(time.RFC3339)
+		p.CreatedAt = now.UTC().Format(time.RFC3339Nano)
 	}
 	if strings.TrimSpace(p.ImageRel) == "" {
 		p.ImageRel = filepath.ToSlash(filepath.Join(imagesDirName, p.ID+".png"))
+	}
+	if strings.TrimSpace(p.Code) == "" {
+		existing, _ := s.readAll() // 盡力而為；讀取失敗就退回空集合，靠隨機碼本身的空間避免撞號
+		p.Code = shortcode.Generate(existingPhotoCodes(existing))
+	}
+	// 描述預設沿用場景文字，讓每張照片一落地就有可回憶的描述；
+	// 使用者仍可事後用 SetCaption 蓋掉。
+	if strings.TrimSpace(p.Caption) == "" {
+		p.Caption = p.Scene
 	}
 	p.Caption = clampRunes(p.Caption, maxCaptionRunes)
 
@@ -263,6 +274,16 @@ func (s *Store) rewriteIndex(photos []Photo) error {
 		b.WriteByte('\n')
 	}
 	return storage.AtomicWriteFile(s.indexPath(), []byte(b.String()), 0o600)
+}
+
+func existingPhotoCodes(photos []Photo) map[string]bool {
+	existing := make(map[string]bool, len(photos))
+	for _, p := range photos {
+		if p.Code != "" {
+			existing[p.Code] = true
+		}
+	}
+	return existing
 }
 
 func clampRunes(s string, max int) string {

@@ -25,11 +25,13 @@ func (a *App) EnterFloatingAvatarOverlayImage(imageData []byte, mode string, x i
 	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 		return err
 	}
-	out := filepath.Join(cacheDir, "overlay_head.png")
+	overlayMode := normalizeOverlayMode(mode)
+	out := filepath.Join(cacheDir, fmt.Sprintf("overlay_%s.png", overlayMode))
 	if err := os.WriteFile(out, imageData, 0o600); err != nil {
 		return err
 	}
-	return showFloatingAvatarOverlay(out, x, y, 96, 96, a.handleFloatingAvatarOverlayAction)
+	maxW, maxH := overlayModeSize(overlayMode)
+	return showFloatingAvatarOverlay(out, x, y, maxW, maxH, a.handleFloatingAvatarOverlayAction)
 }
 
 func (a *App) ExitFloatingAvatarOverlay() error {
@@ -61,6 +63,12 @@ func (a *App) resolveFloatingAvatarOverlayImage(personaID string, mode string, s
 		pack = persona_avatar.DefaultPixelPack(personaID)
 	}
 
+	if normalizeOverlayMode(mode) == "full" {
+		if path := findOverlayAssetPath("persona_fullbody", overlayPackFolder(pack), overlayFullBodyName(state)); path != "" {
+			return path, 200, 360, nil
+		}
+	}
+
 	if config.AvatarProvider == persona_avatar.ProviderStaticImage && config.StaticAvatarPath != "" {
 		if path := resolveOverlayDataPath(config.StaticAvatarPath); path != "" {
 			return path, 96, 96, nil
@@ -89,6 +97,20 @@ func (a *App) resolveFloatingAvatarOverlayImage(personaID string, mode string, s
 	return out, 96, 96, nil
 }
 
+func normalizeOverlayMode(mode string) string {
+	if strings.EqualFold(mode, "full") {
+		return "full"
+	}
+	return "head"
+}
+
+func overlayModeSize(mode string) (int, int) {
+	if normalizeOverlayMode(mode) == "full" {
+		return 200, 360
+	}
+	return 96, 96
+}
+
 func normalizeFloatingAvatarState(state string) string {
 	switch strings.TrimSpace(state) {
 	case "thinking", "working", "happy", "warning", "blocked", "sleepy", "sad", "speechless":
@@ -107,6 +129,13 @@ func overlayPackFolder(pack string) string {
 	default:
 		return pack
 	}
+}
+
+func overlayFullBodyName(state string) string {
+	if state == "blocked" || state == "warning" {
+		return "fullbody.png"
+	}
+	return "fullbody_idle.png"
 }
 
 func resolveOverlayDataPath(path string) string {

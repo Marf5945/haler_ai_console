@@ -40,7 +40,10 @@ const (
 	mfString     = uintptr(0x00000000)
 	tpmRight     = uintptr(0x0002)
 	tpmReturnCmd = uintptr(0x0100)
-	menuRestore  = uintptr(1001)
+	menuHead     = uintptr(1001)
+	menuFull     = uintptr(1002)
+	menuRestore  = uintptr(1003)
+	menuQuit     = uintptr(1004)
 
 	ulwAlpha   = uintptr(0x00000002)
 	acSrcOver  = 0x00
@@ -317,15 +320,24 @@ func trackOverlayMenu(hwnd uintptr) string {
 		return ""
 	}
 	defer procDestroyMenu.Call(menu)
-	appendOverlayMenuItem(menu, menuRestore, "Restore UI")
+	appendOverlayMenuItem(menu, menuHead, "頭像")
+	appendOverlayMenuItem(menu, menuFull, "全身像")
+	appendOverlayMenuItem(menu, menuRestore, "回到介面")
+	appendOverlayMenuItem(menu, menuQuit, "關閉程式")
 
 	var pt overlayPoint
 	procOverlayGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
 	procSetForegroundWindow.Call(hwnd)
 	cmd, _, _ := procTrackPopupMenu.Call(menu, tpmRight|tpmReturnCmd, uintptr(pt.X), uintptr(pt.Y), 0, hwnd, 0)
 	switch cmd {
+	case menuHead:
+		return "head"
+	case menuFull:
+		return "full"
 	case menuRestore:
 		return "restore"
+	case menuQuit:
+		return "quit"
 	default:
 		return ""
 	}

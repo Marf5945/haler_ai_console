@@ -1,4 +1,5 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
+import AnimatedFullBodyAvatar from './AnimatedFullBodyAvatar.jsx';
 
 const defaultAvatarSize = 64;
 const edgeGap = 12;
@@ -9,6 +10,8 @@ const shakePreviewDelayMs = 1200;
 const shakePreviewDistance = 80;
 const shakeVomitDelayMs = 3000;
 const shakeVomitDistance = 500;
+const fullBodyAvatarWidth = 200;
+const fullBodyAvatarHeight = 360;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -45,6 +48,8 @@ export default function FloatingAvatarMode({
   active,
   t,
   avatarSrc,
+  fullBodyAvatarSrc = '',
+  fullBodyAvatarKey = '',
   avatarExpression,
   persona,
   personas = [],
@@ -59,6 +64,8 @@ export default function FloatingAvatarMode({
   onSwitchAgent,
   onSetReminderMode,
   compactWindowMode = false,
+  bodyMode = 'head',
+  onBodyModeChange,
   onCompactDragStart,
   onCompactDrag,
   onCompactDragEnd,
@@ -99,8 +106,10 @@ export default function FloatingAvatarMode({
   const [bubbleDismissed, setBubbleDismissed] = useState(false);
   const [installArmed, setInstallArmed] = useState(false);
   const [scheduleConfirmPending, setScheduleConfirmPending] = useState(false);
-  const avatarFrameWidth = avatarSize;
-  const avatarFrameHeight = avatarSize;
+  const setBodyMode = onBodyModeChange || (() => {});
+  const showBody = bodyMode !== 'head';
+  const avatarFrameWidth = showBody ? fullBodyAvatarWidth : avatarSize;
+  const avatarFrameHeight = showBody ? fullBodyAvatarHeight : avatarSize;
   const rootRef = useRef(null);
   const dragRef = useRef(null);
   const clickTimerRef = useRef(null);
@@ -147,9 +156,9 @@ export default function FloatingAvatarMode({
   useEffect(() => {
     if (!compactWindowMode) return undefined;
     const hasTopBubble = (Boolean(String(bubbleText || '').trim()) && !bubbleDismissed) || shakeMessageVisible;
-    onCompactExpandChange?.(panelOpen || contextOpen || hasTopBubble || Boolean(installCandidate));
+    onCompactExpandChange?.(panelOpen || contextOpen || hasTopBubble || Boolean(installCandidate) || showBody);
     return undefined;
-  }, [compactWindowMode, panelOpen, contextOpen, bubbleText, bubbleDismissed, shakeMessageVisible, installCandidate]);
+  }, [compactWindowMode, panelOpen, contextOpen, bubbleText, bubbleDismissed, shakeMessageVisible, installCandidate, showBody, bodyMode]);
 
   useEffect(() => () => {
     if (clickTimerRef.current) window.clearTimeout(clickTimerRef.current);
@@ -387,7 +396,7 @@ export default function FloatingAvatarMode({
       )}
       <div
         ref={rootRef}
-        className={`floating-avatar-root ${compactWindowMode ? 'floating-avatar-compact-root' : ''} ${flyingBack ? 'floating-avatar-flyback' : ''}`}
+        className={`floating-avatar-root ${compactWindowMode ? 'floating-avatar-compact-root' : ''} ${flyingBack ? 'floating-avatar-flyback' : ''} ${showBody ? `floating-avatar-body-active floating-avatar-body-${bodyMode}` : ''}`}
         style={{
           left: clampedPosition.x,
           top: clampedPosition.y,
@@ -431,7 +440,16 @@ export default function FloatingAvatarMode({
           onDragLeave={() => setDropActive(false)}
           onDrop={handleDrop}
         >
-          <img className="floating-avatar-img" src={avatarSrc} alt="" draggable={false} />
+          {showBody ? (
+            <AnimatedFullBodyAvatar
+              src={fullBodyAvatarSrc || avatarSrc}
+              fallbackSrc={avatarSrc}
+              pack={fullBodyAvatarKey}
+              mode={bodyMode}
+            />
+          ) : (
+            <img className="floating-avatar-img" src={avatarSrc} alt="" draggable={false} />
+          )}
         </button>
         {dropActive && <span className="floating-avatar-drop-label">{t('floatingAvatar.releaseToAdd')}</span>}
         {!compactWindowMode && pendingConfirm && !reminderPaused && (
@@ -449,6 +467,18 @@ export default function FloatingAvatarMode({
           <nav className="floating-avatar-menu" aria-label={t('floatingAvatar.menuLabel')}>
             <button type="button" onClick={onRestore}>{t('floatingAvatar.restore')}</button>
             <button type="button" onClick={onOpenSettings}>{t('floatingAvatar.settings')}</button>
+            <div className="floating-avatar-body-switch" role="group" aria-label={t('floatingAvatar.bodySwitchLabel')}>
+              {[['head', 'bodyHead'], ['full', 'bodyFull']].map(([mode, key]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={bodyMode === mode ? 'floating-avatar-body-active-btn' : ''}
+                  onClick={() => setBodyMode(mode)}
+                >
+                  {t(`floatingAvatar.${key}`)}
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               onClick={() => {

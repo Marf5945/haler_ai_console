@@ -292,6 +292,7 @@ import {
   ExitFloatingAvatarNative,
   EnterFloatingAvatarOverlayImage,
   ExitFloatingAvatarOverlay,
+  GetFloatingAvatarOverlayPosition,
 } from '../../wailsjs/go/main/App';
 import {
   OnFileDrop,
@@ -2048,6 +2049,7 @@ function App() {
   const [floatingAvatarMode, setFloatingAvatarMode] = useState(false);
   const [floatingAvatarFlyingBack, setFloatingAvatarFlyingBack] = useState(false);
   const [floatingAvatarCompactWindow, setFloatingAvatarCompactWindow] = useState(false);
+  const [floatingAvatarBodyMode, setFloatingAvatarBodyMode] = useState('head');
   const [floatingAvatarDrafts, setFloatingAvatarDrafts] = useState({});
   const [floatingReminderPause, setFloatingReminderPause] = useState({mode: '', until: 0});
   const floatingAvatarWindowRef = useRef({restore: null, compactPosition: null});
@@ -7730,7 +7732,8 @@ function App() {
         };
         const overlayX = Math.round((windowPosition?.x ?? 0) + Number(avatarPosition?.x || 0));
         const overlayY = Math.round((windowPosition?.y ?? 0) + Number(avatarPosition?.y || 0));
-        await showFloatingAvatarOverlayAt(overlayX, overlayY);
+        setFloatingAvatarBodyMode('head');
+        await showFloatingAvatarOverlayAt('head', overlayX, overlayY);
         floatingAvatarCompactWindowRef.current = false;
         setFloatingAvatarCompactWindow(false);
         setFloatingAvatarFlyingBack(false);
@@ -8031,9 +8034,20 @@ function App() {
     setToolResult({toolId: 'floating-avatar', ok: true, message: t('floatingAvatar.reminderPausedNotice')});
   }
 
-  async function showFloatingAvatarOverlayAt(x, y) {
-    const imageData = await imageSrcToBytes(floatingAvatarSrc);
-    await callWails(() => EnterFloatingAvatarOverlayImage(imageData, 'head', Math.round(x), Math.round(y)));
+  async function showFloatingAvatarOverlayAt(mode, x, y) {
+    const overlayMode = mode === 'full' ? 'full' : 'head';
+    const src = overlayMode === 'full'
+      ? (floatingFullBodyAvatarSrc || floatingAvatarSrc)
+      : floatingAvatarSrc;
+    const imageData = await imageSrcToBytes(src);
+    await callWails(() => EnterFloatingAvatarOverlayImage(imageData, overlayMode, Math.round(x), Math.round(y)));
+  }
+
+  async function repaintFloatingAvatarOverlay(mode = floatingAvatarBodyMode) {
+    const position = await callWails(() => GetFloatingAvatarOverlayPosition()).catch(() => null);
+    const x = Number.isFinite(position?.x) ? position.x : 0;
+    const y = Number.isFinite(position?.y) ? position.y : 0;
+    await showFloatingAvatarOverlayAt(mode, x, y);
   }
 
   async function switchFloatingAvatarAgent(personaId) {
@@ -8082,16 +8096,30 @@ function App() {
   const floatingLatestText = messages[messages.length - 1] || state.greeting || '';
   // 只在「需要主動提醒」時才浮出上方泡泡（待確認/排程確認）。
   // 進後台、一般狀態、問候語都不浮泡泡，維持乾淨頭像；人格名稱/回覆改由點開迷你框顯示。
+  // 全身像來源：persona 自填的 fullBodyAvatarUrl 優先，否則依角色 pack/state 取內建立繪。
   const floatingExpression = !floatingReminderPaused && (pendingTaskReview || schedulerConfirm) ? 'warning' : avatarExpression;
+  const floatingFullBodyAvatarKey = pixelPackForPersona(floatingPersona, floatingAvatarConfig);
+  const floatingFullBodyAvatarSrc = resolvePersonaFullBodySrc(floatingPersona, floatingAvatarConfig, floatingExpression);
   useEffect(() => {
     const off = EventsOn('floating_avatar:menu_action', async (payload) => {
       const action = payload?.action || 'restore';
       if (action === 'restore') {
         await restoreFromFloatingAvatar('auto');
+        return;
+      }
+      if (action === 'quit') {
+        await closeAfterBackgroundAvatarExit();
+        return;
+      }
+      if (action === 'head' || action === 'full') {
+        setFloatingAvatarBodyMode(action);
+        await repaintFloatingAvatarOverlay(action).catch((error) => {
+          console.warn('repaint floating avatar overlay failed', error);
+        });
       }
     });
     return () => off?.();
-  }, []);
+  }, [floatingAvatarSrc, floatingFullBodyAvatarSrc]);
   const floatingBubbleText = pendingTaskReview?.reason
     || pendingTaskReview?.title
     || schedulerConfirm?.reason
@@ -8112,6 +8140,8 @@ function App() {
         active={floatingAvatarMode}
         t={t}
         avatarSrc={floatingAvatarSrc}
+        fullBodyAvatarSrc={floatingFullBodyAvatarSrc || floatingAvatarSrc}
+        fullBodyAvatarKey={floatingFullBodyAvatarKey}
         avatarExpression={floatingExpression}
         persona={floatingPersona}
         personas={floatingAvatarPersonas}
@@ -8120,6 +8150,8 @@ function App() {
         avatarSize={FLOATING_AVATAR_SIZE}
         onPositionChange={updateFloatingAvatarPosition}
         compactWindowMode={floatingAvatarCompactWindow}
+        bodyMode={floatingAvatarBodyMode}
+        onBodyModeChange={setFloatingAvatarBodyMode}
         onCompactDragStart={beginCompactFloatingAvatarDrag}
         onCompactDrag={moveCompactFloatingAvatarWindow}
         onCompactDragEnd={syncCompactFloatingAvatarWindowPosition}

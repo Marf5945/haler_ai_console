@@ -2,7 +2,7 @@
 // 只在兩個觸發點審：actor 的完成宣告、seen_signatures 打轉。
 // 原則沿用 replan Critic：「只收緊、不放寬」——critic 失效時 fail-open 不擋路，
 // 但會留 system observation 供稽核。每節點最多 1 次反問（CriticRounds 持久化）。
-// flag：AI_CONSOLE_TASK_LOOP_CRITIC，預設關。
+// flag：AI_CONSOLE_TASK_LOOP_CRITIC，v3.1.8 起預設開；設 0/false/off 可關閉。
 package main
 
 import (
@@ -21,13 +21,14 @@ const (
 	loopCriticObsDigestLimit = 200 // 給 critic 看的每筆觀察截斷
 )
 
-// taskLoopCriticEnabled：M2 critic feature flag，預設關。
+// taskLoopCriticEnabled：M2 critic feature flag。v3.1.8 起預設開（fail-open、
+// 每節點最多 1 次反問，成本有界）；設 AI_CONSOLE_TASK_LOOP_CRITIC=0/false/off 關閉。
 func taskLoopCriticEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("AI_CONSOLE_TASK_LOOP_CRITIC"))) {
-	case "1", "true", "on", "yes":
-		return true
-	default:
+	case "0", "false", "off", "no":
 		return false
+	default:
+		return true
 	}
 }
 
@@ -96,7 +97,7 @@ func (a *App) maybeRunLoopCritic(run *dag.DAGRun, node dag.DAGNode, goal, claim,
 		return false
 	}
 	state.CriticRounds++
-	a.emitTaskLoopRound(run.ID, node.ID, state.Iteration, "審查", truncateRunes(question, 60))
+	a.emitTaskLoopRound(run.ID, node.ID, state.Iteration, "審查", truncateRunes(question, 60), "審查發現缺口，正在修正："+truncateRunes(question, 60))
 	appendLoopObservation(state, newLoopObservation("critic", loopCriticQuestionAction, "", question))
 	return true
 }

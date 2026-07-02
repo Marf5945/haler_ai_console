@@ -128,7 +128,7 @@ var (
 	overlayClassOnce sync.Once
 	overlayClassErr  error
 	overlayState     = floatingAvatarOverlayState{
-		PersonaName: "虛世大叔",
+		PersonaName: "厭世大叔",
 		Placeholder: "輸入想聊的內容，只暫存最近 30 條，關掉或切換人格就忘記。",
 	}
 )
@@ -1083,7 +1083,7 @@ func rgb(r byte, g byte, b byte) uint32 {
 func safeOverlayTitle(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "虛世大叔"
+		return "厭世大叔"
 	}
 	runes := []rune(value)
 	if len(runes) > 14 {

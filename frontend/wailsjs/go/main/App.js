@@ -126,6 +126,10 @@ export function CancelTaskProgress(arg1, arg2) {
   return window['go']['main']['App']['CancelTaskProgress'](arg1, arg2);
 }
 
+export function ClarifyDagIntent(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ClarifyDagIntent'](arg1, arg2, arg3);
+}
+
 export function ClassifySource(arg1, arg2, arg3) {
   return window['go']['main']['App']['ClassifySource'](arg1, arg2, arg3);
 }
@@ -568,6 +572,10 @@ export function GetMemoryHealth() {
 
 export function GetMemoryPipelineState() {
   return window['go']['main']['App']['GetMemoryPipelineState']();
+}
+
+export function GetMonitorLinks() {
+  return window['go']['main']['App']['GetMonitorLinks']();
 }
 
 export function GetNativeOCRStatus() {

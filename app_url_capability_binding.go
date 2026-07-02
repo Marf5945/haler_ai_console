@@ -576,13 +576,22 @@ func extractExistingLocalPath(text string) (string, bool) {
 	if raw == "" {
 		return "", false
 	}
+	if raw == string(os.PathSeparator) || (strings.HasPrefix(raw, string(os.PathSeparator)) && len(raw) > 1 && (raw[1] == ' ' || raw[1] == '\t' || raw[1] == '\n' || raw[1] == '\r')) {
+		return "", false
+	}
 	candidates := localPathCandidates(raw)
 	for _, candidate := range candidates {
+		if candidate == string(os.PathSeparator) {
+			continue
+		}
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate, true
 		}
 	}
 	if len(candidates) > 0 {
+		if candidates[0] == string(os.PathSeparator) {
+			return "", false
+		}
 		return candidates[0], true
 	}
 	return "", false

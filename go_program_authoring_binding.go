@@ -78,6 +78,16 @@ func (a *App) maybeHandleGoProgramAuthoring(decision toolRoutingDecision, sessio
 	if err != nil {
 		return true, skill_step.CLIResponse{Error: err.Error(), Action: decision.Action, Target: decision.Target, Next: decision.Next}
 	}
+	if result != nil && result.Status == "existing_skill" {
+		target := firstNonEmpty(result.ProgramID, result.ProgramName, decision.Target)
+		if handled, resp := a.maybeHandleSkillFlow(toolRoutingDecision{
+			Action: "流程",
+			Target: target,
+			Next:   actionchain.NormalizeNext(decision.Next),
+		}, sessionID, traceID, userText); handled {
+			return true, resp
+		}
+	}
 	return true, skill_step.CLIResponse{
 		Text:   result.Message,
 		Action: decision.Action,
@@ -94,13 +104,22 @@ func goProgramAuthoringClarification(userText string) (string, bool) {
 	lower := strings.ToLower(text)
 	hasInputFormat := containsAny(lower, []string{"json", "csv", "xlsx", "xls", "database", "db"}) ||
 		containsAny(text, []string{"表格", "資料庫", "內建資料庫", "引用文件", "貼上的表", "Excel", "試算表"})
+	hasDataDependency := hasInputFormat || containsAny(lower, []string{"data", "table", "spreadsheet"}) ||
+		containsAny(text, []string{"資料", "表格", "表", "欄位", "欄", "表頭", "資料來源", "引用文件", "貼上的表", "試算表"})
 	hasDataShape := hasInputFormat || containsAny(text, []string{"欄位", "欄", "表頭", "格式", "範例", "資料來源"})
 	hasOutputShape := containsAny(lower, []string{"output", "result", "report"}) ||
 		containsAny(text, []string{"輸出", "產生", "生成", "列出", "建議", "報表", "料表", "清單", "結果"})
+	hasBehaviorSpec := containsAny(lower, []string{"ui", "button", "form", "input", "output"}) ||
+		containsAny(text, []string{"支援", "功能", "操作", "輸入", "按鈕", "畫面", "介面", "互動", "限制", "測試", "正確"})
+	hasResultExpectation := hasOutputShape || containsAny(lower, []string{"test", "correct", "return", "display"}) ||
+		containsAny(text, []string{"正確", "測試", "顯示", "看到", "回傳", "算出", "算"})
 	if hasInputFormat && hasDataShape && hasOutputShape {
 		return "", false
 	}
-	return "要製作這個小程式，我需要先知道資料怎麼進來、結果要長什麼樣。請提供輸入格式（JSON、CSV、XLSX 或內建資料庫）、資料範例或欄位，以及希望輸出的欄位/格式；如果有現成表格，也可以放到引用文件或直接貼表頭。", true
+	if !hasDataDependency && hasBehaviorSpec && hasResultExpectation {
+		return "", false
+	}
+	return "要製作這個小程式，我需要先知道資料怎麼進來、結果要長什麼樣。如果是資料處理工具，請提供輸入格式（JSON、CSV、XLSX 或內建資料庫）、資料範例或欄位，以及希望輸出的欄位/格式；如果是互動小工具，請描述使用者會怎麼操作、有哪些功能，以及期待看到的結果。", true
 }
 
 func (a *App) RunGoProgramAuthoringLoop(adapterID, sessionID, programName, userText, traceID string) (*GoProgramAuthoringResult, error) {
@@ -212,7 +231,7 @@ func (a *App) RunGoProgramAuthoringLoop(adapterID, sessionID, programName, userT
 			}
 			continue
 		}
-		finalText, err := a.polishGoProgramResult(adapterID, sessionID, userText, manifest, execResult.Stdout, traceID)
+		finalText, err := a.polishGoProgramResult(adapterID, sessionID, userText, manifest, execResult.Stdout, contractReview, traceID)
 		if err != nil {
 			return nil, err
 		}
@@ -330,6 +349,12 @@ func goProgramTrace(traceID, phase string, attempt int) string {
 }
 
 func (a *App) callRawModel(adapterID, sessionID, prompt, traceID string) (string, error) {
+	return a.callRawModelCapped(adapterID, sessionID, prompt, traceID, 0)
+}
+
+// callRawModelCapped 同 callRawModel，但可帶 maxTokens 限制輸出長度（0 = 不限制）。
+// 僅 API / 本機 adapter 路徑支援；CLI 路徑無法限制，維持原行為。
+func (a *App) callRawModelCapped(adapterID, sessionID, prompt, traceID string, maxTokens int) (string, error) {
 	if strings.TrimSpace(adapterID) == "" {
 		adapterID = a.defaultSkillExecutionAdapterID()
 	}
@@ -337,7 +362,7 @@ func (a *App) callRawModel(adapterID, sessionID, prompt, traceID string) (string
 		return "", fmt.Errorf("go program authoring: no adapter available")
 	}
 	if a.isAPIOrLocalAdapter(adapterID) {
-		return a.callRawAPIModel(adapterID, prompt, traceID)
+		return a.callRawAPIModel(adapterID, prompt, traceID, maxTokens)
 	}
 	if a.cliAdapter == nil {
 		return "", fmt.Errorf("go program authoring: cli adapter is unavailable")
@@ -369,7 +394,7 @@ func (a *App) callRawModel(adapterID, sessionID, prompt, traceID string) (string
 	return strings.TrimSpace(resp.Text), nil
 }
 
-func (a *App) callRawAPIModel(adapterID, prompt, traceID string) (string, error) {
+func (a *App) callRawAPIModel(adapterID, prompt, traceID string, maxTokens int) (string, error) {
 	cfg, err := a.loadLLMAPIAdapterConfig(adapterID)
 	if err != nil {
 		return "", err
@@ -402,6 +427,9 @@ func (a *App) callRawAPIModel(adapterID, prompt, traceID string) (string, error)
 		Messages: []openAIChatMessage{
 			{Role: "user", Content: prompt},
 		},
+	}
+	if maxTokens > 0 {
+		reqBody.MaxTokens = maxTokens
 	}
 	body, err := json.Marshal(reqBody)
 	if err != nil {
@@ -476,9 +504,10 @@ func (a *App) createGoProgramReviewFromValidation(programName string, validation
 	return card
 }
 
-func (a *App) polishGoProgramResult(adapterID, sessionID, userText string, manifest go_program.Manifest, stdout []byte, traceID string) (string, error) {
-	prompt := "以下是受控 Go 小程式的 stdout JSON。請只根據 JSON 與使用者原始需求，合成給使用者的繁體中文回答；不要編造 JSON 沒有的資訊。\n\n使用者需求:\n" +
-		userText + "\n\n程式名稱: " + manifest.DisplayName + "\n\nstdout JSON:\n" + string(stdout)
+func (a *App) polishGoProgramResult(adapterID, sessionID, userText string, manifest go_program.Manifest, stdout []byte, contractReview goProgramContractReview, traceID string) (string, error) {
+	reviewJSON, _ := json.MarshalIndent(contractReview, "", "  ")
+	prompt := "以下是受控 Go 小程式製作完成後的驗證資料。stdout JSON 是一次 smoke test 的實際輸出；contract review JSON 是系統已完成的需求契約審查結果，可用來回報是否已涵蓋使用者要求。請根據使用者原始需求、stdout JSON、contract review JSON 合成給使用者的繁體中文回答。\n\n規則:\n- 不要編造驗證資料沒有支持的資訊。\n- 若 contract_review.ok=true，請明確說明已完成並用 reason/feedback 摘要驗證重點；不要因 stdout 只有單筆 smoke test 就說其他功能未驗證。\n- 若 stdout 與 contract review 衝突，請指出仍需人工確認。\n- 回答要精簡，不要重複保存 pending skill 的字樣。\n\n使用者需求:\n" +
+		userText + "\n\n程式名稱: " + manifest.DisplayName + "\n\nstdout JSON:\n" + string(stdout) + "\n\ncontract review JSON:\n" + string(reviewJSON)
 	text, err := a.callRawModel(adapterID, sessionID, prompt, goProgramTrace(traceID, "polish", 0))
 	if err != nil {
 		return "", err

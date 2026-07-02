@@ -68,7 +68,8 @@ func (a *App) resolveSkillExecution(actionTarget, sessionID string) (*SkillExecu
 	if err != nil {
 		return nil, err
 	}
-	manifest := a.findManifestForExec(result.SelectedSkillID)
+	skillID := skillIDFromResolveResult(result)
+	manifest := a.findManifestForExec(skillID)
 	var lc *skill_step.Lifecycle
 	if manifest != nil {
 		lc = manifest.Lifecycle
@@ -79,7 +80,7 @@ func (a *App) resolveSkillExecution(actionTarget, sessionID string) (*SkillExecu
 	out := &SkillExecutionDecision{
 		Decision:     string(decision),
 		ResolveID:    result.ResolveID,
-		SkillID:      result.SelectedSkillID,
+		SkillID:      skillID,
 		Status:       string(result.Status),
 		ActionTarget: actionTarget,
 	}
@@ -188,6 +189,10 @@ const searchSummaryPromptSentinel = "[[AI_CONSOLE_SEARCH_SUMMARY]]"
 // 而回出「你想搜尋哪一類？」這種答非所問。
 const quickChatPromptSentinel = "[[AI_CONSOLE_QUICK_CHAT]]"
 
+// quickChatMaxTokens 閒聊回覆的輸出上限：prompt 已要求最多 3 句，
+// 設上限讓模型早點停，回覆更快也更省。只作用於 API / 本機 adapter 路徑。
+const quickChatMaxTokens = 220
+
 func isQuickChatPrompt(userText string) bool {
 	return strings.HasPrefix(strings.TrimSpace(userText), quickChatPromptSentinel)
 }
@@ -227,7 +232,7 @@ func (a *App) executeQuickChatPrompt(adapterID, sessionID, userText, traceID str
 	debugtrace.Record("go.quick_chat.direct_model", traceID, map[string]interface{}{
 		"text_len": len([]rune(prompt)),
 	})
-	out, err := a.callRawModel(adapterID, "avatar-chat:"+sessionID, prompt, traceID)
+	out, err := a.callRawModelCapped(adapterID, "avatar-chat:"+sessionID, prompt, traceID, quickChatMaxTokens)
 	if err != nil {
 		return nil, err
 	}
@@ -279,9 +284,10 @@ func (a *App) ConfirmSkillExecution(resolveID, sessionID, choice string) (*Skill
 	if !ok {
 		return nil, fmt.Errorf("ConfirmSkillExecution: resolve %q 不存在或已過期", resolveID)
 	}
-	manifest := a.findManifestForExec(result.SelectedSkillID)
+	skillID := skillIDFromResolveResult(result)
+	manifest := a.findManifestForExec(skillID)
 	if manifest == nil {
-		return nil, fmt.Errorf("ConfirmSkillExecution: 找不到 skill %q", result.SelectedSkillID)
+		return nil, fmt.Errorf("ConfirmSkillExecution: 找不到 skill %q", skillID)
 	}
 	out := &SkillExecutionDecision{ResolveID: resolveID, SkillID: manifest.SkillID, Status: string(result.Status)}
 
@@ -309,6 +315,32 @@ func (a *App) ConfirmSkillExecution(resolveID, sessionID, choice string) (*Skill
 	out.Decision = string(skill_eval.ExecAuto)
 	out.Injected = true
 	return out, nil
+}
+
+func skillIDFromResolveResult(result *skill_step.ResolveResult) string {
+	if result == nil {
+		return ""
+	}
+	if id := strings.TrimSpace(result.SelectedSkillID); id != "" {
+		return id
+	}
+	if len(result.Candidates) == 1 {
+		return strings.TrimSpace(result.Candidates[0].SkillID)
+	}
+	if result.Status != skill_step.StatusAutoSelected {
+		return ""
+	}
+	var selected string
+	for _, candidate := range result.Candidates {
+		if candidate.Score < 0.8 || candidate.Risk == "high" || candidate.Risk == "critical" {
+			continue
+		}
+		if selected != "" {
+			return ""
+		}
+		selected = strings.TrimSpace(candidate.SkillID)
+	}
+	return selected
 }
 
 // ConfirmAndExecuteSkillExecution 接續 need_confirm：授權成功後立即送出原訊息。

@@ -1,6 +1,7 @@
 // task_loop_binding.go — chat_route 節點內 tool loop（ReAct）v3.1.6 M1。
 // 核心原則：模型只提議下一步；Go 持有結構（LoopState sidecar）、裁決風險、決定何時停。
-// flag 預設關（AI_CONSOLE_TASK_LOOP），關閉時 chat_route 行為與 v3.1.5 完全相同。
+// flag 預設開（工作視窗 task 節點）；設 AI_CONSOLE_TASK_LOOP=0 可退回 v3.1.5 單發路由。
+// 閒聊視窗不經 task 節點，不受此 flag 影響。
 package main
 
 import (
@@ -49,13 +50,14 @@ func taskLoopBudgetValue() int {
 	return taskLoopObservationBudget
 }
 
-// taskLoopEnabled 回報節點內 loop feature flag。預設關 → 行為與舊版完全相同。
+// taskLoopEnabled 回報節點內 loop feature flag。v3.1.8 起預設開（只影響工作視窗
+// 的 chat_route / cli_task 節點）；設 AI_CONSOLE_TASK_LOOP=0/false/off 退回單發路由。
 func taskLoopEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("AI_CONSOLE_TASK_LOOP"))) {
-	case "1", "true", "on", "yes":
-		return true
-	default:
+	case "0", "false", "off", "no":
 		return false
+	default:
+		return true
 	}
 }
 
@@ -80,6 +82,7 @@ func (a *App) executeTaskNodeLoop(run *dag.DAGRun, node dag.DAGNode, goal, adapt
 		// 使用者補充過資訊會追加 ExtraRounds，避免回覆後立刻又撞上限。
 		if state.Iteration >= taskLoopMaxRoundsValue()+state.ExtraRounds || state.SanitizedBytes() >= taskLoopBudgetValue() {
 			_ = dag.SaveLoopStateLocked(projectRoot, state)
+			a.emitTaskLoopRound(run.ID, node.ID, state.Iteration, "暫停", "", "已達嘗試上限，等待補充指示")
 			return "已達本步驟的嘗試上限，請補充指示或確認目前結果是否足夠。", errTaskLoopNeedsUser
 		}
 		state.Iteration++
@@ -102,13 +105,14 @@ func (a *App) executeTaskNodeLoop(run *dag.DAGRun, node dag.DAGNode, goal, adapt
 
 		action := strings.TrimSpace(resp.Action)
 		text := strings.TrimSpace(resp.Text)
-		a.emitTaskLoopRound(run.ID, node.ID, state.Iteration, action, resp.Target)
+		a.emitTaskLoopRound(run.ID, node.ID, state.Iteration, action, resp.Target, "")
 
 		// 授權類等待（skill 待確認等）→ 沿用既有整 DAG review 暫停，高風險不走 inline。
 		// 已核准（ApprovedAt 非空）就不再暫停，直接收結果——與單發版語意一致。
 		if resp.NeedsUser && action != "提問" {
 			if strings.TrimSpace(node.ApprovedAt) == "" {
 				_ = dag.SaveLoopStateLocked(projectRoot, state)
+				a.emitTaskLoopRound(run.ID, node.ID, state.Iteration, action, resp.Target, "等待授權確認")
 				return text, errChatRouteNeedsUser
 			}
 			_ = dag.SaveLoopStateLocked(projectRoot, state)
@@ -122,6 +126,7 @@ func (a *App) executeTaskNodeLoop(run *dag.DAGRun, node dag.DAGNode, goal, adapt
 			if question == "" {
 				question = "這一步需要你補充資訊後才會繼續。"
 			}
+			a.emitTaskLoopRound(run.ID, node.ID, state.Iteration, "提問", "", "等待使用者回覆："+truncateRunes(question, 60))
 			return question, errTaskLoopNeedsUser
 		}
 
@@ -133,6 +138,7 @@ func (a *App) executeTaskNodeLoop(run *dag.DAGRun, node dag.DAGNode, goal, adapt
 				continue
 			}
 			_ = dag.SaveLoopStateLocked(projectRoot, state)
+			a.emitTaskLoopRound(run.ID, node.ID, state.Iteration, "完成", "", "本步驟完成")
 			if text == "" {
 				text = "（此步驟無文字輸出）"
 			}
@@ -173,6 +179,7 @@ func (a *App) executeTaskNodeLoop(run *dag.DAGRun, node dag.DAGNode, goal, adapt
 				return ierr.Error() + "。" + xlsxInputFormatHint, errTaskLoopNeedsUser
 			}
 			_ = dag.SaveLoopStateLocked(projectRoot, state)
+			a.emitTaskLoopRound(run.ID, node.ID, state.Iteration, "輸入", "", "等待參數：file_name、cells 或 rows")
 			return "要產出 Excel，" + xlsxInputFormatHint, errTaskLoopNeedsUser
 		}
 
@@ -186,8 +193,10 @@ func (a *App) executeTaskNodeLoop(run *dag.DAGRun, node dag.DAGNode, goal, adapt
 				continue
 			}
 			_ = dag.SaveLoopStateLocked(projectRoot, state)
+			a.emitTaskLoopRound(run.ID, node.ID, state.Iteration, "暫停", "", "重複動作無進展，等待指示")
 			return fmt.Sprintf("已重複嘗試「%s %s」仍無進展，請補充指示。", action, truncateRunes(resp.Target, 60)), errTaskLoopNeedsUser
 		case count == taskLoopSignatureHintAt:
+			a.emitTaskLoopRound(run.ID, node.ID, state.Iteration, action, resp.Target, "偵測到重複動作，正在換方法")
 			appendLoopObservation(state, newLoopObservation("system", action, resp.Target, "你已重複過這個動作，請換方法或直接輸出結論。"))
 		}
 		appendLoopObservation(state, newLoopObservation("tool", action, resp.Target, text))
@@ -284,7 +293,8 @@ func loopSignature(action, target string) string {
 }
 
 // emitTaskLoopRound 每輪一個事件，前端節點卡片顯示「第 N 輪：動作 目標」。
-func (a *App) emitTaskLoopRound(runID, nodeID string, iteration int, action, target string) {
+// message 非空時前端優先顯示人話描述（例：正在修正、等待參數），空字串則照舊組字。
+func (a *App) emitTaskLoopRound(runID, nodeID string, iteration int, action, target, message string) {
 	if a.eventBus == nil {
 		return
 	}
@@ -294,6 +304,7 @@ func (a *App) emitTaskLoopRound(runID, nodeID string, iteration int, action, tar
 		"iteration": iteration,
 		"action":    action,
 		"target":    truncateRunes(target, taskLoopEmitTargetMaxBytes),
+		"message":   truncateRunes(message, taskLoopEmitTargetMaxBytes),
 	})
 }
 

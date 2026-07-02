@@ -82,6 +82,8 @@ type llmAPIAdapterConfig struct {
 type openAIChatRequest struct {
 	Model    string              `json:"model"`
 	Messages []openAIChatMessage `json:"messages"`
+	// MaxTokens 只在需要限制輸出長度時帶上（如懸浮頭像閒聊）；0 = 不限制（omitempty）。
+	MaxTokens int `json:"max_tokens,omitempty"`
 }
 
 type openAIChatMessage struct {
@@ -525,7 +527,7 @@ func appDataRoot() string {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.startHookGeneRecorder()
-	debugtrace.Record("go.startup", "", nil)
+	debugtrace.Record("go.startup", "", map[string]interface{}{})
 	// SEC-06: 清掉上次未正常停止的 ephemeral browser profile（冪等）。
 	_ = a.CleanupEphemeralProfiles()
 	// #7: Inject Wails context into event bus so it can emit to frontend.
@@ -626,6 +628,12 @@ func (a *App) startup(ctx context.Context) {
 			fmt.Fprintf(os.Stderr, "warning: scheduler start failed: %v\n", err)
 		}
 	}()
+}
+
+// GetMonitorLinks is kept for older generated frontends; the local HTTP trace
+// viewer is disabled for the public build surface.
+func (a *App) GetMonitorLinks() debugtrace.LinkSnapshot {
+	return debugtrace.LinkSnapshot{}
 }
 
 type ConsoleState struct {
@@ -1704,6 +1712,12 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 			})
 			return resp, nil
 		}
+		if resp, handled := a.consumeDagIntentAffirmation(sessionID, userText, traceID); handled {
+			debugtrace.Record("go.SendCLIMessage.dag_intent.affirmed", traceID, map[string]interface{}{
+				"target": resp.Target,
+			})
+			return resp, nil
+		}
 		if rejudgeText, handled := a.consumePendingToolAnswer(sessionID, userText, traceID); handled {
 			// Step 2：補答後不沿用舊 decision，改用乾淨 re-judge 文字重跑完整 routing（第二次 judge）。
 			userText = rejudgeText
@@ -2273,6 +2287,12 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 			})
 			return resp, nil
 		}
+		if resp, handled := a.consumeDagIntentAffirmation(sessionID, userText, traceID); handled {
+			debugtrace.Record("go.SendAPIMessage.dag_intent.affirmed", traceID, map[string]interface{}{
+				"target": resp.Target,
+			})
+			return resp, nil
+		}
 		if rejudgeText, handled := a.consumePendingToolAnswer(sessionID, userText, traceID); handled {
 			// Step 2：補答後重跑完整 routing（第二次 judge），不沿用舊 decision。
 			userText = rejudgeText
@@ -2781,11 +2801,11 @@ func inferGoProgramAuthoringRequest(userText string) (string, bool) {
 	if !containsAny(lower, []string{"skill", "小程式", "程式", "program"}) {
 		return "", false
 	}
-	if !containsAny(text, []string{"做", "建立", "製作", "產生", "生成", "新增", "幫我做", "幫我建立", "幫我製作"}) {
+	if !containsAny(text, []string{"做", "建立", "製作", "產生", "生成", "新增", "產", "幫我做", "幫我建立", "幫我製作"}) {
 		return "", false
 	}
-	if !containsAny(lower, []string{"json", "表格", "csv", "xlsx", "資料", "data", "輸出", "輸入", "建議", "判斷", "比較", "轉換", "計算", "處理", "table", "report"}) &&
-		!containsAny(text, []string{"表", "料表", "欄位", "欄", "格式", "清單", "報表"}) {
+	if !containsAny(lower, []string{"json", "表格", "csv", "xlsx", "資料", "data", "輸出", "輸入", "建議", "判斷", "比較", "轉換", "計算", "處理", "table", "report", "ui", "button"}) &&
+		!containsAny(text, []string{"表", "料表", "欄位", "欄", "格式", "清單", "報表", "支援", "功能", "操作", "介面", "畫面", "互動", "測試", "正確"}) {
 		return "", false
 	}
 	name := extractGoProgramName(text)
@@ -2802,7 +2822,7 @@ func extractGoProgramName(text string) string {
 	for _, prefix := range []string{"請幫我", "幫我", "請", "我要", "我想要"} {
 		cleaned = strings.TrimPrefix(strings.TrimSpace(cleaned), prefix)
 	}
-	for _, verb := range []string{"做一個", "建立一個", "製作一個", "產生一個", "生成一個", "新增一個", "做", "建立", "製作", "產生", "生成", "新增"} {
+	for _, verb := range []string{"做一個", "建立一個", "製作一個", "產生一個", "生成一個", "新增一個", "產一個", "做", "建立", "製作", "產生", "生成", "新增", "產"} {
 		if strings.HasPrefix(cleaned, verb) {
 			cleaned = strings.TrimSpace(strings.TrimPrefix(cleaned, verb))
 			break

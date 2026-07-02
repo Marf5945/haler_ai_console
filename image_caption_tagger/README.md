@@ -150,6 +150,6 @@ python3 image_caption_tagger/caption_tagger.py /path/to/images --append
 
 訓練風格 LoRA 時，建議：
 
-- `--token` 使用一個不常見的觸發詞，例如 `custom_style_v1`
+- `--token` 使用一個不常見的觸發詞，例如 `marf_style_v1`
 - 每張圖再人工補上主體、構圖、背景、衣服、情緒、媒材等 tags
 - 不要只放觸發詞，否則模型比較容易把整張圖的所有內容都綁到觸發詞上

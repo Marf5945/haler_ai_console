@@ -6,12 +6,14 @@ const edgeGap = 12;
 const compactTipGap = 8;
 const compactTipMinWidth = 80;
 const compactTipMaxWidth = 224;
-const shakePreviewDelayMs = 1200;
+const shakePreviewDelayMs = 2000;
 const shakePreviewDistance = 80;
-const shakeVomitDelayMs = 3000;
+const shakeVomitDelayMs = 3500;
 const shakeVomitDistance = 500;
 const fullBodyAvatarWidth = 200;
 const fullBodyAvatarHeight = 360;
+const contextMenuWidth = 178;
+const contextMenuGap = 14;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -61,6 +63,8 @@ export default function FloatingAvatarMode({
   onOpenSettings,
   onDropFiles,
   onSubmit,
+  onPhoto,
+  photoBusy = false,
   onChatModeChange,
   onChatModeToggle,
   onSwitchAgent,
@@ -224,6 +228,10 @@ export default function FloatingAvatarMode({
   const compactTipStyle = compactTipFitsLeft
     ? {left: -(compactTipWidth + compactTipGap), top: 0, width: compactTipWidth}
     : {left: edgeGap - clampedPosition.x, top: avatarFrameHeight + compactTipGap, width: compactTipWidth};
+  const contextMenuRightLeft = avatarFrameWidth + contextMenuGap;
+  const contextMenuLeft = clampedPosition.x + contextMenuRightLeft + contextMenuWidth <= window.innerWidth - edgeGap
+    ? contextMenuRightLeft
+    : Math.max(edgeGap - clampedPosition.x, -contextMenuWidth - contextMenuGap);
   const displayStatus = pendingConfirm?.title || statusTitle || t('floatingAvatar.statusIdle');
   const displayLatest = pendingConfirm?.reason || latestText || statusText || t('floatingAvatar.latestIdle');
   const speakerName = persona?.name || t('floatingAvatar.agentFallback');
@@ -266,7 +274,7 @@ export default function FloatingAvatarMode({
     shake.distance += Math.abs(clientX - last.x) + Math.abs(clientY - last.y);
     shake.lastPoint = {x: clientX, y: clientY};
     const elapsed = now - shake.startedAt;
-    // 搖晃中即時改表情：先暈（sad），1.2 秒後抽問候池，3 秒後進嘔吐彩蛋。
+    // 搖晃中即時改表情：先暈（sad），2 秒後抽問候池換表情，3.5 秒後進嘔吐彩蛋。
     if (!shake.previewFired && shake.distance > 240) {
       setShakeState((prev) => (prev === 'speechless' ? prev : 'sad'));
     }
@@ -479,7 +487,7 @@ export default function FloatingAvatarMode({
         </aside>
         )}
         {contextOpen && (
-          <nav className="floating-avatar-menu" aria-label={t('floatingAvatar.menuLabel')}>
+          <nav className="floating-avatar-menu" style={{left: contextMenuLeft}} aria-label={t('floatingAvatar.menuLabel')}>
             <button type="button" onClick={onRestore}>{t('floatingAvatar.restore')}</button>
             <button type="button" onClick={onOpenSettings}>{t('floatingAvatar.settings')}</button>
             <button
@@ -654,7 +662,24 @@ export default function FloatingAvatarMode({
               <span>{chatMode ? t('floatingAvatar.chatPanelKicker') : t('floatingAvatar.panelKicker')}</span>
               <strong>{persona?.name || t('floatingAvatar.agentFallback')}</strong>
             </div>
-            <button type="button" onClick={() => setPanelOpen(false)} aria-label={t('common.close')}>×</button>
+            <div className="floating-avatar-panel-header-actions">
+              <button
+                type="button"
+                className={`floating-avatar-chat-toggle ${chatMode ? 'floating-avatar-chat-toggle-on' : ''}`}
+                aria-pressed={chatMode}
+                onClick={() => {
+                  noteAction();
+                  if (onChatModeToggle) {
+                    onChatModeToggle(!chatMode);
+                  } else {
+                    onChatModeChange?.(!chatMode);
+                  }
+                }}
+              >
+                {menuCheck(chatMode, t('floatingAvatar.chatToggle'))}
+              </button>
+              <button type="button" onClick={() => setPanelOpen(false)} aria-label={t('common.close')}>×</button>
+            </div>
           </header>
           <div className="floating-avatar-mini-status">
             {pendingConfirm && <strong>{displayStatus}</strong>}
@@ -696,7 +721,19 @@ export default function FloatingAvatarMode({
                 </div>
               </div>
             ) : (
-              <button type="submit">{t('floatingAvatar.send')}</button>
+              <div className="floating-avatar-panel-actions">
+                {onPhoto && (
+                  <button
+                    type="button"
+                    className="floating-avatar-photo-btn"
+                    disabled={photoBusy}
+                    onClick={() => { noteAction(); onPhoto(); }}
+                  >
+                    {photoBusy ? t('floatingAvatar.photoBusy') : t('floatingAvatar.photo')}
+                  </button>
+                )}
+                <button type="submit">{t('floatingAvatar.send')}</button>
+              </div>
             )}
           </form>
         </section>

@@ -201,8 +201,8 @@ import {
   PurgeBoundaryDir,
   ListPurgeManifests,
   PauseScheduledJob,
-  // ── v3.6.2 W3A Media Provenance（§9A）接線 ──
-  // 對應 Go app.go 的 W3A Wails binding 方法，
+  // ── v3.6.2 WA3 Media Provenance（§9A）接線 ──
+  // 對應 Go app.go 的 WA3 Wails binding 方法，
   // 涵蓋媒體驗證→污染偵測→匯入匯出→傳輸引導→信任清單管理。
   CreateDocumentWA3,
   GetMediaWA3Info,
@@ -898,7 +898,13 @@ function reorderItemsByKeys(items, orderKeys) {
 
 const learningDigestStorageKey = 'ai-console.learning-digest-ready';
 const learningIdleDelayMs = 20 * 60 * 1000;
-const dagTaskPattern = /(幫我|請|查|搜尋|整理|建立|執行|打開|開啟|分析|寫|寄|下載|安裝|錄製|學習|流程|天氣|地圖)/;
+const dagTaskRequestPattern = /(幫我|幫忙|請你|請幫我|麻煩|替我|我要|我想要|我需要|幫我把|幫我處理)/;
+const dagStrongTaskActionPattern = /(搜尋|查詢|整理|建立|新增|執行|打開|開啟|分析|寄送|寄出|下載|安裝|錄製|學習|製作|產生|產出|生成|修改|修正|更新|檢查|測試|驗證|比較|轉換|匯出|匯入|讀取|刪除|計算)/;
+const dagWeakTaskWithObjectPattern = /(查|寫|做).{0,12}(檔案|文件|報告|摘要|表格|簡報|程式|程式碼|網頁|網站|工具|小工具|計算機|清單|圖表|測試|驗證|天氣|地圖|資料)/;
+const dagDomainTaskPattern = /(搜尋|查詢|查|打開|開啟|導航|規劃).{0,12}(天氣|地圖|路線|地址|位置)/;
+const dagQuestionIntentPattern = /(請問|想問|問一下|你覺得|你認為|為什麼|什麼是|怎麼|如何|怎樣|可不可以解釋|可以解釋|告訴我.*(怎麼|如何|為什麼|什麼))/;
+const dagLeadingQuestionPattern = /^(請問|想問|問一下|你覺得|你認為|為什麼|什麼是|怎麼看|如何理解|可以解釋|你好|嗨|早安|晚安|謝謝)/;
+const dagAmbiguousTaskSignalPattern = /(看|查|寫|做|找|弄|處理|研究|幫我|幫忙|請你|我要|我想要|我需要|天氣|地圖|路線|資料|檔案|文件|報告|程式|工具|小工具|計算機)/;
 const dagHighRiskPattern = /(刪除|安裝|寄|付款|修改系統|開啟地圖|地圖|錄製|螢幕)/;
 const internalControlPrefixPattern = /^[ㄅ-ㄩ]{3}\s*/;
 
@@ -1116,9 +1122,26 @@ function createDagRunFromMessage(text) {
 function shouldCreateDagRun(text) {
   const raw = String(text || '').trim();
   if (!raw) return false;
-  // Auto-DAG runs only after an explicit internal/LLM route. Natural language
-  // must reach the LLM first so it can choose chat, search, saved operation, or DAG.
-  return /^\/dag\b/i.test(raw) || /^#dag\b/i.test(raw);
+  if (/^\/dag\b/i.test(raw) || /^#dag\b/i.test(raw)) return true;
+  // 自然語言只做高信心自動任務判定：先排除問話，再要求「請系統做事」
+  // 且命中明確動詞；查/寫/做 這類弱動詞必須帶明確產物或領域。
+  if (dagQuestionIntentPattern.test(raw)) return false;
+  if (raw.length < 6) return false;
+  if (!dagTaskRequestPattern.test(raw)) return false;
+  return dagStrongTaskActionPattern.test(raw)
+    || dagWeakTaskWithObjectPattern.test(raw)
+    || dagDomainTaskPattern.test(raw);
+}
+
+function shouldSuggestDagRun(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  if (/^\/dag\b/i.test(raw) || /^#dag\b/i.test(raw)) return false;
+  if (shouldCreateDagRun(raw)) return false;
+  if (dagLeadingQuestionPattern.test(raw)) return false;
+  if (raw.length < 4) return false;
+  if (!dagTaskRequestPattern.test(raw)) return false;
+  return dagQuestionIntentPattern.test(raw) || dagAmbiguousTaskSignalPattern.test(raw);
 }
 
 function shouldHandleLearningShortcutBeforeLLM() {
@@ -1574,6 +1597,8 @@ function App() {
   const [state, setState] = useState(fallbackState);
   const [messagesByAgent, setMessagesByAgent] = useState({main: fallbackState.messages});
   const [draft, setDraft] = useState('');
+  const [dismissedDagSuggestionText, setDismissedDagSuggestionText] = useState('');
+  const [dagClarificationPending, setDagClarificationPending] = useState(false);
   /* i18n: persona fallback */ const [personaName, setPersonaName] = useState(_t('persona.fallbackName'));
   const [personaJob, setPersonaJob] = useState(_t('persona.fallbackJob'));
   const [activePanel, setActivePanel] = useState(null);
@@ -1627,18 +1652,18 @@ function App() {
     refreshSchedulerJobs();
   }, []);
 
-  // ── v3.6.2 W3A Media Provenance（§9A）state ──
-  // w3aImportPopup   : 匯入選單資料（ImportResult 結構，null = 關閉）
-  // w3aToastMsg      : 傳輸引導 toast 訊息（null = 隱藏）
-  // w3aTrustList     : 信任清單陣列
-  const [w3aImportPopup, setW3aImportPopup] = useState(null);
-  const [w3aToastMsg, setW3aToastMsg] = useState(null);
-  const [w3aTrustList, setW3aTrustList] = useState([]);
-  const [w3aDetail, setW3aDetail] = useState(null);
-  const [w3aPollutionResult, setW3aPollutionResult] = useState(null);
-  const [w3aTransferGuidance, setW3aTransferGuidance] = useState(null);
-  const [w3aActionBusy, setW3aActionBusy] = useState('');
-  const [w3aActionError, setW3aActionError] = useState('');
+  // ── v3.6.2 WA3 Media Provenance（§9A）state ──
+  // wa3ImportPopup   : 匯入選單資料（ImportResult 結構，null = 關閉）
+  // wa3ToastMsg      : 傳輸引導 toast 訊息（null = 隱藏）
+  // wa3TrustList     : 信任清單陣列
+  const [wa3ImportPopup, setWa3ImportPopup] = useState(null);
+  const [wa3ToastMsg, setWa3ToastMsg] = useState(null);
+  const [wa3TrustList, setWa3TrustList] = useState([]);
+  const [wa3Detail, setWa3Detail] = useState(null);
+  const [wa3PollutionResult, setWa3PollutionResult] = useState(null);
+  const [wa3TransferGuidance, setWa3TransferGuidance] = useState(null);
+  const [wa3ActionBusy, setWa3ActionBusy] = useState('');
+  const [wa3ActionError, setWa3ActionError] = useState('');
 
   // ── v3.6.3 Remote Bridge Communication（§12A）state ──
   // remoteBridgeChannels : 已註冊通道陣列，結構同 Go ChannelBinding（id, channel, mode, active…）
@@ -2056,6 +2081,7 @@ function App() {
   const [floatingAvatarChatMode, setFloatingAvatarChatMode] = useState(false);
   const [floatingAvatarPanelOpenSignal, setFloatingAvatarPanelOpenSignal] = useState(0);
   const [floatingAvatarReplyBubble, setFloatingAvatarReplyBubble] = useState('');
+  const [floatingPhotoBusy, setFloatingPhotoBusy] = useState(false);
   const [floatingAvatarDrafts, setFloatingAvatarDrafts] = useState({});
   const [floatingReminderPause, setFloatingReminderPause] = useState({mode: '', until: 0});
   const floatingAvatarWindowRef = useRef({restore: null, compactPosition: null});
@@ -2635,6 +2661,7 @@ function App() {
         iteration: payload?.iteration || 0,
         action: payload?.action || '',
         target: payload?.target || '',
+        message: payload?.message || '',
       }}));
     });
     const offTaskSystemMessage = EventsOn('task:system_message', (payload) => {
@@ -2650,16 +2677,16 @@ function App() {
 
     // §24: 文件匯入完成 toast
     const offDocImported = EventsOn('document:imported', (data) => {
-      setW3aToastMsg(t('system.imported', { name: data?.display_name || t('w3a.defaultDocName') }));
-      setTimeout(() => setW3aToastMsg(null), 4000);
+      setWa3ToastMsg(t('system.imported', { name: data?.display_name || t('wa3.defaultDocName') }));
+      setTimeout(() => setWa3ToastMsg(null), 4000);
     });
 
     // skill 產出落位完成 → 立即刷新右側引用面板（5 秒輪詢之外的即時路徑）。
     const offReferenceImported = EventsOn('reference:imported', (data) => {
       refreshReferenceFiles().catch(() => {});
       if (data?.name) {
-        setW3aToastMsg(t('system.imported', { name: data.name }));
-        setTimeout(() => setW3aToastMsg(null), 4000);
+        setWa3ToastMsg(t('system.imported', { name: data.name }));
+        setTimeout(() => setWa3ToastMsg(null), 4000);
       }
     });
 
@@ -2837,22 +2864,35 @@ function App() {
       }
     });
 
-    // ── v3.6.2 W3A Media Provenance（§9A）事件監聯 ──
-    const offW3AVerified = EventsOn('w3a:verified', (data) => {
-      if (data) setW3aVerifyResult(data);
+    // ── v3.6.2 WA3 Media Provenance（§9A）事件監聯 ──
+    const offWA3Verified = EventsOn('wa3:verified', (data) => {
+      // 驗證完成 → 同步更新目前檢視中媒體的狀態（若路徑相符）
+      if (data?.path) {
+        setWa3Detail((current) => (
+          current && current.file_path === data.path
+            ? {...current, status: data.status}
+            : current
+        ));
+      }
     });
-    const offW3APollution = EventsOn('w3a:pollution_detected', (data) => {
-      if (data) setW3aToastMsg(t('w3a.pollutionWarning'));
-      setTimeout(() => setW3aToastMsg(null), 6000);
+    const offWA3Pollution = EventsOn('wa3:pollution_detected', (data) => {
+      if (data) setWa3ToastMsg(t('wa3.pollutionWarning'));
+      setTimeout(() => setWa3ToastMsg(null), 6000);
     });
-    const offW3AExported = EventsOn('w3a:exported', () => {
-      setW3aToastMsg(t('w3a.transmitHint'));
-      setTimeout(() => setW3aToastMsg(null), 5000);
+    const offWA3Exported = EventsOn('wa3:exported', () => {
+      setWa3ToastMsg(t('wa3.transmitHint'));
+      setTimeout(() => setWa3ToastMsg(null), 5000);
     });
-    const offW3AImported = EventsOn('w3a:imported', (data) => {
-      // 由 importMediaW3A 函式處理彈窗
+    const offWA3Imported = EventsOn('wa3:imported', (data) => {
+      // 由 importMediaWA3 函式處理彈窗
     });
-    const offW3ATrust = EventsOn('w3a:trust_updated', () => refreshW3ATrustList());
+    const offWA3DocCreated = EventsOn('wa3:doc_created', () => {
+      setWa3ToastMsg(t('wa3.docCreated'));
+      setTimeout(() => setWa3ToastMsg(null), 4000);
+    });
+    const offWA3Trust = EventsOn('wa3:trust_updated', () => refreshWA3TrustList());
+    // 啟動時載入一次信任清單，避免匯入選單首次顯示信任數為 0
+    refreshWA3TrustList();
 
     // §30: 關閉視窗 → 前端收到後端 session:close_prompt 事件，顯示對話框
     const offSessionClose = EventsOn('session:close_prompt', (payload) => {
@@ -2967,11 +3007,12 @@ function App() {
       offRBInbound();
       offSchedulerRequested();
       offSchedulerReminder();
-      offW3AVerified();
-      offW3APollution();
-      offW3AExported();
-      offW3AImported();
-      offW3ATrust();
+      offWA3Verified();
+      offWA3Pollution();
+      offWA3Exported();
+      offWA3Imported();
+      offWA3DocCreated();
+      offWA3Trust();
       offSessionClose();
       offSessionCloseConfirmed();
       offSchedulerBgPrompt();
@@ -3166,6 +3207,9 @@ function App() {
     const cliResp = await applyComposerBuiltInSideEffects(normalizeCLIResponse(resp));
     console.log('[CLI_MONITOR] frontend raw resp -> normalized', {traceId, resp, cliResp});
     postDebugTrace(apiAdapter ? 'ui.composer.after.SendAPIMessage' : 'ui.composer.after.SendCLIMessage', traceId, {response: cliResp || null});
+    const cliAction = String(cliResp?.action || '').trim();
+    const cliNext = String(cliResp?.next || '').trim();
+    setDagClarificationPending(cliAction === '提問' || cliNext === '提問');
     refreshReadinessGateState();
     setChatCliLog((prev) => ({
       ...(prev || {payload}),
@@ -3207,6 +3251,20 @@ function App() {
       });
       await executeLearningOperationIntent(operationIntent, {conversationId, traceId});
       return;
+    }
+    if (!cliResp?.auth_required && !cliResp?.error && cliAction === '任務') {
+      const taskText = String(cliResp?.target || payload?.userText || '').trim();
+      if (taskText) {
+        setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(
+          prev,
+          traceId,
+          makeComposerPendingMessage(traceId, '任務規劃中，請稍等。'),
+        ));
+        postDebugTrace('ui.composer.dag_intent_confirmed', traceId, {user_text: taskText});
+        setDagClarificationPending(false);
+        startDagForMessage(taskText, {conversationId, traceId});
+        return;
+      }
     }
     if (cliResp?.auth_required) {
       setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, `Ai:${cliResp.text || t('system.authRequired')}`));
@@ -4914,6 +4972,17 @@ function App() {
     submitComposerText([selectedText, typedText].filter(Boolean).join('\n'), images);
   }
 
+  function acceptDagTaskSuggestion() {
+    const text = String(draft || '').trim();
+    if (!text) return;
+    setDismissedDagSuggestionText('');
+    submitComposerText(text, [], {forceDag: true});
+  }
+
+  function dismissDagTaskSuggestion() {
+    setDismissedDagSuggestionText(String(draft || '').trim());
+  }
+
   function summarizeSearchResultText(text) {
     const sourceText = String(text || '').trim();
     if (!sourceText) return;
@@ -4932,6 +5001,7 @@ function App() {
     const conversationId = activeConversationIdRef.current || 'main';
     // DEBUG_TRACE_REMOVE: Correlates every debug trace event for this composer send.
     const traceId = makeDebugTraceID('chat');
+    const sessionId = appSessionId || '';
     const pendingMessage = makeComposerPendingMessage(traceId);
     postDebugTrace('ui.composer.submit.raw', traceId, {user_text: text});
     setConversationMessages(conversationId, (prev) => [...prev, displayText, pendingMessage]);
@@ -5012,14 +5082,37 @@ function App() {
       }
       return;
     }
-    if (shouldCreateDagRun(text)) {
+    if (!dagClarificationPending && !options.forceDag && shouldSuggestDagRun(text)) {
+      try {
+        const clarifyResp = await callWails(() => window.go?.main?.App?.ClarifyDagIntent?.(sessionId, text, traceId));
+        const cliResp = normalizeCLIResponse(clarifyResp);
+        if (cliResp?.action === '提問') {
+          clearPendingTimers();
+          setDagClarificationPending(true);
+          setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(
+            prev,
+            traceId,
+            `Ai:${cliResp.text || '這是要我實際執行，還是想先討論？'}`,
+          ));
+          persistConversationEntry(conversationId, 'assistant', cliResp.text || '這是要我實際執行，還是想先討論？', traceId).catch(() => {});
+          refreshReadinessGateState();
+          scheduleReadinessGateBurstRefresh();
+          return;
+        }
+      } catch (error) {
+        postDebugTrace('ui.composer.dag_intent_clarify.error', traceId, {error: error?.message || String(error)});
+      }
+    }
+    const explicitDagRun = /^\/dag\b/i.test(text) || /^#dag\b/i.test(text);
+    if (options.forceDag || explicitDagRun || (!dagClarificationPending && shouldCreateDagRun(text))) {
       clearPendingTimers();
+      setDagClarificationPending(false);
       setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(
         prev,
         traceId,
         makeComposerPendingMessage(traceId, '任務規劃中，請稍等。'),
       ));
-      postDebugTrace('ui.composer.task_progress_only', traceId, {user_text: text});
+      postDebugTrace('ui.composer.task_progress_only', traceId, {user_text: text, forced: !!options.forceDag});
       classifySourceInText(text);
       startDagForMessage(text, {conversationId, traceId});
       return;
@@ -5034,7 +5127,6 @@ function App() {
     const safeText = callWails(() => EscapeExternalTokens(text))
       .catch(() => text);
     // 透過 CLIAdapter 送出（含 SkillInjection），同時記錄互動
-    const sessionId = appSessionId || '';
     // 送出前把本回合附圖暫存到後端（StageSessionImages）。傳空陣列也會清掉前一則殘留，
     // 避免圖片外洩到下一則。用 window.go 取用，避開 wails 綁定重新生成前的前端 build 破壞。
     const stagedImageURLs = (images || []).map((img) => img.src).filter(Boolean);
@@ -5105,6 +5197,7 @@ function App() {
     // v3.6.4: 使用者送出新訊息 → 清除 Floating Candidate Actions
     callWails(DismissFloatingCandidates).catch(() => {});
     setReadinessGate((prev) => ({...prev, floating_candidates: []}));
+    setDismissedDagSuggestionText('');
     scheduleReadinessGateBurstRefresh();
     // 重置高風險確認流程狀態
     setRiskImpactExpanded(false);
@@ -5393,176 +5486,176 @@ function App() {
     } catch { /* best-effort */ }
   }
 
-  // ── v3.6.2 W3A Media Provenance（§9A）──
+  // ── v3.6.2 WA3 Media Provenance（§9A）──
   //
   // 函式群組說明：
-  //  refreshW3ATrustList  — 從後端拉取開發者信任清單
-  //  importMediaW3A       — 匯入媒體 → 驗證 → 顯示選單解釋 W3A 功能
-  //  dismissW3AImportPopup — 關閉匯入選單
+  //  refreshWA3TrustList  — 從後端拉取開發者信任清單
+  //  importMediaWA3       — 匯入媒體 → 驗證 → 顯示選單解釋 WA3 功能
+  //  dismissWA3ImportPopup — 關閉匯入選單
 
-  async function refreshW3ATrustList() {
+  async function refreshWA3TrustList() {
     callWails(ListWA3TrustedDevelopers)
-      .then((list) => setW3aTrustList(list || []))
+      .then((list) => setWa3TrustList(list || []))
       .catch(() => {});
   }
 
-  function isW3AMediaPath(filePath) {
+  function isWA3MediaPath(filePath) {
     return /\.(png|jpe?g|webp|gif|bmp|tiff?|wav|mp3|m4a|aac|flac|ogg|mp4|mov|m4v|webm)$/i.test(String(filePath || ''));
   }
 
-  // W3A 文檔來源證明適用的文字檔格式（與 media 互斥）。
-  function isW3ADocPath(filePath) {
+  // WA3 文檔來源證明適用的文字檔格式（與 media 互斥）。
+  function isWA3DocPath(filePath) {
     return /\.(txt|md|markdown|rtf|csv|html?|pdf|docx?|odt)$/i.test(String(filePath || ''));
   }
 
   function shouldProbeDroppedInstallPackage(paths = []) {
-    if (paths.length !== 1 || isW3AMediaPath(paths[0])) return false;
+    if (paths.length !== 1 || isWA3MediaPath(paths[0])) return false;
     const name = String(paths[0] || '').split(/[\\/]/).pop() || '';
     return !name.includes('.') || /\.(zip|skill|subagent)$/i.test(name);
   }
 
-  function resolveW3AMediaPath() {
-    return w3aImportPopup?.source_path
-      || w3aImportPopup?.info?.file_path
-      || w3aDetail?.file_path
+  function resolveWA3MediaPath() {
+    return wa3ImportPopup?.source_path
+      || wa3ImportPopup?.info?.file_path
+      || wa3Detail?.file_path
       || '';
   }
 
-  function makeW3ACopyPath(filePath) {
+  function makeWA3CopyPath(filePath) {
     const rawPath = String(filePath || '');
     const splitAt = Math.max(rawPath.lastIndexOf('/'), rawPath.lastIndexOf('\\'));
     const dir = splitAt >= 0 ? rawPath.slice(0, splitAt + 1) : '';
     const name = splitAt >= 0 ? rawPath.slice(splitAt + 1) : rawPath;
     const extAt = name.lastIndexOf('.');
     return extAt > 0
-      ? `${dir}${name.slice(0, extAt)}.w3a-copy${name.slice(extAt)}`
-      : `${dir}${name}.w3a-copy`;
+      ? `${dir}${name.slice(0, extAt)}.wa3-copy${name.slice(extAt)}`
+      : `${dir}${name}.wa3-copy`;
   }
 
-  async function importMediaW3A(filePath) {
+  async function importMediaWA3(filePath) {
     try {
-      setW3aActionError('');
+      setWa3ActionError('');
       const result = await callWails(() => ImportMediaVerify(filePath));
       if (result) {
         const popup = {...result, source_path: filePath};
-        setW3aImportPopup(popup);
-        setW3aDetail(popup.info || null);
-        setW3aPollutionResult(popup.info?.pollution || null);
+        setWa3ImportPopup(popup);
+        setWa3Detail(popup.info || null);
+        setWa3PollutionResult(popup.info?.pollution || null);
       }
       return result;
     } catch (error) {
       const message = error?.message || String(error);
-      setW3aActionError(message);
+      setWa3ActionError(message);
       throw error;
     }
   }
 
-  async function loadW3AMediaInfo() {
-    const filePath = resolveW3AMediaPath();
+  async function loadWA3MediaInfo() {
+    const filePath = resolveWA3MediaPath();
     if (!filePath) {
-      setW3aActionError(t('w3a.noMediaPath'));
+      setWa3ActionError(t('wa3.noMediaPath'));
       return;
     }
-    setW3aActionBusy('info');
-    setW3aActionError('');
+    setWa3ActionBusy('info');
+    setWa3ActionError('');
     try {
       const info = await callWails(() => GetMediaWA3Info(filePath));
-      setW3aDetail(info || null);
-      setW3aImportPopup((current) => current ? {...current, info: info || current.info, source_path: filePath} : current);
-      setW3aToastMsg(t('w3a.infoLoaded'));
+      setWa3Detail(info || null);
+      setWa3ImportPopup((current) => current ? {...current, info: info || current.info, source_path: filePath} : current);
+      setWa3ToastMsg(t('wa3.infoLoaded'));
     } catch (error) {
-      setW3aActionError(error?.message || String(error));
+      setWa3ActionError(error?.message || String(error));
     } finally {
-      setW3aActionBusy('');
+      setWa3ActionBusy('');
     }
   }
 
-  async function detectW3APollution() {
-    const filePath = resolveW3AMediaPath();
+  async function detectWA3Pollution() {
+    const filePath = resolveWA3MediaPath();
     if (!filePath) {
-      setW3aActionError(t('w3a.noMediaPath'));
+      setWa3ActionError(t('wa3.noMediaPath'));
       return;
     }
-    setW3aActionBusy('pollution');
-    setW3aActionError('');
+    setWa3ActionBusy('pollution');
+    setWa3ActionError('');
     try {
       const report = await callWails(() => DetectModelPollution(filePath));
-      setW3aPollutionResult(report || null);
-      setW3aDetail((current) => current ? {...current, pollution: report || null} : current);
-      setW3aToastMsg(report?.is_pollution_risk ? t('w3a.pollutionRiskDetected') : t('w3a.pollutionSafe'));
+      setWa3PollutionResult(report || null);
+      setWa3Detail((current) => current ? {...current, pollution: report || null} : current);
+      setWa3ToastMsg(report?.is_pollution_risk ? t('wa3.pollutionRiskDetected') : t('wa3.pollutionSafe'));
     } catch (error) {
-      setW3aActionError(error?.message || String(error));
+      setWa3ActionError(error?.message || String(error));
     } finally {
-      setW3aActionBusy('');
+      setWa3ActionBusy('');
     }
   }
 
-  async function showW3ATransferGuidance() {
-    setW3aActionBusy('guidance');
-    setW3aActionError('');
+  async function showWA3TransferGuidance() {
+    setWa3ActionBusy('guidance');
+    setWa3ActionError('');
     try {
       const guidance = await callWails(GetWA3TransferGuidance);
-      setW3aTransferGuidance(guidance || null);
-      setW3aToastMsg(guidance?.ui_message || t('w3a.exportHint'));
+      setWa3TransferGuidance(guidance || null);
+      setWa3ToastMsg(guidance?.ui_message || t('wa3.exportHint'));
     } catch (error) {
-      setW3aActionError(error?.message || String(error));
+      setWa3ActionError(error?.message || String(error));
     } finally {
-      setW3aActionBusy('');
+      setWa3ActionBusy('');
     }
   }
 
-  async function trustW3ADeveloper() {
-    const signature = w3aDetail?.developer_signature || w3aImportPopup?.info?.developer_signature;
+  async function trustWA3Developer() {
+    const signature = wa3Detail?.developer_signature || wa3ImportPopup?.info?.developer_signature;
     if (!signature?.app_id || !signature?.public_key) {
-      setW3aActionError(t('w3a.noDeveloperSignature'));
+      setWa3ActionError(t('wa3.noDeveloperSignature'));
       return;
     }
-    setW3aActionBusy('trust');
-    setW3aActionError('');
+    setWa3ActionBusy('trust');
+    setWa3ActionError('');
     try {
       await callWails(() => AddWA3TrustedDeveloper(signature.app_id, signature.public_key, signature.app_id));
-      await refreshW3ATrustList();
-      setW3aToastMsg(t('w3a.trustAdded'));
+      await refreshWA3TrustList();
+      setWa3ToastMsg(t('wa3.trustAdded'));
     } catch (error) {
-      setW3aActionError(error?.message || String(error));
+      setWa3ActionError(error?.message || String(error));
     } finally {
-      setW3aActionBusy('');
+      setWa3ActionBusy('');
     }
   }
 
-  async function exportW3AWithSidecarCopy() {
-    const filePath = resolveW3AMediaPath();
+  async function exportWA3WithSidecarCopy() {
+    const filePath = resolveWA3MediaPath();
     if (!filePath) {
-      setW3aActionError(t('w3a.noMediaPath'));
+      setWa3ActionError(t('wa3.noMediaPath'));
       return;
     }
-    const destPath = makeW3ACopyPath(filePath);
-    setW3aActionBusy('export');
-    setW3aActionError('');
+    const destPath = makeWA3CopyPath(filePath);
+    setWa3ActionBusy('export');
+    setWa3ActionError('');
     try {
       await callWails(() => ExportMediaWithSidecar(filePath, destPath));
-      setW3aToastMsg(t('w3a.exportCopied', { path: destPath }));
+      setWa3ToastMsg(t('wa3.exportCopied', { path: destPath }));
     } catch (error) {
-      setW3aActionError(error?.message || String(error));
+      setWa3ActionError(error?.message || String(error));
     } finally {
-      setW3aActionBusy('');
+      setWa3ActionBusy('');
     }
   }
 
-  function dismissW3AImportPopup() {
-    setW3aImportPopup(null);
-    setW3aActionError('');
+  function dismissWA3ImportPopup() {
+    setWa3ImportPopup(null);
+    setWa3ActionError('');
   }
 
-  // W3A 驗證狀態對應的 icon 與顏色
-  const w3aStatusConfig = {
-    exact_original:        { icon: '✅', color: '#2ecc40', label: t('w3a.originalFile') },
-    w3a_app_processed:     { icon: '🔏', color: '#3498db', label: t('w3a.appProcessed') },
-    platform_processed_copy: { icon: '📋', color: '#f39c12', label: t('w3a.platformProcessed') },
-    unauthorized_copy:     { icon: '🚫', color: '#e74c3c', label: t('w3a.unauthorizedCopy') },
-    content_modified:      { icon: '✏️', color: '#e67e22', label: t('w3a.contentModified') },
-    model_pollution_risk:  { icon: '☣️', color: '#e74c3c', label: t('w3a.pollutionRisk') },
-    unverified:            { icon: '❓', color: '#95a5a6', label: t('w3a.unverified') },
+  // WA3 驗證狀態對應的 icon 與顏色
+  const wa3StatusConfig = {
+    exact_original:        { icon: '✅', color: '#2ecc40', label: t('wa3.originalFile') },
+    wa3_app_processed:     { icon: '🔏', color: '#3498db', label: t('wa3.appProcessed') },
+    platform_processed_copy: { icon: '📋', color: '#f39c12', label: t('wa3.platformProcessed') },
+    unauthorized_copy:     { icon: '🚫', color: '#e74c3c', label: t('wa3.unauthorizedCopy') },
+    content_modified:      { icon: '✏️', color: '#e67e22', label: t('wa3.contentModified') },
+    model_pollution_risk:  { icon: '☣️', color: '#e74c3c', label: t('wa3.pollutionRisk') },
+    unverified:            { icon: '❓', color: '#95a5a6', label: t('wa3.unverified') },
   };
 
   // ── v3.6.3 Remote Bridge Communication（§12A）──
@@ -6932,8 +7025,8 @@ function App() {
           const importedFile = {
             ...imported,
             addedVia: addedVia || imported?.addedVia || '',
-            status: isW3AMediaPath(path) ? 'checking' : 'ready',
-            detail: isW3AMediaPath(path) ? '正在檢查媒體來源' : '',
+            status: isWA3MediaPath(path) ? 'checking' : 'ready',
+            detail: isWA3MediaPath(path) ? '正在檢查媒體來源' : '',
           };
           referencePathForStatus = importedFile.path || path;
           referenceImportReady = true;
@@ -6944,7 +7037,7 @@ function App() {
           setToolResult({
             toolId: 'doc-entrance',
             ok: true,
-            message: `${isW3AMediaPath(path) ? '已加入引用媒體' : '已加入引用文件'}：${importedFile.name || name}`,
+            message: `${isWA3MediaPath(path) ? '已加入引用媒體' : '已加入引用文件'}：${importedFile.name || name}`,
           });
         } catch (error) {
           const message = error?.message || '無法複製，已保留原路徑';
@@ -6958,9 +7051,9 @@ function App() {
           }));
           setToolResult({toolId: 'doc-entrance', ok: false, message});
         }
-        if (isW3AMediaPath(path)) {
+        if (isWA3MediaPath(path)) {
           try {
-            await importMediaW3A(path);
+            await importMediaWA3(path);
             setReferenceFiles((current) => updateReferenceFileStatus(current, referencePathForStatus, {
               status: 'ready',
               detail: '媒體來源檢查完成',
@@ -6974,7 +7067,7 @@ function App() {
             setToolResult({toolId: 'doc-entrance', ok: false, message});
           }
         }
-        else if (referenceImportReady && isW3ADocPath(path)) {
+        else if (referenceImportReady && isWA3DocPath(path)) {
           try {
             await CreateDocumentWA3(referencePathForStatus);
             setReferenceFiles((current) => updateReferenceFileStatus(current, referencePathForStatus, {
@@ -6982,7 +7075,7 @@ function App() {
               detail: '文件來源證明已建立',
             }));
           } catch (error) {
-            // best-effort：建 .w3a.json 失敗不影響文件已匯入
+            // best-effort：建 .wa3.json 失敗不影響文件已匯入
             setReferenceFiles((current) => updateReferenceFileStatus(current, referencePathForStatus, {
               status: 'ready',
               detail: '已匯入（來源證明稍後重試）',
@@ -8238,8 +8331,9 @@ function App() {
   function buildFloatingAvatarQuickChatPrompt(userText, history) {
     const personaName = floatingPersona?.name || t('floatingAvatar.agentFallback');
     const personality = String(floatingPersona?.personality || '').trim();
+    // 提速：prompt 只帶最近 8 條（暫存仍留 30 條），token 少、回覆快。
     const recent = (Array.isArray(history) ? history : [])
-      .slice(-30)
+      .slice(-8)
       .map((entry) => `${entry.role === 'assistant' ? personaName : '主人'}：${entry.text}`)
       .join('\n');
     return [
@@ -8251,6 +8345,7 @@ function App() {
       personality ? `人格語氣：${personality}` : '',
       '只做輕量閒聊回覆，不規劃任務、不呼叫工具、不要求使用者等待主控台流程。',
       '回覆請簡短自然，最多 3 句；若適合可用繁體中文。',
+      '一律純文字聊天，不要使用 Markdown、標題、清單、表格、JSON 或程式碼區塊。',
       recent ? `最近暫存對話：\n${recent}` : '',
       `主人：${userText}`,
       `${personaName}：`,
@@ -8395,6 +8490,35 @@ function App() {
   const floatingExpression = !floatingReminderPaused && (pendingTaskReview || schedulerConfirm) ? 'warning' : avatarExpression;
   const floatingFullBodyAvatarKey = pixelPackForPersona(floatingPersona, floatingAvatarConfig);
   const floatingFullBodyAvatarSrc = resolvePersonaFullBodySrc(floatingPersona, floatingAvatarConfig, floatingExpression);
+  // 紀念照「拍照」共用流程：Windows 原生浮窗選單與 mac 迷你面板的拍照鈕都走這裡，
+  // 讓兩個平台的後台頭像介面行為一致。
+  async function takeFloatingKeepsakePhoto() {
+    if (floatingPhotoBusy) return;
+    const scene = [
+      floatingAvatarDraft,
+      floatingAvatarReplyBubble,
+      floatingLatestText,
+      state.greeting,
+    ].map((item) => String(item || '').trim()).find(Boolean) || '';
+    setFloatingPhotoBusy(true);
+    setToolResult({toolId: 'floating-avatar-photo', ok: true, message: '正在拍照…（首次產圖較久）'});
+    try {
+      const photo = await callWails(() => ConfirmCommemorativePhoto(scene, ''));
+      const message = '已拍下並存入相冊：' + (photo?.scene || '合照');
+      setFloatingAvatarReplyBubble(message);
+      syncFloatingAvatarOverlayMetadata(message);
+      setManualAvatarState('happy');
+      setToolResult({toolId: 'floating-avatar-photo', ok: true, message});
+    } catch (error) {
+      const message = '產圖失敗：' + String(error?.message || error);
+      setFloatingAvatarReplyBubble(message);
+      syncFloatingAvatarOverlayMetadata(message);
+      setManualAvatarState('sad');
+      setToolResult({toolId: 'floating-avatar-photo', ok: false, message});
+    } finally {
+      setFloatingPhotoBusy(false);
+    }
+  }
   useEffect(() => {
     const off = EventsOn('floating_avatar:menu_action', async (payload) => {
       const action = payload?.action || 'restore';
@@ -8419,33 +8543,7 @@ function App() {
         return;
       }
       if (action === 'photo') {
-        const scene = [
-          floatingAvatarDraft,
-          floatingAvatarReplyBubble,
-          floatingLatestText,
-          state.greeting,
-        ].map((item) => String(item || '').trim()).find(Boolean) || '';
-        setKeepsakeBusy(true);
-        setKeepsakeMsg('正在拍照…（首次產圖較久）');
-        setToolResult({toolId: 'floating-avatar-photo', ok: true, message: '正在拍照…'});
-        try {
-          const photo = await callWails(() => ConfirmCommemorativePhoto(scene, ''));
-          const message = '已拍下並存入相冊：' + (photo?.scene || '合照');
-          setKeepsakeMsg(message);
-          setFloatingAvatarReplyBubble(message);
-          syncFloatingAvatarOverlayMetadata(message);
-          setManualAvatarState('happy');
-          setToolResult({toolId: 'floating-avatar-photo', ok: true, message});
-        } catch (error) {
-          const message = '產圖失敗：' + String(error?.message || error);
-          setKeepsakeMsg(message);
-          setFloatingAvatarReplyBubble(message);
-          syncFloatingAvatarOverlayMetadata(message);
-          setManualAvatarState('sad');
-          setToolResult({toolId: 'floating-avatar-photo', ok: false, message});
-        } finally {
-          setKeepsakeBusy(false);
-        }
+        await takeFloatingKeepsakePhoto();
         return;
       }
       if (action === 'chat') {
@@ -8464,6 +8562,21 @@ function App() {
     || schedulerConfirm?.title
     || floatingAvatarReplyBubble
     || '';
+  const dagSuggestionText = String(draft || '').trim();
+  const dagTaskSuggestionAction = dagSuggestionText
+    && dismissedDagSuggestionText !== dagSuggestionText
+    && shouldSuggestDagRun(dagSuggestionText)
+    ? {
+        title: '要轉成任務嗎？',
+        lines: ['這句可能需要多步驟處理；轉成任務後會顯示進度，並啟用自我修正。'],
+        cancelLabel: '留在聊天',
+        primaryLabel: '轉成任務',
+      }
+    : null;
+  const schedulerComposerConfirmAction = buildSchedulerComposerConfirmAction(schedulerConversation, schedulerBusy);
+  const activeComposerConfirmAction = schedulerComposerConfirmAction || dagTaskSuggestionAction;
+  const activeComposerConfirmHandler = schedulerComposerConfirmAction ? confirmComposerAction : acceptDagTaskSuggestion;
+  const activeComposerCancelHandler = schedulerComposerConfirmAction ? cancelComposerAction : dismissDagTaskSuggestion;
 
   return (
     <div
@@ -8511,6 +8624,8 @@ function App() {
         onOpenSettings={() => restoreFromFloatingAvatar('settings')}
         onDropFiles={handleFloatingAvatarDrop}
         onSubmit={submitFloatingAvatarText}
+        onPhoto={takeFloatingKeepsakePhoto}
+        photoBusy={floatingPhotoBusy}
         onSwitchAgent={switchFloatingAvatarAgent}
         onSetReminderMode={setFloatingReminderMode}
         activePersonaId={floatingPersona.id}
@@ -8956,26 +9071,26 @@ function App() {
               snoozeHours={snoozeHours}
               systemStatusHistory={systemStatusHistory}
               onDismissSkillFirstUse={dismissSkillFirstUseCard}
-              w3aImportPopup={w3aImportPopup}
-              w3aDetail={w3aDetail}
-              w3aPollutionResult={w3aPollutionResult}
-              w3aTransferGuidance={w3aTransferGuidance}
-              w3aTrustList={w3aTrustList}
-              w3aActionBusy={w3aActionBusy}
-              w3aActionError={w3aActionError}
-              w3aStatusConfig={w3aStatusConfig}
-              w3aToastMsg={w3aToastMsg}
-              onLoadW3AInfo={loadW3AMediaInfo}
-              onDetectW3APollution={detectW3APollution}
-              onShowW3AGuidance={showW3ATransferGuidance}
-              onTrustW3ADeveloper={trustW3ADeveloper}
-              onExportW3ACopy={exportW3AWithSidecarCopy}
-              onDismissW3AImportPopup={dismissW3AImportPopup}
-              onShowW3AToast={(msg) => {
-                setW3aToastMsg(msg);
-                setTimeout(() => setW3aToastMsg(null), 4000);
+              wa3ImportPopup={wa3ImportPopup}
+              wa3Detail={wa3Detail}
+              wa3PollutionResult={wa3PollutionResult}
+              wa3TransferGuidance={wa3TransferGuidance}
+              wa3TrustList={wa3TrustList}
+              wa3ActionBusy={wa3ActionBusy}
+              wa3ActionError={wa3ActionError}
+              wa3StatusConfig={wa3StatusConfig}
+              wa3ToastMsg={wa3ToastMsg}
+              onLoadWA3Info={loadWA3MediaInfo}
+              onDetectWA3Pollution={detectWA3Pollution}
+              onShowWA3Guidance={showWA3TransferGuidance}
+              onTrustWA3Developer={trustWA3Developer}
+              onExportWA3Copy={exportWA3WithSidecarCopy}
+              onDismissWA3ImportPopup={dismissWA3ImportPopup}
+              onShowWA3Toast={(msg) => {
+                setWa3ToastMsg(msg);
+                setTimeout(() => setWa3ToastMsg(null), 4000);
               }}
-              onDismissW3AToast={() => setW3aToastMsg(null)}
+              onDismissWA3Toast={() => setWa3ToastMsg(null)}
               onAvatarProviderSelect={(provider) => setAvatarProviderMode(provider, mainPersona.id)}
               onAvatarStateSelect={setManualAvatarState}
               onPersonaJobChange={(value) => {
@@ -9091,9 +9206,9 @@ function App() {
               onConfirmTaskReview={confirmSkillBuild}
               onCancelTaskReview={() => cancelActiveTaskProgress('review_cancel')}
               onShowTaskReviewDetails={() => setReviewPopup((current) => current === 'risk' ? null : 'risk')}
-              composerConfirmAction={buildSchedulerComposerConfirmAction(schedulerConversation, schedulerBusy)}
-              onComposerConfirm={confirmComposerAction}
-              onComposerCancel={cancelComposerAction}
+              composerConfirmAction={activeComposerConfirmAction}
+              onComposerConfirm={activeComposerConfirmHandler}
+              onComposerCancel={activeComposerCancelHandler}
             />
           </main>
           <RightRail
@@ -10631,8 +10746,10 @@ function getBundledAvatarPackUrl(pack, state = 'idle') {
   return '';
 }
 
-function postDebugTrace() {
-  return undefined;
+function postDebugTrace(node, traceId, data) {
+  void node;
+  void traceId;
+  void data;
 }
 
 function makeDebugTraceID(scope) {
@@ -11599,6 +11716,9 @@ export function PersonaSettingsDrawer({
               {personaPatrolDialogueBadge(persona) && (
                 <small className="settings-persona-patrol-badge">{personaPatrolDialogueBadge(persona)}</small>
               )}
+              {persona.code && (
+                <small className="settings-persona-code" title={t('persona.codeHint')}>{persona.code}</small>
+              )}
               {persona.id === lockedPersonaId && <small className="settings-persona-lock">{t('persona.lockedName')}</small>}
             </button>
             {avatarMenuPersonaId === persona.id && persona.id !== lockedPersonaId && (
@@ -11825,10 +11945,10 @@ function TopConsole({
   dagRun, reviewState = fallbackReviewState, reviewPopup, skillInjections = [], snoozeHours,
   systemStatusHistory = [], reviewArchive = [],
   showSkillFirstUseCard, onDismissSkillFirstUse,
-  w3aImportPopup, w3aDetail, w3aPollutionResult, w3aTransferGuidance, w3aTrustList = [],
-  w3aActionBusy = '', w3aActionError = '', w3aStatusConfig = {}, w3aToastMsg,
-  onLoadW3AInfo, onDetectW3APollution, onShowW3AGuidance, onTrustW3ADeveloper, onExportW3ACopy,
-  onDismissW3AImportPopup, onShowW3AToast, onDismissW3AToast,
+  wa3ImportPopup, wa3Detail, wa3PollutionResult, wa3TransferGuidance, wa3TrustList = [],
+  wa3ActionBusy = '', wa3ActionError = '', wa3StatusConfig = {}, wa3ToastMsg,
+  onLoadWA3Info, onDetectWA3Pollution, onShowWA3Guidance, onTrustWA3Developer, onExportWA3Copy,
+  onDismissWA3ImportPopup, onShowWA3Toast, onDismissWA3Toast,
   onAvatarProviderSelect, onAvatarLoad, onAvatarStateSelect, onPersonaJobChange, onPersonaNameChange,
   onReviewPopupChange, onRotateGreeting, onSkillSelect,
   onSnooze, onSnoozeHoursChange, onAcknowledgeDigestItem, onConfirmSkillBuild,
@@ -12745,23 +12865,23 @@ function TopConsole({
           onAcknowledgeDigestItem={onAcknowledgeDigestItem}
           onConfirmSkillBuild={onConfirmSkillBuild}
           reviewArchive={reviewArchive}
-          w3aImportPopup={w3aImportPopup}
-          w3aDetail={w3aDetail}
-          w3aPollutionResult={w3aPollutionResult}
-          w3aTransferGuidance={w3aTransferGuidance}
-          w3aTrustList={w3aTrustList}
-          w3aActionBusy={w3aActionBusy}
-          w3aActionError={w3aActionError}
-          w3aStatusConfig={w3aStatusConfig}
-          w3aToastMsg={w3aToastMsg}
-          onLoadW3AInfo={onLoadW3AInfo}
-          onDetectW3APollution={onDetectW3APollution}
-          onShowW3AGuidance={onShowW3AGuidance}
-          onTrustW3ADeveloper={onTrustW3ADeveloper}
-          onExportW3ACopy={onExportW3ACopy}
-          onDismissW3AImportPopup={onDismissW3AImportPopup}
-          onShowW3AToast={onShowW3AToast}
-          onDismissW3AToast={onDismissW3AToast}
+          wa3ImportPopup={wa3ImportPopup}
+          wa3Detail={wa3Detail}
+          wa3PollutionResult={wa3PollutionResult}
+          wa3TransferGuidance={wa3TransferGuidance}
+          wa3TrustList={wa3TrustList}
+          wa3ActionBusy={wa3ActionBusy}
+          wa3ActionError={wa3ActionError}
+          wa3StatusConfig={wa3StatusConfig}
+          wa3ToastMsg={wa3ToastMsg}
+          onLoadWA3Info={onLoadWA3Info}
+          onDetectWA3Pollution={onDetectWA3Pollution}
+          onShowWA3Guidance={onShowWA3Guidance}
+          onTrustWA3Developer={onTrustWA3Developer}
+          onExportWA3Copy={onExportWA3Copy}
+          onDismissWA3ImportPopup={onDismissWA3ImportPopup}
+          onShowWA3Toast={onShowWA3Toast}
+          onDismissWA3Toast={onDismissWA3Toast}
           panelTheme={panelTheme}
           taskLoopRounds={taskLoopRounds}
           taskLoopReply={taskLoopReply}
@@ -13180,11 +13300,11 @@ function ConversationPanel({
 function ReviewPanel({
   activePopup, dagRun, onPopupChange, reviewState, onSkillSelect, onSnooze,
   onSnoozeHoursChange, snoozeHours, onAcknowledgeDigestItem, onConfirmSkillBuild,
-  reviewArchive, w3aImportPopup, w3aDetail, w3aPollutionResult, w3aTransferGuidance, w3aTrustList = [],
-  w3aActionBusy = '', w3aActionError = '', w3aStatusConfig = {}, w3aToastMsg,
-  onLoadW3AInfo = () => {}, onDetectW3APollution = () => {}, onShowW3AGuidance = () => {},
-  onTrustW3ADeveloper = () => {}, onExportW3ACopy = () => {},
-  onDismissW3AImportPopup = () => {}, onShowW3AToast = () => {}, onDismissW3AToast = () => {},
+  reviewArchive, wa3ImportPopup, wa3Detail, wa3PollutionResult, wa3TransferGuidance, wa3TrustList = [],
+  wa3ActionBusy = '', wa3ActionError = '', wa3StatusConfig = {}, wa3ToastMsg,
+  onLoadWA3Info = () => {}, onDetectWA3Pollution = () => {}, onShowWA3Guidance = () => {},
+  onTrustWA3Developer = () => {}, onExportWA3Copy = () => {},
+  onDismissWA3ImportPopup = () => {}, onShowWA3Toast = () => {}, onDismissWA3Toast = () => {},
   panelTheme = 'onanegiku',
   taskLoopRounds = {}, taskLoopReply = {}, onTaskLoopReplyChange = () => {},
 }) {
@@ -13196,11 +13316,11 @@ function ReviewPanel({
   const [popupFrame, setPopupFrame] = useState(null);
   const [digestExpanded, setDigestExpanded] = useState({urgent: true, later: false, archive: false});
   const [taskDebugDump, setTaskDebugDump] = useState(null);
-  const activeW3AInfo = w3aDetail || w3aImportPopup?.info || {};
-  const activeW3ATraining = activeW3AInfo.training || {};
-  const activeW3APollution = w3aPollutionResult || activeW3AInfo.pollution;
-  const activeW3APath = w3aImportPopup?.source_path || activeW3AInfo.file_path || '';
-  const activeW3ASidecar = w3aImportPopup?.sidecar_path || '';
+  const activeWA3Info = wa3Detail || wa3ImportPopup?.info || {};
+  const activeWA3Training = activeWA3Info.training || {};
+  const activeWA3Pollution = wa3PollutionResult || activeWA3Info.pollution;
+  const activeWA3Path = wa3ImportPopup?.source_path || activeWA3Info.file_path || '';
+  const activeWA3Sidecar = wa3ImportPopup?.sidecar_path || '';
 
   // Count total hook candidates for badge
   const hookCount = (hookCandidates?.tagPatches?.length || 0)
@@ -13319,7 +13439,9 @@ function ReviewPanel({
                       {node.resultSummary && <small>{node.resultSummary}</small>}
                       {node.status === 'running' && taskLoopRounds[node.id] && (
                         <small className="dag-loop-round">
-                          {`第 ${taskLoopRounds[node.id].iteration} 輪：${taskLoopRounds[node.id].action} ${taskLoopRounds[node.id].target}`}
+                          {taskLoopRounds[node.id].message
+                            ? `第 ${taskLoopRounds[node.id].iteration} 輪：${taskLoopRounds[node.id].message}`
+                            : `第 ${taskLoopRounds[node.id].iteration} 輪：${taskLoopRounds[node.id].action} ${taskLoopRounds[node.id].target}`}
                         </small>
                       )}
                       {node.status === 'waiting_user' && (
@@ -13616,108 +13738,108 @@ function ReviewPanel({
         document.body,
       )}
 
-      {/* ── v3.6.2 W3A Media Provenance（§9A）UI ── */}
+      {/* ── v3.6.2 WA3 Media Provenance（§9A）UI ── */}
 
-      {/* W3A 匯入選單：偵測到 sidecar 後顯示功能說明 */}
-      {w3aImportPopup && (
-        <div className="w3a-import-overlay" onClick={onDismissW3AImportPopup}>
-          <div className="w3a-import-popup" onClick={(e) => e.stopPropagation()}>
-            <div className="w3a-import-header">
-              <span className="w3a-import-icon">
-                {w3aStatusConfig[w3aImportPopup.info?.status]?.icon || '❓'}
+      {/* WA3 匯入選單：偵測到 sidecar 後顯示功能說明 */}
+      {wa3ImportPopup && (
+        <div className="wa3-import-overlay" onClick={onDismissWA3ImportPopup}>
+          <div className="wa3-import-popup" onClick={(e) => e.stopPropagation()}>
+            <div className="wa3-import-header">
+              <span className="wa3-import-icon">
+                {wa3StatusConfig[wa3ImportPopup.info?.status]?.icon || '❓'}
               </span>
-              <span className="w3a-import-title">{t("w3a.title")}</span>
+              <span className="wa3-import-title">{t("wa3.title")}</span>
             </div>
-            <div className="w3a-import-status" style={{color: w3aStatusConfig[activeW3AInfo.status]?.color || '#95a5a6'}}>
-              {w3aStatusConfig[activeW3AInfo.status]?.label || t('w3a.unknownStatus')}
+            <div className="wa3-import-status" style={{color: wa3StatusConfig[activeWA3Info.status]?.color || '#95a5a6'}}>
+              {wa3StatusConfig[activeWA3Info.status]?.label || t('wa3.unknownStatus')}
             </div>
-            <div className="w3a-import-recommendation">{w3aImportPopup.recommendation}</div>
-            {w3aImportPopup.has_sidecar && (
-              <div className="w3a-import-sidecar-badge">{t("w3a.sidecarDetected")}</div>
+            <div className="wa3-import-recommendation">{wa3ImportPopup.recommendation}</div>
+            {wa3ImportPopup.has_sidecar && (
+              <div className="wa3-import-sidecar-badge">{t("wa3.sidecarDetected")}</div>
             )}
-            <div className="w3a-detail-grid">
-              {activeW3APath && (
-                <div className="w3a-detail-row">
-                  <span>{t('w3a.sourcePath')}</span>
-                  <code>{activeW3APath}</code>
+            <div className="wa3-detail-grid">
+              {activeWA3Path && (
+                <div className="wa3-detail-row">
+                  <span>{t('wa3.sourcePath')}</span>
+                  <code>{activeWA3Path}</code>
                 </div>
               )}
-              {activeW3ASidecar && (
-                <div className="w3a-detail-row">
-                  <span>{t('w3a.sidecarPath')}</span>
-                  <code>{activeW3ASidecar}</code>
+              {activeWA3Sidecar && (
+                <div className="wa3-detail-row">
+                  <span>{t('wa3.sidecarPath')}</span>
+                  <code>{activeWA3Sidecar}</code>
                 </div>
               )}
-              {activeW3AInfo.media_scope && (
-                <div className="w3a-detail-row">
-                  <span>{t('w3a.mediaScope')}</span>
-                  <strong>{activeW3AInfo.media_scope}</strong>
+              {activeWA3Info.media_scope && (
+                <div className="wa3-detail-row">
+                  <span>{t('wa3.mediaScope')}</span>
+                  <strong>{activeWA3Info.media_scope}</strong>
                 </div>
               )}
-              {activeW3AInfo.training && (
+              {activeWA3Info.training && (
                 <>
-                  <div className="w3a-detail-row">
-                    <span>{t('w3a.trainingSafe')}</span>
-                    <strong>{activeW3ATraining.training_safe ? t('w3a.safeYes') : t('w3a.safeNo')}</strong>
+                  <div className="wa3-detail-row">
+                    <span>{t('wa3.trainingSafe')}</span>
+                    <strong>{activeWA3Training.training_safe ? t('wa3.safeYes') : t('wa3.safeNo')}</strong>
                   </div>
-                  <div className="w3a-detail-row">
-                    <span>{t('w3a.filterRequired')}</span>
-                    <strong>{activeW3ATraining.filter_required ? t('common.yes') : t('common.no')}</strong>
+                  <div className="wa3-detail-row">
+                    <span>{t('wa3.filterRequired')}</span>
+                    <strong>{activeWA3Training.filter_required ? t('common.yes') : t('common.no')}</strong>
                   </div>
                 </>
               )}
-              <div className="w3a-detail-row">
-                <span>{t('w3a.trustCount')}</span>
-                <strong>{w3aTrustList.length}</strong>
+              <div className="wa3-detail-row">
+                <span>{t('wa3.trustCount')}</span>
+                <strong>{wa3TrustList.length}</strong>
               </div>
             </div>
-            {activeW3APollution && (
-              <div className={`w3a-pollution-card ${activeW3APollution.is_pollution_risk ? 'w3a-pollution-risk' : ''}`}>
-                <span>{t('w3a.weightedTotal')}</span>
-                <strong>{typeof activeW3APollution.weighted_total === 'number' ? activeW3APollution.weighted_total.toFixed(2) : activeW3APollution.weighted_total}</strong>
-                {activeW3APollution.details && <small>{activeW3APollution.details}</small>}
+            {activeWA3Pollution && (
+              <div className={`wa3-pollution-card ${activeWA3Pollution.is_pollution_risk ? 'wa3-pollution-risk' : ''}`}>
+                <span>{t('wa3.weightedTotal')}</span>
+                <strong>{typeof activeWA3Pollution.weighted_total === 'number' ? activeWA3Pollution.weighted_total.toFixed(2) : activeWA3Pollution.weighted_total}</strong>
+                {activeWA3Pollution.details && <small>{activeWA3Pollution.details}</small>}
               </div>
             )}
-            {w3aTransferGuidance && (
-              <div className="w3a-guidance-card">
-                <strong>{w3aTransferGuidance.ui_message}</strong>
-                <div className="w3a-guidance-list">
-                  <span>{t('w3a.recommended')}</span>
-                  {(w3aTransferGuidance.recommended || []).map((item) => <small key={item}>{item}</small>)}
+            {wa3TransferGuidance && (
+              <div className="wa3-guidance-card">
+                <strong>{wa3TransferGuidance.ui_message}</strong>
+                <div className="wa3-guidance-list">
+                  <span>{t('wa3.recommended')}</span>
+                  {(wa3TransferGuidance.recommended || []).map((item) => <small key={item}>{item}</small>)}
                 </div>
-                <div className="w3a-guidance-list">
-                  <span>{t('w3a.notRecommended')}</span>
-                  {(w3aTransferGuidance.not_recommended || []).map((item) => <small key={item}>{item}</small>)}
+                <div className="wa3-guidance-list">
+                  <span>{t('wa3.notRecommended')}</span>
+                  {(wa3TransferGuidance.not_recommended || []).map((item) => <small key={item}>{item}</small>)}
                 </div>
               </div>
             )}
-            <div className="w3a-import-capabilities">
-              <span className="w3a-import-cap-title">{t("w3a.capTitle")}</span>
-              {(w3aImportPopup.capabilities || []).map((cap, i) => (
-                <div className="w3a-import-cap-item" key={i}>▸ {cap}</div>
+            <div className="wa3-import-capabilities">
+              <span className="wa3-import-cap-title">{t("wa3.capTitle")}</span>
+              {(wa3ImportPopup.capabilities || []).map((cap, i) => (
+                <div className="wa3-import-cap-item" key={i}>▸ {cap}</div>
               ))}
             </div>
-            {w3aActionError && <div className="w3a-import-error">{w3aActionError}</div>}
-            <div className="w3a-import-actions">
-              <button className="w3a-import-btn w3a-import-btn-secondary" type="button" disabled={!!w3aActionBusy} onClick={onLoadW3AInfo}>{w3aActionBusy === 'info' ? t('w3a.actionBusy') : t('w3a.infoAction')}</button>
-              <button className="w3a-import-btn w3a-import-btn-secondary" type="button" disabled={!!w3aActionBusy} onClick={onDetectW3APollution}>{w3aActionBusy === 'pollution' ? t('w3a.actionBusy') : t('w3a.pollutionAction')}</button>
-              <button className="w3a-import-btn w3a-import-btn-secondary" type="button" disabled={!!w3aActionBusy} onClick={onShowW3AGuidance}>{w3aActionBusy === 'guidance' ? t('w3a.actionBusy') : t('w3a.guidanceAction')}</button>
-              <button className="w3a-import-btn w3a-import-btn-secondary" type="button" disabled={!!w3aActionBusy} onClick={onTrustW3ADeveloper}>{w3aActionBusy === 'trust' ? t('w3a.actionBusy') : t('w3a.trustAction')}</button>
-              <button className="w3a-import-btn w3a-import-btn-warning" type="button" disabled={!!w3aActionBusy} onClick={onExportW3ACopy}>{w3aActionBusy === 'export' ? t('w3a.actionBusy') : t('w3a.exportCopyAction')}</button>
-              <button className="w3a-import-btn w3a-import-btn-primary" type="button" onClick={onDismissW3AImportPopup}>{t('w3a.confirm')}</button>
+            {wa3ActionError && <div className="wa3-import-error">{wa3ActionError}</div>}
+            <div className="wa3-import-actions">
+              <button className="wa3-import-btn wa3-import-btn-secondary" type="button" disabled={!!wa3ActionBusy} onClick={onLoadWA3Info}>{wa3ActionBusy === 'info' ? t('wa3.actionBusy') : t('wa3.infoAction')}</button>
+              <button className="wa3-import-btn wa3-import-btn-secondary" type="button" disabled={!!wa3ActionBusy} onClick={onDetectWA3Pollution}>{wa3ActionBusy === 'pollution' ? t('wa3.actionBusy') : t('wa3.pollutionAction')}</button>
+              <button className="wa3-import-btn wa3-import-btn-secondary" type="button" disabled={!!wa3ActionBusy} onClick={onShowWA3Guidance}>{wa3ActionBusy === 'guidance' ? t('wa3.actionBusy') : t('wa3.guidanceAction')}</button>
+              <button className="wa3-import-btn wa3-import-btn-secondary" type="button" disabled={!!wa3ActionBusy} onClick={onTrustWA3Developer}>{wa3ActionBusy === 'trust' ? t('wa3.actionBusy') : t('wa3.trustAction')}</button>
+              <button className="wa3-import-btn wa3-import-btn-warning" type="button" disabled={!!wa3ActionBusy} onClick={onExportWA3Copy}>{wa3ActionBusy === 'export' ? t('wa3.actionBusy') : t('wa3.exportCopyAction')}</button>
+              <button className="wa3-import-btn wa3-import-btn-primary" type="button" onClick={onDismissWA3ImportPopup}>{t('wa3.confirm')}</button>
             </div>
           </div>
         </div>
       )}
 
       {/* §24: 文件寫入確認卡片 */}
-      <DocumentReviewCard onToast={onShowW3AToast} />
+      <DocumentReviewCard onToast={onShowWA3Toast} />
 
-      {/* W3A 傳輸引導 toast（軟性提示） */}
-      {w3aToastMsg && (
-        <div className="w3a-toast" onClick={onDismissW3AToast}>
-          <span className="w3a-toast-icon">🔏</span>
-          <span className="w3a-toast-text">{w3aToastMsg}</span>
+      {/* WA3 傳輸引導 toast（軟性提示） */}
+      {wa3ToastMsg && (
+        <div className="wa3-toast" onClick={onDismissWA3Toast}>
+          <span className="wa3-toast-icon">🔏</span>
+          <span className="wa3-toast-text">{wa3ToastMsg}</span>
         </div>
       )}
     </section>

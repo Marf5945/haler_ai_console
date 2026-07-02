@@ -400,7 +400,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--token",
         default="",
-        help="Trigger token to put first, for example custom_style_v1.",
+        help="Trigger token to put first, for example marf_style_v1.",
     )
     parser.add_argument(
         "--base-tags",

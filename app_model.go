@@ -335,7 +335,7 @@ func pingOpenAIModelsEndpoint(endpoint string, timeout time.Duration) bool {
 // DetectModelPollution 對媒體執行模型污染偵測。
 func (a *App) DetectModelPollution(path string) (*wa3_media.PollutionReport, error) {
 	report, err := a.wa3Media.DetectMediaPollution(path)
-	if err == nil && report.IsPollutionRisk {
+	if err == nil && report != nil && report.IsPollutionRisk {
 		a.eventBus.Emit("wa3:pollution_detected", map[string]interface{}{"path": path, "score": report.WeightedTotal})
 	}
 	return report, err

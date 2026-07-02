@@ -86,6 +86,8 @@ export function CancelScheduledJob(arg1:string):Promise<void>;
 
 export function CancelTaskProgress(arg1:string,arg2:string):Promise<dag.DAGRun>;
 
+export function ClarifyDagIntent(arg1:string,arg2:string,arg3:string):Promise<skill_step.CLIResponse>;
+
 export function ClassifySource(arg1:string,arg2:string,arg3:Array<string>):Promise<source_trust.SourceTrustEvidence>;
 
 export function CleanOrphanQuarantine(arg1:string):Promise<void>;
@@ -307,6 +309,8 @@ export function GetMediaWA3Info(arg1:string):Promise<any>;
 export function GetMemoryHealth():Promise<health.MemoryHealth>;
 
 export function GetMemoryPipelineState():Promise<memory.PipelineState>;
+
+export function GetMonitorLinks():Promise<debugtrace.LinkSnapshot>;
 
 export function GetNativeOCRStatus():Promise<visual_learning.OCRStatus>;
 

@@ -48,6 +48,7 @@ func (a *App) StartTaskProgress(userText, adapterID, modelID, sessionID string) 
 	if userText == "" {
 		return nil, fmt.Errorf("task progress: empty input")
 	}
+	a.clearClarification(sessionID)
 	projectRoot := storage.ProjectRoot(appDataRoot(), "default")
 	now := time.Now().Format(time.RFC3339)
 	runID := fmt.Sprintf("dag-%d", time.Now().UnixNano())
@@ -2042,13 +2043,15 @@ func (a *App) interruptStaleTaskRuns(reason string) {
 const decomposeMaxSteps = 10      // 一次最多拆 10 步
 const decomposeMaxStepRunes = 600 // 每步文字長度上限（rune）
 
-// decomposeEnabled 回報多指令拆解 feature flag 是否開啟。預設關 → 行為與舊版完全相同。
+// decomposeEnabled 回報多指令拆解 feature flag。v3.1.8 起預設開：任務先拆成
+// chat_route 節點（全部走節點內 loop），拆解失敗自動退回單一 planner（永不當機）。
+// 設 AI_CONSOLE_DECOMPOSE=0/false/off 可關閉。
 func decomposeEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("AI_CONSOLE_DECOMPOSE"))) {
-	case "1", "true", "on", "yes":
-		return true
-	default:
+	case "0", "false", "off", "no":
 		return false
+	default:
+		return true
 	}
 }
 

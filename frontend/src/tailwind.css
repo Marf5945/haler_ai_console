@@ -19,6 +19,7 @@
     --font-weight-bold: 700;
     --font-weight-black: 900;
     --tracking-wide: 0.025em;
+    --tracking-wider: 0.05em;
     --leading-tight: 1.25;
     --leading-snug: 1.375;
     --leading-normal: 1.5;
@@ -6610,6 +6611,29 @@
     color: #15100a;
     box-shadow: 0 8px 18px rgba(0,0,0,.28);
   }
+  .settings-persona-code {
+    position: absolute;
+    top: calc(var(--spacing) * 2);
+    left: calc(var(--spacing) * 2);
+    border-radius: 5px;
+    background-color: color-mix(in srgb, #000 55%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-black) 55%, transparent);
+    }
+    padding-inline: 6px;
+    padding-block: 3px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    --tw-font-weight: var(--font-weight-bold);
+    font-weight: var(--font-weight-bold);
+    --tw-tracking: var(--tracking-wider);
+    letter-spacing: var(--tracking-wider);
+    color: color-mix(in srgb, #fff 80%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      color: color-mix(in oklab, var(--color-white) 80%, transparent);
+    }
+    backdrop-filter: blur(4px);
+  }
   .settings-persona-add-card {
     place-items: center;
     --tw-border-style: dashed;
@@ -10559,7 +10583,7 @@
 .reference-link-bridge strong {
   color: #ffd281;
 }
-.w3a-import-overlay {
+.wa3-import-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
@@ -10568,7 +10592,7 @@
   justify-content: center;
   z-index: 9999;
 }
-.w3a-import-popup {
+.wa3-import-popup {
   background: #1a1a2e;
   border: 1px solid #3498db;
   border-radius: 12px;
@@ -10579,32 +10603,32 @@
   overflow-y: auto;
   box-shadow: 0 8px 32px rgba(52, 152, 219, 0.2);
 }
-.w3a-import-header {
+.wa3-import-header {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 12px;
 }
-.w3a-import-icon {
+.wa3-import-icon {
   font-size: 1.4rem;
 }
-.w3a-import-title {
+.wa3-import-title {
   font-size: 1.1rem;
   font-weight: 600;
   color: #ecf0f1;
 }
-.w3a-import-status {
+.wa3-import-status {
   font-size: 1rem;
   font-weight: 500;
   margin-bottom: 8px;
 }
-.w3a-import-recommendation {
+.wa3-import-recommendation {
   color: #bdc3c7;
   font-size: 0.85rem;
   margin-bottom: 10px;
   line-height: 1.4;
 }
-.w3a-import-sidecar-badge {
+.wa3-import-sidecar-badge {
   background: rgba(46, 204, 64, 0.15);
   color: #2ecc40;
   border-radius: 6px;
@@ -10613,33 +10637,33 @@
   margin-bottom: 10px;
   display: inline-block;
 }
-.w3a-import-capabilities {
+.wa3-import-capabilities {
   background: rgba(52, 152, 219, 0.08);
   border-radius: 8px;
   padding: 10px;
   margin-bottom: 14px;
 }
-.w3a-detail-grid {
+.wa3-detail-grid {
   display: grid;
   gap: 6px;
   margin: 12px 0;
 }
-.w3a-detail-row {
+.wa3-detail-row {
   display: grid;
   grid-template-columns: 104px minmax(0, 1fr);
   gap: 8px;
   align-items: start;
   font-size: 0.78rem;
 }
-.w3a-detail-row span {
+.wa3-detail-row span {
   color: #7f8c8d;
 }
-.w3a-detail-row code, .w3a-detail-row strong {
+.wa3-detail-row code, .wa3-detail-row strong {
   min-width: 0;
   color: #ecf0f1;
   overflow-wrap: anywhere;
 }
-.w3a-pollution-card, .w3a-guidance-card {
+.wa3-pollution-card, .wa3-guidance-card {
   background: rgba(236, 240, 241, 0.06);
   border: 1px solid rgba(236, 240, 241, 0.12);
   border-radius: 8px;
@@ -10650,21 +10674,21 @@
   color: #bdc3c7;
   font-size: 0.8rem;
 }
-.w3a-pollution-card strong, .w3a-guidance-card strong {
+.wa3-pollution-card strong, .wa3-guidance-card strong {
   color: #ecf0f1;
 }
-.w3a-pollution-risk {
+.wa3-pollution-risk {
   border-color: rgba(231, 76, 60, 0.55);
   background: rgba(231, 76, 60, 0.12);
 }
-.w3a-guidance-list {
+.wa3-guidance-list {
   display: grid;
   gap: 3px;
 }
-.w3a-guidance-list span {
+.wa3-guidance-list span {
   color: #7f8c8d;
 }
-.w3a-import-error {
+.wa3-import-error {
   margin-bottom: 10px;
   color: #ffb4a8;
   background: rgba(231, 76, 60, 0.12);
@@ -10673,50 +10697,50 @@
   padding: 8px;
   font-size: 0.8rem;
 }
-.w3a-import-cap-title {
+.wa3-import-cap-title {
   font-size: 0.8rem;
   color: #7f8c8d;
   display: block;
   margin-bottom: 6px;
 }
-.w3a-import-cap-item {
+.wa3-import-cap-item {
   font-size: 0.8rem;
   color: #bdc3c7;
   padding: 2px 0;
 }
-.w3a-import-actions {
+.wa3-import-actions {
   display: flex;
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 8px;
 }
-.w3a-import-btn {
+.wa3-import-btn {
   border: none;
   border-radius: 6px;
   padding: 6px 18px;
   font-size: 0.85rem;
   cursor: pointer;
 }
-.w3a-import-btn:disabled {
+.wa3-import-btn:disabled {
   cursor: wait;
   opacity: 0.65;
 }
-.w3a-import-btn-secondary {
+.wa3-import-btn-secondary {
   background: rgba(236, 240, 241, 0.12);
   color: #ecf0f1;
 }
-.w3a-import-btn-warning {
+.wa3-import-btn-warning {
   background: rgba(243, 156, 18, 0.2);
   color: #f8d28b;
 }
-.w3a-import-btn-primary {
+.wa3-import-btn-primary {
   background: #3498db;
   color: #fff;
 }
-.w3a-import-btn-primary:hover {
+.wa3-import-btn-primary:hover {
   background: #2980b9;
 }
-.w3a-toast {
+.wa3-toast {
   position: fixed;
   bottom: 24px;
   left: 50%;
@@ -10731,17 +10755,17 @@
   z-index: 9998;
   box-shadow: 0 4px 16px rgba(52, 152, 219, 0.25);
   cursor: pointer;
-  animation: w3a-toast-in 0.3s ease-out;
+  animation: wa3-toast-in 0.3s ease-out;
 }
-.w3a-toast-icon {
+.wa3-toast-icon {
   font-size: 1.2rem;
 }
-.w3a-toast-text {
+.wa3-toast-text {
   color: #ecf0f1;
   font-size: 0.85rem;
   line-height: 1.4;
 }
-@keyframes w3a-toast-in {
+@keyframes wa3-toast-in {
   from {
     opacity: 0;
     transform: translateX(-50%) translateY(10px);
@@ -12006,6 +12030,23 @@
   color: #fff6df;
   background: rgba(255, 186, 85, .12);
 }
+.floating-avatar-panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.floating-avatar-mini-panel header .floating-avatar-chat-toggle {
+  min-height: 24px;
+  padding: 2px 9px;
+  font-size: .74rem;
+  font-weight: 700;
+  border-radius: 11px;
+}
+.floating-avatar-mini-panel header .floating-avatar-chat-toggle-on {
+  border-color: rgba(255, 210, 129, .7);
+  background: rgba(41, 26, 8, .95);
+  color: #ffd281;
+}
 .floating-avatar-mini-status {
   border-radius: 8px;
   padding: 9px 10px;
@@ -12040,6 +12081,23 @@
   min-height: 34px;
   padding: 0 14px;
   font-weight: 800;
+}
+.floating-avatar-panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.floating-avatar-panel-actions button {
+  justify-self: auto;
+}
+.floating-avatar-panel-actions .floating-avatar-photo-btn {
+  border: 1px solid rgba(110, 215, 207, .55);
+  background: rgba(110, 215, 207, .12);
+  color: #d6fff9;
+}
+.floating-avatar-panel-actions .floating-avatar-photo-btn[disabled] {
+  opacity: .55;
+  cursor: default;
 }
 .floating-avatar-menu {
   left: 74px;
@@ -12379,7 +12437,6 @@
   border-radius: 999px;
   background: radial-gradient(circle at 42% 36%, rgba(255, 255, 255, .9) 0 26%, rgba(255, 255, 255, .42) 44%, rgba(255, 255, 255, 0) 72%);
   box-shadow: 0 0 4px var(--pupil-shadow);
-  mix-blend-mode: screen;
   transform: translate( calc(-50% + (var(--look-x) * var(--eye-range-x))), calc(-50% + (var(--look-y) * var(--eye-range-y))) );
   transition: transform .12s ease-out;
 }

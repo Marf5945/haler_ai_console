@@ -497,7 +497,8 @@ func (a *App) BuildSkillContext(resolveID string, sessionID string) (*skill_step
 	if !ok {
 		return nil, fmt.Errorf("app: BuildSkillContext: resolve result %q not found", resolveID)
 	}
-	if result.SelectedSkillID == "" || len(result.Candidates) == 0 {
+	skillID := skillIDFromResolveResult(result)
+	if skillID == "" || len(result.Candidates) == 0 {
 		return nil, fmt.Errorf("app: BuildSkillContext: no selected skill in resolve result %q", resolveID)
 	}
 	if sessionID == "" {
@@ -510,14 +511,14 @@ func (a *App) BuildSkillContext(resolveID string, sessionID string) (*skill_step
 	// Find the selected candidate.
 	var selected skill_step.Candidate
 	for _, c := range result.Candidates {
-		if c.SkillID == result.SelectedSkillID {
+		if c.SkillID == skillID {
 			selected = c
 			break
 		}
 	}
 
 	var manifest skill_step.SkillManifest
-	if m := a.findManifestForExec(result.SelectedSkillID); m != nil {
+	if m := a.findManifestForExec(skillID); m != nil {
 		manifest = *m
 	}
 

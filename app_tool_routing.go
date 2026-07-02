@@ -545,17 +545,6 @@ func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sess
 	return false, skill_step.CLIResponse{}
 }
 
-func buildToolRoutingJudgePrompt(systemPrompt string, userText string) string {
-	_ = systemPrompt
-	return strings.Join([]string{
-		"任務=工具粗判",
-		"輸出只能是 需要工具 或 閒聊ㄌ<回答>",
-		"需要搜尋本機文件/讀資料/開啟/寫入/匯出/排程/製作或使用小程式/已保存螢幕操作/DAG/自動流程/重現/回放/操作/點擊時，輸出需要工具",
-		"不要猜工具名稱; 不要輸出無前綴自然語言",
-		"Q=" + compactPromptField(userText),
-	}, " | ")
-}
-
 func isNeedToolResponse(text string) bool {
 	firstLine := strings.TrimSpace(strings.Split(strings.TrimSpace(text), "\n")[0])
 	firstLine = strings.Trim(firstLine, "。.!！ \t\r\n")

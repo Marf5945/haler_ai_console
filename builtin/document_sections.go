@@ -5,11 +5,11 @@
 // 段落，連同一份壓縮目錄餵給模型，不再餵全文 → 省 token、省時間。
 //
 // 設計（呼應暗標系統 highlight_system_marks.go 的三原則）：
-//   1. 規則先行、熱路徑便宜：切分 + 規則分類全是 stdlib，零模型、零外部服務。
-//   2. idle 才補強：規則判不出的段落標 LabelSource="pending"，交 BackfillPendingLabels
-//      在 idle 時用 app 注入的本地模型補強（builtin 不直接依賴 LLM / UI）。
-//   3. 增量重建：沿用 vector 索引同套策略——schema/sectioner 版本或 content hash
-//      不符才重建（SectionIndexNeedsRebuild）。
+//  1. 規則先行、熱路徑便宜：切分 + 規則分類全是 stdlib，零模型、零外部服務。
+//  2. idle 才補強：規則判不出的段落標 LabelSource="pending"，交 BackfillPendingLabels
+//     在 idle 時用 app 注入的本地模型補強（builtin 不直接依賴 LLM / UI）。
+//  3. 增量重建：沿用 vector 索引同套策略——schema/sectioner 版本或 content hash
+//     不符才重建（SectionIndexNeedsRebuild）。
 //
 // 零第三方相依：只用 stdlib（math / regexp / sort / strings / json / os …）與
 // 本套件既有 helper（tokenizeForVector / sha256Hex / snippet / runeLen）。
@@ -447,7 +447,7 @@ func (idx *DocSectionIndex) TOC(content string) string {
 	var b strings.Builder
 	for i := range idx.Sections {
 		s := &idx.Sections[i]
-		indent := strings.Repeat("  ", maxIntPos(s.Level-1))
+		indent := strings.Repeat("  ", max(s.Level-1, 0))
 		head := s.Heading
 		if head == "" {
 			head = "（前言）"
@@ -594,13 +594,6 @@ func hitWindow(text string, qToks []string, maxRunes int) string {
 		out = out + "…"
 	}
 	return out
-}
-
-func maxIntPos(a int) int {
-	if a > 0 {
-		return a
-	}
-	return 0
 }
 
 // ───────────────────────── idle 模型補強 ─────────────────────────

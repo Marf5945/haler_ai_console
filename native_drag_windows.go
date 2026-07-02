@@ -726,42 +726,6 @@ func windowsDesktopDirectory() string {
 	return filepath.Join(home, "Desktop")
 }
 
-func copyWindowsDragFallback(path, reason string) nativeDragResult {
-	desktop := windowsDesktopDirectory()
-	if desktop == "" {
-		writeNativeDragPhase("windows-fallback-no-desktop", "")
-		return nativeDragResult{Status: nativeDragStatusFailed, FallbackRequired: true, Message: reason + "; desktop path could not be resolved"}
-	}
-	target := filepath.Join(desktop, filepath.Base(path))
-	if _, err := os.Stat(target); err == nil {
-		writeNativeDragPhase("windows-fallback-target-exists", fmt.Sprintf("target=%q", target))
-		return nativeDragResult{Status: nativeDragStatusFailed, FallbackRequired: true, Message: reason + "; fallback target already exists on Desktop"}
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		writeNativeDragPhase("windows-fallback-source-missing", err.Error())
-		return nativeDragResult{Status: nativeDragStatusFailed, FallbackRequired: true, Message: reason + "; source missing"}
-	}
-	if info.IsDir() {
-		err = copySubExportDirectory(path, target)
-	} else {
-		err = copySubExportFile(path, target, info.Mode())
-	}
-	if err != nil {
-		writeNativeDragPhase("windows-fallback-copy-error", err.Error())
-		return nativeDragResult{Status: nativeDragStatusFailed, FallbackRequired: true, Message: reason + "; fallback copy failed: " + err.Error()}
-	}
-	writeNativeDragPhase("windows-fallback-copied", fmt.Sprintf("target=%q", target))
-	return nativeDragResult{
-		Status:           nativeDragStatusSuccess,
-		FallbackRequired: true,
-		Message:          reason,
-		LandedPath:       target,
-		DropTargetKind:   "desktop-fallback",
-		DropTargetDir:    desktop,
-	}
-}
-
 func explorerDirectoryForHWND(root uintptr) string {
 	shellObj, err := createDispatch("Shell.Application")
 	if err != nil {

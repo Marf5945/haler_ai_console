@@ -263,8 +263,8 @@ func extractUIIconRegions(data []byte, w, h int) []regionRect {
 		r := int(data[offset])
 		g := int(data[offset+1])
 		b := int(data[offset+2])
-		maxC := maxInt(r, maxInt(g, b))
-		minC := minInt(r, minInt(g, b))
+		maxC := max(r, max(g, b))
+		minC := min(r, min(g, b))
 		avg := (r + g + b) / 3
 		saturation := maxC - minC
 
@@ -378,15 +378,15 @@ func isLayoutContainerRegion(r regionRect, imgW, imgH int) bool {
 }
 
 func regionOverlapRatio(a, b regionRect) float64 {
-	x1 := maxInt(a.x, b.x)
-	y1 := maxInt(a.y, b.y)
-	x2 := minInt(a.x+a.w, b.x+b.w)
-	y2 := minInt(a.y+a.h, b.y+b.h)
+	x1 := max(a.x, b.x)
+	y1 := max(a.y, b.y)
+	x2 := min(a.x+a.w, b.x+b.w)
+	y2 := min(a.y+a.h, b.y+b.h)
 	if x2 <= x1 || y2 <= y1 {
 		return 0
 	}
 	intersection := (x2 - x1) * (y2 - y1)
-	smaller := minInt(a.w*a.h, b.w*b.h)
+	smaller := min(a.w*a.h, b.w*b.h)
 	if smaller <= 0 {
 		return 0
 	}
@@ -394,10 +394,10 @@ func regionOverlapRatio(a, b regionRect) float64 {
 }
 
 func padRegion(r regionRect, padding, maxW, maxH int) regionRect {
-	x := maxInt(0, r.x-padding)
-	y := maxInt(0, r.y-padding)
-	x2 := minInt(maxW, r.x+r.w+padding)
-	y2 := minInt(maxH, r.y+r.h+padding)
+	x := max(0, r.x-padding)
+	y := max(0, r.y-padding)
+	x2 := min(maxW, r.x+r.w+padding)
+	y2 := min(maxH, r.y+r.h+padding)
 	return regionRect{x: x, y: y, w: x2 - x, h: y2 - y}
 }
 
@@ -435,8 +435,8 @@ func mergeRegions(regions []regionRect, threshold int) []regionRect {
 
 // regionsClose 檢查兩區域是否距離小於 threshold。
 func regionsClose(a, b regionRect, threshold int) bool {
-	dx := maxInt(a.x, b.x) - minInt(a.x+a.w, b.x+b.w)
-	dy := maxInt(a.y, b.y) - minInt(a.y+a.h, b.y+b.h)
+	dx := max(a.x, b.x) - min(a.x+a.w, b.x+b.w)
+	dy := max(a.y, b.y) - min(a.y+a.h, b.y+b.h)
 	if dx < 0 {
 		dx = 0
 	}
@@ -448,10 +448,10 @@ func regionsClose(a, b regionRect, threshold int) bool {
 
 // mergeTwo 合併兩個矩形為外接矩形。
 func mergeTwo(a, b regionRect) regionRect {
-	x := minInt(a.x, b.x)
-	y := minInt(a.y, b.y)
-	x2 := maxInt(a.x+a.w, b.x+b.w)
-	y2 := maxInt(a.y+a.h, b.y+b.h)
+	x := min(a.x, b.x)
+	y := min(a.y, b.y)
+	x2 := max(a.x+a.w, b.x+b.w)
+	y2 := max(a.y+a.h, b.y+b.h)
 	return regionRect{x: x, y: y, w: x2 - x, h: y2 - y}
 }
 
@@ -503,17 +503,3 @@ func computeRegionHash(gray []byte, imgW int, r regionRect) string {
 // ──────────────────────────────────────────────
 // 輔助函式
 // ──────────────────────────────────────────────
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

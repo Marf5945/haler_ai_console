@@ -90,24 +90,6 @@ func (s *Service) NextGreeting(current string) string {
 	return next
 }
 
-func (s *Service) CompanionReply(input string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.lastActivity = time.Now()
-	if IsBlocked(input) {
-		s.currentText = RejectTemplate
-		s.currentLayer = LayerUser
-		return s.currentText
-	}
-	if reply, err := localCompanionReply(input, s.snapshots.Items()); err == nil {
-		s.currentText = reply
-	} else {
-		s.currentText = s.fallbackPhraseLocked()
-	}
-	s.currentLayer = LayerUser
-	return s.currentText
-}
-
 func (s *Service) AddSnapshot(role, text string) {
 	s.snapshots.Add(role, text)
 }
@@ -179,11 +161,4 @@ func (s *Service) idlePhraseLocked() string {
 		return "你好，主人。"
 	}
 	return s.idlePhrases[s.rand.Intn(len(s.idlePhrases))]
-}
-
-func (s *Service) fallbackPhraseLocked() string {
-	if len(s.greetings) == 0 {
-		return "本大叔在。"
-	}
-	return s.greetings[s.rand.Intn(len(s.greetings))]
 }

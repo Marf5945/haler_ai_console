@@ -78,7 +78,7 @@
       "獸族",
       "毛茸茸"
     ],
-    "openInteraction": "打開互動"
+    "openInteraction": "互動"
   },
   "recordingCatalog": {
     "title": "錄製",
@@ -953,7 +953,7 @@
     "discordMessage": "收到 Discord 訊息",
     "remoteReply": "收到 {{channel}} 回覆：{{label}}",
     "remoteComms": "遠端通訊",
-    "openInteractive": "打開互動",
+    "openInteractive": "互動",
     "interactiveLabel": "閒聊互動檢視",
     "interactiveHeader": "閒聊互動",
     "selectAdapter": "選擇 CLI adapter",
@@ -1434,6 +1434,13 @@
     "menuLabel": "後台頭像選單",
     "restore": "恢復主系統",
     "settings": "設定",
+    "chatModeOn": "切換閒聊模式",
+    "chatModeOff": "關閉閒聊模式",
+    "chatPanelKicker": "閒聊模式",
+    "chatInputPlaceholder": "輸入想聊的內容；只暫存最近 30 條，關掉或切換人格就忘記。",
+    "chatPrompt": "輸入閒聊內容",
+    "chatStarted": "已進入閒聊模式，會暫存最近 30 條對話。",
+    "chatClosed": "已關閉閒聊模式，暫存對話已清空。",
     "reminderSettings": "提醒設定",
     "switchAgent": "切換 agent",
     "quit": "退出後台",

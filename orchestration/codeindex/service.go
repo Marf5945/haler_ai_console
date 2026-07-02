@@ -689,7 +689,7 @@ func appendRelated(snapshot domain.Snapshot, matches []domain.Match, limit int) 
 			target := sectionsByID[targetID]
 			matches = append(matches, domain.Match{
 				Section: target,
-				Score:   maxInt(match.Score/3, 20),
+				Score:   max(match.Score/3, 20),
 				Tags:    dedupStrings(tagsBySection[targetID]),
 				Reasons: []string{"related_" + string(edge.Kind)},
 				Related: true,
@@ -711,8 +711,8 @@ func (s *Service) readSectionContent(section domain.Section, opts domain.QueryOp
 	if section.DocStartLine > 0 {
 		start = section.DocStartLine
 	}
-	start = maxInt(1, start-opts.ContextBefore)
-	end := minInt(len(lines), section.EndLine+opts.ContextAfter)
+	start = max(1, start-opts.ContextBefore)
+	end := min(len(lines), section.EndLine+opts.ContextAfter)
 	selected := lines[start-1 : end]
 	truncated := false
 	if opts.MaxContextLines > 0 && len(selected) > opts.MaxContextLines {
@@ -1034,18 +1034,4 @@ func truncateBytes(value string, maxBytes int) string {
 		cut--
 	}
 	return value[:cut]
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

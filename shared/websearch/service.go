@@ -292,7 +292,7 @@ func (s *Service) searchGoogleCSE(ctx context.Context, query string, limit int, 
 	q.Set("key", strings.TrimSpace(cfg.APIKey))
 	q.Set("cx", strings.TrimSpace(cfg.CX))
 	q.Set("q", query)
-	q.Set("num", fmt.Sprintf("%d", minInt(limit, 10)))
+	q.Set("num", fmt.Sprintf("%d", min(limit, 10)))
 	u.RawQuery = q.Encode()
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
@@ -602,11 +602,4 @@ func hostOf(rawURL string) string {
 		return ""
 	}
 	return u.Hostname()
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

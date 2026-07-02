@@ -61,9 +61,12 @@ export default function FloatingAvatarMode({
   onOpenSettings,
   onDropFiles,
   onSubmit,
+  onChatModeChange,
+  onChatModeToggle,
   onSwitchAgent,
   onSetReminderMode,
   compactWindowMode = false,
+  panelOpenSignal = 0,
   bodyMode = 'head',
   onBodyModeChange,
   onCompactDragStart,
@@ -71,6 +74,7 @@ export default function FloatingAvatarMode({
   onCompactDragEnd,
   onCompactExpandChange,
   flyingBack = false,
+  chatMode = false,
   activePersonaId = '',
   reminderPaused = false,
   reminderLabel = '',
@@ -177,6 +181,14 @@ export default function FloatingAvatarMode({
     if (!panelOpen) setScheduleConfirmPending(false);
   }, [panelOpen]);
 
+  useEffect(() => {
+    if (!active || !panelOpenSignal) return;
+    setContextOpen(false);
+    setAgentPickerOpen(false);
+    setReminderPickerOpen(false);
+    setPanelOpen(true);
+  }, [active, panelOpenSignal]);
+
   if (!active) return null;
 
   const selectedSet = new Set(selectedCandidateIDs || []);
@@ -232,6 +244,7 @@ export default function FloatingAvatarMode({
     ['tomorrow', t('floatingAvatar.muteTomorrow')],
     ['manual', t('floatingAvatar.muteManual')],
   ];
+  const menuCheck = (active, label) => active ? `✓ ${label}` : label;
 
   function noteAction() {
     if (guideVisible) setGuideVisible(false);
@@ -403,6 +416,8 @@ export default function FloatingAvatarMode({
           width: avatarFrameWidth,
           height: avatarFrameHeight,
           '--floating-avatar-size': `${avatarSize}px`,
+          '--floating-avatar-frame-width': `${avatarFrameWidth}px`,
+          '--floating-avatar-frame-height': `${avatarFrameHeight}px`,
         }}
         onContextMenu={(event) => {
           event.preventDefault();
@@ -467,15 +482,32 @@ export default function FloatingAvatarMode({
           <nav className="floating-avatar-menu" aria-label={t('floatingAvatar.menuLabel')}>
             <button type="button" onClick={onRestore}>{t('floatingAvatar.restore')}</button>
             <button type="button" onClick={onOpenSettings}>{t('floatingAvatar.settings')}</button>
+            <button
+              type="button"
+              className={chatMode ? 'floating-avatar-body-active-btn' : ''}
+              aria-pressed={chatMode}
+              onClick={() => {
+                if (onChatModeToggle) {
+                  onChatModeToggle(!chatMode);
+                } else {
+                  onChatModeChange?.(!chatMode);
+                }
+                setReminderPickerOpen(false);
+                setAgentPickerOpen(false);
+              }}
+            >
+              {menuCheck(chatMode, chatMode ? t('floatingAvatar.chatModeOff') : t('floatingAvatar.chatModeOn'))}
+            </button>
             <div className="floating-avatar-body-switch" role="group" aria-label={t('floatingAvatar.bodySwitchLabel')}>
               {[['head', 'bodyHead'], ['full', 'bodyFull']].map(([mode, key]) => (
                 <button
                   key={mode}
                   type="button"
                   className={bodyMode === mode ? 'floating-avatar-body-active-btn' : ''}
+                  aria-pressed={bodyMode === mode}
                   onClick={() => setBodyMode(mode)}
                 >
-                  {t(`floatingAvatar.${key}`)}
+                  {menuCheck(bodyMode === mode, t(`floatingAvatar.${key}`))}
                 </button>
               ))}
             </div>
@@ -619,7 +651,7 @@ export default function FloatingAvatarMode({
         <section className="floating-avatar-mini-panel" style={compactWindowMode ? compactPanelStyle : {left: panelLeft, top: panelTop}} aria-label={t('floatingAvatar.panelLabel')}>
           <header>
             <div>
-              <span>{t('floatingAvatar.panelKicker')}</span>
+              <span>{chatMode ? t('floatingAvatar.chatPanelKicker') : t('floatingAvatar.panelKicker')}</span>
               <strong>{persona?.name || t('floatingAvatar.agentFallback')}</strong>
             </div>
             <button type="button" onClick={() => setPanelOpen(false)} aria-label={t('common.close')}>×</button>
@@ -632,7 +664,7 @@ export default function FloatingAvatarMode({
             onSubmit={(event) => {
               event.preventDefault();
               noteAction();
-              if (!scheduleConfirmPending && looksLikeSchedule(draft)) {
+              if (!chatMode && !scheduleConfirmPending && looksLikeSchedule(draft)) {
                 setScheduleConfirmPending(true);
                 return;
               }
@@ -643,7 +675,7 @@ export default function FloatingAvatarMode({
             <textarea
               value={draft}
               rows={3}
-              placeholder={t('floatingAvatar.inputPlaceholder')}
+              placeholder={chatMode ? t('floatingAvatar.chatInputPlaceholder') : t('floatingAvatar.inputPlaceholder')}
               onChange={(event) => {
                 noteAction();
                 setScheduleConfirmPending(false);

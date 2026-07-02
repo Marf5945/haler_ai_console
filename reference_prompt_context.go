@@ -5,13 +5,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
 	"ui_console/adapter/debugtrace"
 	"ui_console/builtin"
@@ -22,7 +19,6 @@ import (
 
 const (
 	referencePromptMaxFiles        = 5
-	referencePromptSummaryRunes    = 400
 	referencePromptReadLimitBytes  = 64 * 1024
 	referencePromptMinimumScore    = 18
 	referencePromptFilenameHitBase = 90
@@ -227,11 +223,21 @@ func (a *App) buildDocSearchContext(sessionID, userText, adapterID, traceID stri
 
 // unifiedDocSearch 同時搜 document_store 和 references 的向量索引，合併排名。
 func unifiedDocSearch(query string, store *builtin.Store, refVecDir string, vec builtin.Vectorizer, limit int) ([]builtin.DocumentSearchResult, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, nil
+	}
+	// query 向量只算一次，兩個目錄共用——dense（Ollama）模式下省掉一次 embedding HTTP 呼叫。
+	queryVec, err := vec.Vectorize(query)
+	if err != nil {
+		return nil, fmt.Errorf("unified_doc_search: vectorize query: %w", err)
+	}
+
 	var all []builtin.DocumentSearchResult
 
 	// 1. 搜 document_store
 	if store != nil {
-		docResults, err := builtin.SearchDocuments(store, query, vec, limit*2) // 多取再合併
+		docResults, err := builtin.SearchDocumentsWithVector(store, queryVec, limit*2) // 多取再合併
 		if err != nil {
 			return nil, err
 		}
@@ -239,7 +245,7 @@ func unifiedDocSearch(query string, store *builtin.Store, refVecDir string, vec 
 	}
 
 	// 2. 搜 references/files 向量索引
-	refResults, err := builtin.SearchDocumentsInDir(refVecDir, query, vec, limit*2,
+	refResults, err := builtin.SearchDocumentsInDirWithVector(refVecDir, queryVec, limit*2,
 		func(docID string) (string, string, string) {
 			return docID, "", "" // 引用文件沒有 format/wa3ID
 		}, "reference")
@@ -446,82 +452,3 @@ func sanitizeDocSearchText(text string) string {
 }
 
 // --- 舊函式保留（供測試相容） ---
-
-func readReferenceSummary(path string) string {
-	file, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, referencePromptReadLimitBytes))
-	if err != nil || !utf8.Valid(data) {
-		return ""
-	}
-	return summarizeReferenceText(string(data), referencePromptSummaryRunes)
-}
-
-func summarizeReferenceText(text string, limit int) string {
-	text = strings.TrimSpace(strings.Join(strings.Fields(text), " "))
-	if text == "" {
-		return ""
-	}
-	runes := []rune(text)
-	if limit > 0 && len(runes) > limit {
-		return string(runes[:limit])
-	}
-	return text
-}
-
-func referencePromptQueryTokens(query string) []string {
-	seen := make(map[string]bool)
-	var tokens []string
-	add := func(token string) {
-		token = strings.TrimSpace(strings.ToLower(token))
-		if token == "" || isReferencePromptStopToken(token) || seen[token] {
-			return
-		}
-		seen[token] = true
-		tokens = append(tokens, token)
-	}
-	var latin []rune
-	var cjk []rune
-	flushLatin := func() {
-		if len(latin) >= 2 {
-			add(string(latin))
-		}
-		latin = latin[:0]
-	}
-	flushCJK := func() {
-		for n := 2; n <= 4; n++ {
-			for i := 0; i+n <= len(cjk); i++ {
-				add(string(cjk[i : i+n]))
-			}
-		}
-		cjk = cjk[:0]
-	}
-	for _, r := range query {
-		if unicode.Is(unicode.Han, r) {
-			flushLatin()
-			cjk = append(cjk, r)
-			continue
-		}
-		flushCJK()
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			latin = append(latin, unicode.ToLower(r))
-			continue
-		}
-		flushLatin()
-	}
-	flushLatin()
-	flushCJK()
-	return tokens
-}
-
-func isReferencePromptStopToken(token string) bool {
-	switch token {
-	case "你有", "有找", "找到", "到檔", "檔案", "文件", "的檔", "有載", "載入", "存在", "有沒", "沒有", "請問":
-		return true
-	default:
-		return false
-	}
-}

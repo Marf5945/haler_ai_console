@@ -204,14 +204,14 @@ import {
   // ── v3.6.2 W3A Media Provenance（§9A）接線 ──
   // 對應 Go app.go 的 W3A Wails binding 方法，
   // 涵蓋媒體驗證→污染偵測→匯入匯出→傳輸引導→信任清單管理。
-  CreateDocumentW3A,
-  GetMediaW3AInfo,
+  CreateDocumentWA3,
+  GetMediaWA3Info,
   DetectModelPollution,
   ExportMediaWithSidecar,
   ImportMediaVerify,
-  GetW3ATransferGuidance,
-  ListW3ATrustedDevelopers,
-  AddW3ATrustedDeveloper,
+  GetWA3TransferGuidance,
+  ListWA3TrustedDevelopers,
+  AddWA3TrustedDeveloper,
   // ── v3.6.3 Remote Bridge Communication（§12A）接線 ──
   // 對應 Go app.go 的 9 個 Wails binding 方法，
   // 涵蓋通道偵測→測試→註冊→啟用→模式切換→移除→稽核查詢完整生命週期。
@@ -293,6 +293,8 @@ import {
   EnterFloatingAvatarOverlayImage,
   ExitFloatingAvatarOverlay,
   GetFloatingAvatarOverlayPosition,
+  SetFloatingAvatarOverlayChatMode,
+  SetFloatingAvatarOverlayMetadata,
 } from '../../wailsjs/go/main/App';
 import {
   OnFileDrop,
@@ -2049,7 +2051,11 @@ function App() {
   const [floatingAvatarMode, setFloatingAvatarMode] = useState(false);
   const [floatingAvatarFlyingBack, setFloatingAvatarFlyingBack] = useState(false);
   const [floatingAvatarCompactWindow, setFloatingAvatarCompactWindow] = useState(false);
+  const [floatingAvatarSurfaceOnly, setFloatingAvatarSurfaceOnly] = useState(false);
   const [floatingAvatarBodyMode, setFloatingAvatarBodyMode] = useState('head');
+  const [floatingAvatarChatMode, setFloatingAvatarChatMode] = useState(false);
+  const [floatingAvatarPanelOpenSignal, setFloatingAvatarPanelOpenSignal] = useState(0);
+  const [floatingAvatarReplyBubble, setFloatingAvatarReplyBubble] = useState('');
   const [floatingAvatarDrafts, setFloatingAvatarDrafts] = useState({});
   const [floatingReminderPause, setFloatingReminderPause] = useState({mode: '', until: 0});
   const floatingAvatarWindowRef = useRef({restore: null, compactPosition: null});
@@ -2069,9 +2075,13 @@ function App() {
   const floatingAvatarCompactWindowRef = useRef(floatingAvatarCompactWindow);
   const floatingAvatarPositionRef = useRef(floatingAvatarPosition);
   const floatingAvatarTransitionRef = useRef(false);
+  const floatingAvatarChatModeRef = useRef(floatingAvatarChatMode);
+  const floatingAvatarChatHistoryRef = useRef([]);
+  const floatingAvatarChatRequestSeqRef = useRef(0);
   floatingAvatarModeRef.current = floatingAvatarMode;
   floatingAvatarCompactWindowRef.current = floatingAvatarCompactWindow;
   floatingAvatarPositionRef.current = floatingAvatarPosition;
+  floatingAvatarChatModeRef.current = floatingAvatarChatMode;
 
   useEffect(() => {
     if (floatingAvatarCompactWindow) return;
@@ -2081,7 +2091,7 @@ function App() {
   }, [floatingAvatarCompactWindow, floatingAvatarPosition]);
 
   useEffect(() => {
-    const nativeWindowActive = floatingAvatarMode && ENABLE_NATIVE_FLOATING_AVATAR_WINDOW;
+    const nativeWindowActive = floatingAvatarMode && (ENABLE_NATIVE_FLOATING_AVATAR_WINDOW || floatingAvatarCompactWindow || floatingAvatarSurfaceOnly);
     document.documentElement.classList.toggle('floating-avatar-window-active', nativeWindowActive);
     document.body.classList.toggle('floating-avatar-window-active', nativeWindowActive);
     document.documentElement.classList.toggle('floating-avatar-window-keyed', nativeWindowActive && IS_WINDOWS_RUNTIME);
@@ -2092,7 +2102,7 @@ function App() {
       document.body.classList.remove('floating-avatar-window-active');
       document.body.classList.remove('floating-avatar-window-keyed');
     };
-  }, [floatingAvatarMode]);
+  }, [floatingAvatarMode, floatingAvatarCompactWindow, floatingAvatarSurfaceOnly]);
 
   useEffect(() => {
     if (!floatingAvatarMode) return undefined;
@@ -5391,7 +5401,7 @@ function App() {
   //  dismissW3AImportPopup — 關閉匯入選單
 
   async function refreshW3ATrustList() {
-    callWails(ListW3ATrustedDevelopers)
+    callWails(ListWA3TrustedDevelopers)
       .then((list) => setW3aTrustList(list || []))
       .catch(() => {});
   }
@@ -5456,7 +5466,7 @@ function App() {
     setW3aActionBusy('info');
     setW3aActionError('');
     try {
-      const info = await callWails(() => GetMediaW3AInfo(filePath));
+      const info = await callWails(() => GetMediaWA3Info(filePath));
       setW3aDetail(info || null);
       setW3aImportPopup((current) => current ? {...current, info: info || current.info, source_path: filePath} : current);
       setW3aToastMsg(t('w3a.infoLoaded'));
@@ -5491,7 +5501,7 @@ function App() {
     setW3aActionBusy('guidance');
     setW3aActionError('');
     try {
-      const guidance = await callWails(GetW3ATransferGuidance);
+      const guidance = await callWails(GetWA3TransferGuidance);
       setW3aTransferGuidance(guidance || null);
       setW3aToastMsg(guidance?.ui_message || t('w3a.exportHint'));
     } catch (error) {
@@ -5510,7 +5520,7 @@ function App() {
     setW3aActionBusy('trust');
     setW3aActionError('');
     try {
-      await callWails(() => AddW3ATrustedDeveloper(signature.app_id, signature.public_key, signature.app_id));
+      await callWails(() => AddWA3TrustedDeveloper(signature.app_id, signature.public_key, signature.app_id));
       await refreshW3ATrustList();
       setW3aToastMsg(t('w3a.trustAdded'));
     } catch (error) {
@@ -6966,7 +6976,7 @@ function App() {
         }
         else if (referenceImportReady && isW3ADocPath(path)) {
           try {
-            await CreateDocumentW3A(referencePathForStatus);
+            await CreateDocumentWA3(referencePathForStatus);
             setReferenceFiles((current) => updateReferenceFileStatus(current, referencePathForStatus, {
               status: 'ready',
               detail: '文件來源證明已建立',
@@ -7612,6 +7622,13 @@ function App() {
     ? floatingPersona.id || 'main'
     : activeConversationId || floatingPersona.id || 'main';
   const floatingAvatarDraft = floatingAvatarDrafts[activeFloatingAgentId] || '';
+  const floatingAvatarChatOwnerRef = useRef(activeFloatingAgentId);
+  useEffect(() => {
+    if (floatingAvatarChatOwnerRef.current && floatingAvatarChatOwnerRef.current !== activeFloatingAgentId) {
+      setFloatingAvatarChatModeEnabled(false, {clearHistory: true, silent: true});
+    }
+    floatingAvatarChatOwnerRef.current = activeFloatingAgentId;
+  }, [activeFloatingAgentId]);
   const floatingReminderPaused = floatingReminderPause.mode === 'manual'
     || Number(floatingReminderPause.until || 0) > (avatarClock || Date.now());
   const floatingReminderLabel = floatingReminderPause.mode === 'manual'
@@ -7725,7 +7742,10 @@ function App() {
     if (!ENABLE_NATIVE_FLOATING_AVATAR_WINDOW) {
       floatingAvatarTransitionRef.current = true;
       try {
-        const windowPosition = await WindowGetPosition().catch(() => ({x: 0, y: 0}));
+        const [windowSize, windowPosition] = await Promise.all([
+          WindowGetSize().catch(() => ({w: window.innerWidth, h: window.innerHeight})),
+          WindowGetPosition().catch(() => ({x: 0, y: 0})),
+        ]);
         const avatarPosition = floatingAvatarPositionRef.current || floatingAvatarPosition || {
           x: Math.max(12, window.innerWidth - FLOATING_AVATAR_WINDOW_SIZE),
           y: Math.max(12, window.innerHeight - FLOATING_AVATAR_WINDOW_SIZE - 16),
@@ -7736,9 +7756,17 @@ function App() {
         await showFloatingAvatarOverlayAt('head', overlayX, overlayY);
         floatingAvatarCompactWindowRef.current = false;
         setFloatingAvatarCompactWindow(false);
+        setFloatingAvatarSurfaceOnly(false);
         setFloatingAvatarFlyingBack(false);
         floatingAvatarDragWindowRef.current = null;
-        floatingAvatarWindowRef.current = {restore: null, compactPosition: null};
+        floatingAvatarWindowRef.current = {
+          restore: {
+            size: windowSize || {w: window.innerWidth, h: window.innerHeight},
+            position: windowPosition || {x: 0, y: 0},
+            avatarPosition,
+          },
+          compactPosition: null,
+        };
         floatingAvatarModeRef.current = true;
         setFloatingAvatarMode(true);
         setSchedulerBgPrompt(false);
@@ -7790,10 +7818,12 @@ function App() {
       setFloatingAvatarPosition(compactAvatarPosition);
       floatingAvatarCompactWindowRef.current = true;
       setFloatingAvatarCompactWindow(true);
+      setFloatingAvatarSurfaceOnly(false);
     } catch (error) {
       console.warn('floating avatar compact window failed', error);
       floatingAvatarCompactWindowRef.current = false;
       setFloatingAvatarCompactWindow(false);
+      setFloatingAvatarSurfaceOnly(false);
     } finally {
       floatingAvatarTransitionRef.current = false;
     }
@@ -7804,12 +7834,85 @@ function App() {
     setToolResult({toolId: 'scheduler', ok: true, message: t('floatingAvatar.entered')});
   }
 
+  async function openFloatingAvatarPanelFromOverlay() {
+    if (floatingAvatarTransitionRef.current) return;
+    floatingAvatarTransitionRef.current = true;
+    try {
+      const overlayPosition = await callWails(() => GetFloatingAvatarOverlayPosition()).catch(() => null);
+      const avatarScreenX = Number.isFinite(overlayPosition?.x) ? Math.round(overlayPosition.x) : Math.max(12, window.innerWidth - FLOATING_AVATAR_WINDOW_SIZE);
+      const avatarScreenY = Number.isFinite(overlayPosition?.y) ? Math.round(overlayPosition.y) : Math.max(12, window.innerHeight - FLOATING_AVATAR_WINDOW_SIZE - 16);
+      await callWails(() => ExitFloatingAvatarOverlay()).catch((e) => console.warn('ExitFloatingAvatarOverlay failed', e));
+
+      const screens = await ScreenGetAll().catch(() => []);
+      const currentScreen = (screens || []).find((item) => item?.isCurrent) || (screens || []).find((item) => item?.isPrimary) || null;
+      const screenLeft = firstFiniteNumber(window.screen?.availLeft, window.screen?.left);
+      const screenTop = firstFiniteNumber(window.screen?.availTop, window.screen?.top);
+      const screenWidth = firstFiniteNumber(window.screen?.availWidth, currentScreen?.width, window.innerWidth) || FLOATING_AVATAR_PANEL_W;
+      const screenHeight = firstFiniteNumber(window.screen?.availHeight, currentScreen?.height, window.innerHeight) || FLOATING_AVATAR_PANEL_H;
+      const panelW = Math.min(FLOATING_AVATAR_PANEL_W, screenWidth);
+      const panelH = Math.min(FLOATING_AVATAR_PANEL_H, screenHeight);
+      let panelX = avatarScreenX - FLOATING_AVATAR_LEFT_TIP_ROOM;
+      let panelY = avatarScreenY - 118;
+      if (Number.isFinite(screenLeft)) {
+        const minX = screenLeft;
+        const maxX = screenLeft + screenWidth - panelW;
+        panelX = Math.max(Math.min(panelX, Math.max(minX, maxX)), Math.min(minX, maxX));
+      }
+      if (Number.isFinite(screenTop)) {
+        const minY = screenTop;
+        const maxY = screenTop + screenHeight - panelH;
+        panelY = Math.max(Math.min(panelY, Math.max(minY, maxY)), Math.min(minY, maxY));
+      }
+
+      const avatarPosition = {x: Math.round(avatarScreenX - panelX), y: Math.round(avatarScreenY - panelY)};
+      floatingAvatarWindowRef.current = {
+        ...floatingAvatarWindowRef.current,
+        compactPosition: {x: Math.round(panelX), y: Math.round(panelY)},
+        expanded: {avatarScreenX, avatarScreenY},
+      };
+      floatingAvatarPositionRef.current = avatarPosition;
+      setFloatingAvatarPosition(avatarPosition);
+      floatingAvatarCompactWindowRef.current = true;
+      setFloatingAvatarCompactWindow(true);
+      setFloatingAvatarSurfaceOnly(true);
+      WindowSetMinSize(320, 320);
+      WindowSetSize(panelW, panelH);
+      WindowSetPosition(Math.round(panelX), Math.round(panelY));
+      WindowSetAlwaysOnTop(true);
+      WindowSetBackgroundColour(0, 0, 0, 0);
+      WindowUnminimise();
+      WindowShow();
+      floatingAvatarModeRef.current = true;
+      setFloatingAvatarMode(true);
+      setFloatingAvatarPanelOpenSignal((value) => value + 1);
+    } catch (error) {
+      console.warn('floating avatar panel open failed', error);
+      setToolResult({toolId: 'floating-avatar', ok: false, message: t('floatingAvatar.backgroundFail', {error: error?.message || error})});
+    } finally {
+      floatingAvatarTransitionRef.current = false;
+    }
+  }
+
   async function restoreFloatingAvatarWindow() {
     if (floatingAvatarTransitionRef.current) return;
     if (!ENABLE_NATIVE_FLOATING_AVATAR_WINDOW && floatingAvatarModeRef.current) {
+      const restore = floatingAvatarWindowRef.current?.restore;
       await callWails(() => ExitFloatingAvatarOverlay()).catch((e) => console.warn('ExitFloatingAvatarOverlay failed', e));
-      WindowShow();
       WindowUnminimise();
+      WindowShow();
+      WindowSetAlwaysOnTop(false);
+      WindowSetMinSize(MAIN_WINDOW_MIN_SIZE.width, MAIN_WINDOW_MIN_SIZE.height);
+      WindowSetBackgroundColour(5, 5, 5, 255);
+      if (restore?.size) {
+        WindowSetSize(restore.size.w || restore.size.width || 1536, restore.size.h || restore.size.height || 860);
+      }
+      if (restore?.position) {
+        WindowSetPosition(restore.position.x || 0, restore.position.y || 0);
+      }
+      floatingAvatarCompactWindowRef.current = false;
+      setFloatingAvatarCompactWindow(false);
+      setFloatingAvatarSurfaceOnly(false);
+      floatingAvatarWindowRef.current = {restore: null, compactPosition: null};
       return;
     }
     const restore = floatingAvatarWindowRef.current?.restore;
@@ -7870,6 +7973,7 @@ function App() {
     await restoreFloatingAvatarWindow();
     floatingAvatarModeRef.current = false;
     setFloatingAvatarMode(false);
+    setFloatingAvatarSurfaceOnly(false);
     setManualAvatarState('');
     if (target === 'settings') {
       setActivePanel('settings');
@@ -7890,7 +7994,10 @@ function App() {
   }
 
   async function closeAfterBackgroundAvatarExit() {
-    await restoreFloatingAvatarWindow();
+    await setFloatingAvatarChatModeEnabled(false, {clearHistory: true, silent: true});
+    await callWails(() => ExitFloatingAvatarOverlay()).catch((error) => {
+      console.warn('ExitFloatingAvatarOverlay failed', error);
+    });
     floatingAvatarModeRef.current = false;
     setFloatingAvatarMode(false);
     setManualAvatarState('');
@@ -7900,6 +8007,7 @@ function App() {
       // 停用背景喚醒失敗時仍嘗試完整關閉，避免留下殘留浮窗/圖示。
     }
     await callWails(() => ConfirmClose(false, ''));
+    Quit();
   }
 
   // 單擊頭像展開迷你框時，把浮窗放大到面板尺寸；關閉時縮回頭像尺寸。
@@ -7908,6 +8016,20 @@ function App() {
     if (!floatingAvatarCompactWindowRef.current) return;
     const ref = floatingAvatarWindowRef.current;
     if (!ref) return;
+    if (!ENABLE_NATIVE_FLOATING_AVATAR_WINDOW && !open) {
+      if (!ref.expanded) return;
+      const {avatarScreenX, avatarScreenY} = ref.expanded;
+      ref.expanded = null;
+      ref.compactPosition = null;
+      floatingAvatarCompactWindowRef.current = false;
+      setFloatingAvatarCompactWindow(false);
+      setFloatingAvatarSurfaceOnly(false);
+      WindowHide();
+      await showFloatingAvatarOverlayAt(floatingAvatarBodyMode, avatarScreenX, avatarScreenY).catch((error) => {
+        console.warn('restore floating avatar overlay failed', error);
+      });
+      return;
+    }
     try {
       if (open) {
         if (ref.expanded) return;
@@ -8013,6 +8135,161 @@ function App() {
     setFloatingAvatarDrafts((prev) => ({...prev, [activeFloatingAgentId]: value}));
   }
 
+  function syncFloatingAvatarOverlayMetadata(replyText = floatingAvatarReplyBubble) {
+    const personaName = floatingPersona?.name || t('floatingAvatar.agentFallback');
+    const placeholder = t('floatingAvatar.chatInputPlaceholder');
+    callWails(() => SetFloatingAvatarOverlayMetadata(personaName, replyText || '', placeholder)).catch(() => {});
+  }
+
+  function syncFloatingAvatarOverlayChatMode(enabled) {
+    callWails(() => SetFloatingAvatarOverlayChatMode(Boolean(enabled))).catch(() => {});
+    syncFloatingAvatarOverlayMetadata(enabled ? floatingAvatarReplyBubble : '');
+  }
+
+  function clearFloatingAvatarChatMemory() {
+    floatingAvatarChatHistoryRef.current = [];
+    floatingAvatarChatRequestSeqRef.current += 1;
+  }
+
+  async function setFloatingAvatarChatModeEnabled(enabled, options = {}) {
+    const next = Boolean(enabled);
+    floatingAvatarChatModeRef.current = next;
+    setFloatingAvatarChatMode(next);
+    syncFloatingAvatarOverlayChatMode(next);
+    if (!next || options.clearHistory) {
+      clearFloatingAvatarChatMemory();
+      setFloatingAvatarReplyBubble('');
+      syncFloatingAvatarOverlayMetadata('');
+    }
+    if (!options.silent) {
+      setToolResult({
+        toolId: 'floating-avatar-chat',
+        ok: true,
+        message: next ? t('floatingAvatar.chatStarted') : t('floatingAvatar.chatClosed'),
+      });
+    }
+  }
+
+  async function toggleFloatingAvatarChatMode(enabled, options = {}) {
+    if (!enabled) {
+      await setFloatingAvatarChatModeEnabled(false, {clearHistory: true});
+      return;
+    }
+    if (options.prompt === false) {
+      await setFloatingAvatarChatModeEnabled(true);
+      return;
+    }
+    await promptFloatingAvatarChatInput();
+  }
+
+  function floatingAvatarThinkingMessageForPersona(persona) {
+    const id = String(persona?.id || '').toLowerCase();
+    const name = String(persona?.name || '').trim().toLowerCase();
+    const identity = String(persona?.identity || '').trim().toLowerCase();
+    const haystack = [id, name, identity].join(' ');
+    if (id === 'persona-a' || haystack.includes('憂樂傻酷') || haystack.includes('yurosaku')) {
+      return '本犬要動一下腦袋，稍等！';
+    }
+    if (id === 'persona-b' || haystack.includes('厭世叔') || haystack.includes('厭世大叔') || haystack.includes('grumpy uncle')) {
+      return '啊啊，我想一下，先別繼續問.....。';
+    }
+    if (id === 'persona-c' || haystack.includes('秘書小妹') || haystack.includes('秘書小姐') || haystack.includes('assistant') || haystack.includes('secretary')) {
+      return '好的，請給我點時間，馬上處理中。';
+    }
+    if (id === 'persona-d' || haystack.includes('警察') || haystack.includes('rossfork') || haystack.includes('police')) {
+      return '身為警察，任何事都會盡心盡力服務的，請稍等。';
+    }
+    if (id === 'persona-e' || haystack.includes('東春') || haystack.includes('touharu') || haystack.includes('miko')) {
+      return '真是拿你沒辦法，竟然還要我說？';
+    }
+    return '想一下…';
+  }
+
+  async function submitFloatingAvatarChatText(rawText) {
+    const text = String(rawText || '').trim();
+    if (!text) return;
+    updateFloatingAvatarDraft('');
+    setSelectedFloatingCandidateIDs([]);
+    await setFloatingAvatarChatModeEnabled(true, {silent: true});
+    const requestSeq = floatingAvatarChatRequestSeqRef.current + 1;
+    floatingAvatarChatRequestSeqRef.current = requestSeq;
+    const waitingText = floatingAvatarThinkingMessageForPersona(floatingPersona);
+    setFloatingAvatarReplyBubble(waitingText);
+    syncFloatingAvatarOverlayMetadata(waitingText);
+    const resp = await sendFloatingAvatarQuickChat(text);
+    if (requestSeq !== floatingAvatarChatRequestSeqRef.current || !floatingAvatarChatModeRef.current) {
+      return;
+    }
+    if (resp?.error) {
+      setToolResult({toolId: 'floating-avatar-chat', ok: false, message: resp.error});
+      setManualAvatarState('sad');
+    } else if (resp?.text) {
+      floatingAvatarChatHistoryRef.current = [
+        ...floatingAvatarChatHistoryRef.current,
+        {role: 'user', text},
+        {role: 'assistant', text: resp.text},
+      ].slice(-30);
+      setFloatingAvatarReplyBubble(resp.text);
+      syncFloatingAvatarOverlayMetadata(resp.text);
+      setManualAvatarState('happy');
+    }
+  }
+
+  function buildFloatingAvatarQuickChatPrompt(userText, history) {
+    const personaName = floatingPersona?.name || t('floatingAvatar.agentFallback');
+    const personality = String(floatingPersona?.personality || '').trim();
+    const recent = (Array.isArray(history) ? history : [])
+      .slice(-30)
+      .map((entry) => `${entry.role === 'assistant' ? personaName : '主人'}：${entry.text}`)
+      .join('\n');
+    return [
+      // 後端看到這個 sentinel 會直達模型，跳過意圖路由（否則慢、且會被誤判成搜尋）。
+      '[[AI_CONSOLE_QUICK_CHAT]]',
+      // RAW 行讓後端判斷唯一的工具特例：明講「網路搜尋/上網查 …」才觸發網搜。
+      `[[RAW]]${String(userText).replace(/\s+/g, ' ').trim()}`,
+      `你現在是「${personaName}」的閒聊模式。`,
+      personality ? `人格語氣：${personality}` : '',
+      '只做輕量閒聊回覆，不規劃任務、不呼叫工具、不要求使用者等待主控台流程。',
+      '回覆請簡短自然，最多 3 句；若適合可用繁體中文。',
+      recent ? `最近暫存對話：\n${recent}` : '',
+      `主人：${userText}`,
+      `${personaName}：`,
+    ].filter(Boolean).join('\n');
+  }
+
+  async function sendFloatingAvatarQuickChat(userText) {
+    const adapter = resolveAdapterFromRefs();
+    const adapterID = adapter?.id || adapter?.adapter_id || activeAdapterIdRef.current || '';
+    if (!adapterID) {
+      return {error: '找不到可用 adapter。'};
+    }
+    const sessionId = appSessionIdRef.current || '';
+    const traceId = makeDebugTraceID('avatar-chat');
+    const prompt = buildFloatingAvatarQuickChatPrompt(userText, floatingAvatarChatHistoryRef.current);
+    const escaped = await callWails(() => EscapeExternalTokens(prompt)).catch(() => prompt);
+    try {
+      const resp = await callWails(() => (
+        isAPIAdapter(adapter)
+          ? SendAPIMessage(adapterID, sessionId, escaped || prompt, traceId)
+          : SendCLIMessage(adapterID, sessionId, escaped || prompt, traceId)
+      ));
+      const cliResp = normalizeCLIResponse(resp);
+      return cliResp;
+    } catch (error) {
+      return {error: sanitizeDisplayedCLIError(error?.message || String(error))};
+    }
+  }
+
+  async function promptFloatingAvatarChatInput() {
+    await setFloatingAvatarChatModeEnabled(true, {silent: true});
+    const value = window.prompt(t('floatingAvatar.chatPrompt'), '');
+    if (value === null) {
+      await setFloatingAvatarChatModeEnabled(false, {clearHistory: true});
+      return;
+    }
+    await submitFloatingAvatarChatText(value);
+  }
+
   function setFloatingReminderMode(mode) {
     const now = Date.now();
     if (mode === 'resume') {
@@ -8041,6 +8318,7 @@ function App() {
       : floatingAvatarSrc;
     const imageData = await imageSrcToBytes(src);
     await callWails(() => EnterFloatingAvatarOverlayImage(imageData, overlayMode, Math.round(x), Math.round(y)));
+    syncFloatingAvatarOverlayMetadata();
   }
 
   async function repaintFloatingAvatarOverlay(mode = floatingAvatarBodyMode) {
@@ -8050,15 +8328,32 @@ function App() {
     await showFloatingAvatarOverlayAt(mode, x, y);
   }
 
+  async function changeFloatingAvatarBodyMode(mode) {
+    const nextMode = mode === 'full' ? 'full' : 'head';
+    setFloatingAvatarBodyMode(nextMode);
+    if (!ENABLE_NATIVE_FLOATING_AVATAR_WINDOW && floatingAvatarModeRef.current) {
+      await repaintFloatingAvatarOverlay(nextMode).catch((error) => {
+        console.warn('repaint floating avatar overlay failed', error);
+      });
+    }
+  }
+
   async function switchFloatingAvatarAgent(personaId) {
     const persona = settingsState.personas.find((item) => item.id === personaId);
     if (!persona) return;
+    if (persona.id !== floatingPersona.id) {
+      await setFloatingAvatarChatModeEnabled(false, {clearHistory: true, silent: true});
+    }
     await savePersonaPatch(persona.id, persona);
     await loadCurrentAvatar(persona.id);
     setToolResult({toolId: persona.id, ok: true, message: t('floatingAvatar.agentSwitched', {name: persona.name || t('floatingAvatar.agentFallback')})});
   }
 
   async function submitFloatingAvatarText(rawText) {
+    if (floatingAvatarChatModeRef.current) {
+      await submitFloatingAvatarChatText(rawText);
+      return;
+    }
     const selectedText = selectedFloatingCandidateIDs
       .map((candidateID) => (readinessGate.floating_candidates || []).find((candidate) => candidate.id === candidateID))
       .map(candidateReplyText)
@@ -8107,28 +8402,72 @@ function App() {
         await restoreFromFloatingAvatar('auto');
         return;
       }
+      if (action === 'open_panel') {
+        await setFloatingAvatarChatModeEnabled(true, {silent: true});
+        return;
+      }
       if (action === 'quit') {
         await closeAfterBackgroundAvatarExit();
         return;
       }
+      if (action === 'chat_on') {
+        await setFloatingAvatarChatModeEnabled(true, {silent: true});
+        return;
+      }
+      if (action === 'chat_submit') {
+        await submitFloatingAvatarChatText(payload?.text || '');
+        return;
+      }
+      if (action === 'photo') {
+        const scene = [
+          floatingAvatarDraft,
+          floatingAvatarReplyBubble,
+          floatingLatestText,
+          state.greeting,
+        ].map((item) => String(item || '').trim()).find(Boolean) || '';
+        setKeepsakeBusy(true);
+        setKeepsakeMsg('正在拍照…（首次產圖較久）');
+        setToolResult({toolId: 'floating-avatar-photo', ok: true, message: '正在拍照…'});
+        try {
+          const photo = await callWails(() => ConfirmCommemorativePhoto(scene, ''));
+          const message = '已拍下並存入相冊：' + (photo?.scene || '合照');
+          setKeepsakeMsg(message);
+          setFloatingAvatarReplyBubble(message);
+          syncFloatingAvatarOverlayMetadata(message);
+          setManualAvatarState('happy');
+          setToolResult({toolId: 'floating-avatar-photo', ok: true, message});
+        } catch (error) {
+          const message = '產圖失敗：' + String(error?.message || error);
+          setKeepsakeMsg(message);
+          setFloatingAvatarReplyBubble(message);
+          syncFloatingAvatarOverlayMetadata(message);
+          setManualAvatarState('sad');
+          setToolResult({toolId: 'floating-avatar-photo', ok: false, message});
+        } finally {
+          setKeepsakeBusy(false);
+        }
+        return;
+      }
+      if (action === 'chat') {
+        await toggleFloatingAvatarChatMode(!floatingAvatarChatModeRef.current, {prompt: false});
+        return;
+      }
       if (action === 'head' || action === 'full') {
-        setFloatingAvatarBodyMode(action);
-        await repaintFloatingAvatarOverlay(action).catch((error) => {
-          console.warn('repaint floating avatar overlay failed', error);
-        });
+        await changeFloatingAvatarBodyMode(action);
       }
     });
     return () => off?.();
-  }, [floatingAvatarSrc, floatingFullBodyAvatarSrc]);
+  }, [floatingAvatarSrc, floatingFullBodyAvatarSrc, floatingAvatarDraft, floatingAvatarReplyBubble, floatingLatestText, state.greeting]);
   const floatingBubbleText = pendingTaskReview?.reason
     || pendingTaskReview?.title
     || schedulerConfirm?.reason
     || schedulerConfirm?.title
+    || floatingAvatarReplyBubble
     || '';
 
   return (
     <div
-      className={`console-shell ${activePanel === 'settings' ? 'settings-open' : ''} ${floatingAvatarMode && ENABLE_NATIVE_FLOATING_AVATAR_WINDOW ? 'floating-avatar-shell-active' : ''}`}
+      className={`console-shell ${activePanel === 'settings' ? 'settings-open' : ''} ${floatingAvatarMode && (ENABLE_NATIVE_FLOATING_AVATAR_WINDOW || floatingAvatarCompactWindow || floatingAvatarSurfaceOnly) ? 'floating-avatar-shell-active' : ''}`}
       data-theme={panelTheme}
       data-lang={_i18nLang}
       dir={_i18nDir}
@@ -8150,8 +8489,12 @@ function App() {
         avatarSize={FLOATING_AVATAR_SIZE}
         onPositionChange={updateFloatingAvatarPosition}
         compactWindowMode={floatingAvatarCompactWindow}
+        panelOpenSignal={floatingAvatarPanelOpenSignal}
         bodyMode={floatingAvatarBodyMode}
-        onBodyModeChange={setFloatingAvatarBodyMode}
+        chatMode={floatingAvatarChatMode}
+        onBodyModeChange={changeFloatingAvatarBodyMode}
+        onChatModeChange={(enabled) => setFloatingAvatarChatModeEnabled(enabled, {clearHistory: !enabled})}
+        onChatModeToggle={toggleFloatingAvatarChatMode}
         onCompactDragStart={beginCompactFloatingAvatarDrag}
         onCompactDrag={moveCompactFloatingAvatarWindow}
         onCompactDragEnd={syncCompactFloatingAvatarWindowPosition}

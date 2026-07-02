@@ -1620,14 +1620,6 @@ func xlsxCellValueString(value interface{}) string {
 	}
 }
 
-func gridToTSV(grid [][]string) string {
-	lines := make([]string, 0, len(grid))
-	for _, row := range grid {
-		lines = append(lines, strings.Join(row, "\t"))
-	}
-	return strings.Join(lines, "\n")
-}
-
 func maxGridColumns(grid [][]string) int {
 	max := 0
 	for _, row := range grid {

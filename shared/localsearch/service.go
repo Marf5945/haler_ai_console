@@ -472,10 +472,6 @@ func isQueryStopWord(term string) bool {
 	}
 }
 
-func FormatChatResponse(req SearchRequest, results []SearchResult) string {
-	return FormatSearchOutcome(req, SearchOutcome{Results: results})
-}
-
 func FormatSearchOutcome(req SearchRequest, outcome SearchOutcome) string {
 	query := strings.TrimSpace(req.Query)
 	if len(outcome.Results) == 0 {
@@ -896,26 +892,5 @@ func sourceFromPath(path string) string {
 		return "skill"
 	default:
 		return "file"
-	}
-}
-
-func sourceLabel(source string) string {
-	switch source {
-	case "memory", "talk":
-		return "記憶"
-	case "document":
-		return "文件"
-	case "image":
-		return "圖片"
-	case "video":
-		return "影片"
-	case "trace", "debug":
-		return "紀錄"
-	case "tool":
-		return "工具"
-	case "skill":
-		return "技能"
-	default:
-		return "本機"
 	}
 }

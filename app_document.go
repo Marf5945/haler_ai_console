@@ -223,7 +223,7 @@ func (a *App) currentVectorizer() builtin.Vectorizer {
 	}
 	cfg := a.settingsService.EmbeddingConfig()
 	if cfg.ProviderID == "ollama" && cfg.ModelID != "" {
-		return builtin.NewOllamaEmbedVectorizer("", cfg.ModelID)
+		return builtin.NewOllamaEmbedVectorizerWithDimension("", cfg.ModelID, cfg.Dimension)
 	}
 	return builtin.TFIDFVectorizer{}
 }
@@ -279,21 +279,40 @@ func (a *App) indexReferenceFileIfNeeded(filePath, vecDir string, vec builtin.Ve
 	if !builtin.IsSearchableFormat(filePath) {
 		return nil
 	}
+	indexPath := filepath.Join(vecDir, filepath.Base(filePath)+".json")
+
+	// 快速路徑（stamp 快取）：來源檔 size+mtime 沒變、vectorizer/chunker 指紋
+	// 也沒變 → 連 ExtractSearchableText 都免跑（PDF/docx 抽字是這條流程最貴的一步）。
+	info, statErr := os.Stat(filePath)
+	if statErr == nil && referenceIndexStampMatches(indexPath, info, vec) {
+		return nil
+	}
+
 	content, err := builtin.ExtractSearchableText(filePath)
 	if err != nil || strings.TrimSpace(content) == "" {
 		return err
 	}
 	contentHash := sha256Hex64(content)
-	indexPath := filepath.Join(vecDir, filepath.Base(filePath)+".json")
 	if data, rerr := os.ReadFile(indexPath); rerr == nil {
 		var existing builtin.DocumentVectorIndex
 		if json.Unmarshal(data, &existing) == nil {
 			if !builtin.IndexNeedsRebuild(existing, vec, contentHash) {
+				// 索引其實是新的（例如 stamp 是舊版或遺失）→ 補發 stamp，
+				// 下次同一檔案就能走快速路徑。
+				if statErr == nil {
+					_ = writeReferenceIndexStamp(indexPath, info, vec)
+				}
 				return nil
 			}
 		}
 	}
-	return builtin.BuildAndSaveVectorIndexToDir(vecDir, filepath.Base(filePath), content, vec)
+	if err := builtin.BuildAndSaveVectorIndexToDir(vecDir, filepath.Base(filePath), content, vec); err != nil {
+		return err
+	}
+	if statErr == nil {
+		_ = writeReferenceIndexStamp(indexPath, info, vec)
+	}
+	return nil
 }
 
 // sha256Hex64 — local helper mirroring builtin.sha256Hex（不匯出避免循環）。
@@ -306,7 +325,6 @@ func sha256Hex64(s string) string {
 func referenceVectorsDir() string {
 	return filepath.Join(appDataRoot(), "data", "references", "vectors")
 }
-
 
 // ──────────────────────────────────────────────
 // 段落標籤快取接線（背景建 + 可選標籤檢索）

@@ -106,11 +106,6 @@ if exist "build\cache" (
   rmdir /s /q "build\cache"
 )
 
-if exist "frontend\node_modules" (
-  echo Removing frontend\node_modules before Wails binding generation...
-  rmdir /s /q "frontend\node_modules"
-)
-
 echo.
 echo Running wails doctor...
 call "%WAILS_EXE%" doctor

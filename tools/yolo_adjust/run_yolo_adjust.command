@@ -1,3 +1,4 @@
 #!/bin/zsh
-cd "$HOME/Desktop/yolo_adjust" || exit 1
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR" || exit 1
 python3 yolo_adjust_app.py

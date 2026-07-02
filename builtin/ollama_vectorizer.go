@@ -68,6 +68,14 @@ func NewOllamaEmbedVectorizer(endpoint, modelID string) *OllamaEmbedVectorizer {
 	}
 }
 
+func NewOllamaEmbedVectorizerWithDimension(endpoint, modelID string, dimension int) *OllamaEmbedVectorizer {
+	v := NewOllamaEmbedVectorizer(endpoint, modelID)
+	if dimension > 0 {
+		v.measuredDim = dimension
+	}
+	return v
+}
+
 // Meta 回 metadata。Dimension 在第一次成功 Vectorize 後才會非零。
 // 重要：外部讀到 Dimension==0 就代表「還沒測過」，不要拿去比較。
 func (o *OllamaEmbedVectorizer) Meta() VectorMetadata {

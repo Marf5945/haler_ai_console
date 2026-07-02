@@ -437,13 +437,6 @@ func (a *App) GetActiveLearningRun() interface{} {
 	return frontendDTO(a.learningService.ActiveRun())
 }
 
-func (a *App) GetVisualLearningPermissionStatus() interface{} {
-	if a == nil || a.nativeInput == nil {
-		return map[string]interface{}{"message": "native input is not available"}
-	}
-	return frontendDTO(a.nativeInput.PermissionStatus())
-}
-
 func (a *App) RequestVisualLearningPermissions() interface{} {
 	if a == nil || a.nativeInput == nil {
 		return map[string]interface{}{"message": "native input is not available"}

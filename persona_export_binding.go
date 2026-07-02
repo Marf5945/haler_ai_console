@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type NativePersonaDragExportResult struct {
@@ -22,44 +20,6 @@ type NativePersonaDragExportResult struct {
 	DropTargetKind   string      `json:"drop_target_kind"`
 	DropTargetDir    string      `json:"drop_target_dir"`
 	State            interface{} `json:"state,omitempty"`
-}
-
-func (a *App) SelectPersonaExportDirectory() (string, error) {
-	home, _ := os.UserHomeDir()
-	startDir := filepath.Join(home, "Desktop")
-	if a.ctx == nil {
-		return startDir, nil
-	}
-	return wailsruntime.OpenDirectoryDialog(a.ctx, wailsruntime.OpenDialogOptions{
-		Title:            "選擇人格匯出位置",
-		DefaultDirectory: startDir,
-	})
-}
-
-func (a *App) ExportPersonaHandler(personaID, mode, destDir string) (interface{}, error) {
-	// Remove mode exports first; system data changes only after the JSON is safe.
-	exportPath, err := a.settingsService.ExportPersona(personaID, destDir)
-	if err != nil {
-		return nil, err
-	}
-
-	removed := false
-	state := a.settingsService.State()
-	if mode == "export_remove" {
-		next, err := a.settingsService.RemovePersona(personaID)
-		if err != nil {
-			return nil, err
-		}
-		state = next
-		removed = true
-	}
-
-	return map[string]interface{}{
-		"persona_id":  personaID,
-		"export_path": exportPath,
-		"removed":     removed,
-		"state":       state,
-	}, nil
 }
 
 func (a *App) NativeDragExportPersonaHandler(personaID, mode string) (*NativePersonaDragExportResult, error) {

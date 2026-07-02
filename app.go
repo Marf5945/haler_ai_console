@@ -1054,10 +1054,6 @@ func (a *App) clearActionStatus() {
 	}
 }
 
-func (a *App) NotifyStatusRail(source string, template string, subject string, priority string) statusrail.View {
-	return a.statusRail.AddNotice(source, toNoticeTemplate(template), subject, toNoticePriority(priority))
-}
-
 func (a *App) AcknowledgeStatusRail() statusrail.View {
 	return a.statusRail.AcknowledgeNotices()
 }
@@ -1127,10 +1123,6 @@ func (a *App) TranscribeVoiceWAV(audioBase64, mimeType string) (*voice.Transcrip
 func (a *App) RouteVoiceCommand(text string) voice.CommandRoute {
 	state := a.voiceService.Get(a.currentPanelLanguage())
 	return voice.RouteCommand(text, state.Settings.CommandMode)
-}
-
-func (a *App) GetTTSPackStatus() voice.TTSPackStatus {
-	return a.voiceService.TTSPackStatus()
 }
 
 func (a *App) InstallTTSPack() (voice.TTSPackStatus, error) {
@@ -1696,6 +1688,10 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 	actionTags := a.syncActionTagsToCLIAdapter(traceID)
 	isTaskProgressInternal := isTaskProgressTraceID(traceID)
 	if !isTaskProgressInternal {
+		// 懸浮頭像閒聊：直達模型，跳過 keyword/judge 路由（快、且不會被判成搜尋）。
+		if isQuickChatPrompt(userText) {
+			return a.executeQuickChatPrompt(adapterID, sessionID, userText, traceID)
+		}
 		if isSearchSummaryPrompt(userText) {
 			return a.executeSearchSummaryPrompt(adapterID, sessionID, userText, traceID)
 		}
@@ -2261,6 +2257,10 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 	actionTags := a.syncActionTagsToCLIAdapter(traceID)
 	isTaskProgressInternal := isTaskProgressTraceID(traceID)
 	if !isTaskProgressInternal {
+		// 懸浮頭像閒聊：直達模型，跳過 keyword/judge 路由（快、且不會被判成搜尋）。
+		if isQuickChatPrompt(userText) {
+			return a.executeQuickChatPrompt(adapterID, sessionID, userText, traceID)
+		}
 		if isSearchSummaryPrompt(userText) {
 			return a.executeSearchSummaryPrompt(adapterID, sessionID, userText, traceID)
 		}
@@ -2667,13 +2667,6 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func minInt(a int, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func buildAPIActionChainPrompt(systemPrompt string, actionTags []string, userText string) string {
@@ -3249,6 +3242,12 @@ func (a *App) SendInspectorMessage(adapterID, sessionID, userText, traceID strin
 // SendTopInteractionMessage keeps the frontend on one top-lane contract.
 // Backend drivers still differ: CLI uses sidecar; API/local uses HTTP.
 func (a *App) SendTopInteractionMessage(adapterID, sessionID, userText, traceID string) (*skill_step.CLIResponse, error) {
+	// 閒聊通道唯二特例：明講的網路搜尋、拍照（拍照走 ConfirmCommemorativePhoto）。
+	// 其餘一律純聊天，不進工具路由。搜尋結果也記進 30 則短歷史，讓人格能接著聊。
+	if resp, handled := a.maybeHandleChatLaneWebSearch(userText, sessionID, traceID); handled {
+		a.finishInspectorReply(adapterID, userText, resp)
+		return resp, nil
+	}
 	if a.isAPIOrLocalAdapter(adapterID) {
 		return a.SendInspectorAPIMessage(adapterID, sessionID, userText, traceID)
 	}
@@ -4027,34 +4026,6 @@ func (a *App) ListReviewArchive() ([]review.ArchivedCard, error) {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-
-func toNoticeTemplate(template string) statusrail.NoticeTemplate {
-	switch template {
-	case string(statusrail.NoticeNeedsConfirm):
-		return statusrail.NoticeNeedsConfirm
-	case string(statusrail.NoticeCompleted):
-		return statusrail.NoticeCompleted
-	case string(statusrail.NoticeError):
-		return statusrail.NoticeError
-	case string(statusrail.NoticeReviewPending):
-		return statusrail.NoticeReviewPending
-	case string(statusrail.NoticeAssetValidated):
-		return statusrail.NoticeAssetValidated
-	default:
-		return statusrail.NoticeNeedsConfirm
-	}
-}
-
-func toNoticePriority(priority string) statusrail.NoticePriority {
-	switch priority {
-	case string(statusrail.PriorityCritical):
-		return statusrail.PriorityCritical
-	case string(statusrail.PriorityDestructive):
-		return statusrail.PriorityDestructive
-	default:
-		return statusrail.PriorityNormal
-	}
-}
 
 // =============================================================================
 // 遺留待重建能力 — Wails Bindings (#1–#7)

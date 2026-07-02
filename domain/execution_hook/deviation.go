@@ -1,11 +1,7 @@
 package execution_hook
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"time"
 )
 
 // DeviationType enumerates the kinds of deviation that can occur between
@@ -60,16 +56,6 @@ type OutlineStep struct {
 	Dependencies      []string  `json:"dependencies,omitempty"`
 }
 
-// DeviationStore persists deviation records for a hook run.
-type DeviationStore struct {
-	hookDir   string
-	hookRunID string
-}
-
-func NewDeviationStore(hookDir, hookRunID string) *DeviationStore {
-	return &DeviationStore{hookDir: hookDir, hookRunID: hookRunID}
-}
-
 // Analyze compares an outline step against the actual trace and produces a
 // Deviation if a meaningful difference is found.
 // This function must NOT call LLM, must NOT modify any registry or policy.
@@ -115,26 +101,4 @@ func Analyze(outlineStep OutlineStep, actual StepTrace) *Deviation {
 		RiskDelta:          riskDelta,
 		SuggestedPatchType: patchType,
 	}
-}
-
-// Save appends deviations to the hook run's pending_tag_patch.json.
-// Only low-risk deviations may be auto-promoted (see reinforcement.go).
-func (ds *DeviationStore) Save(deviations []Deviation) error {
-	if len(deviations) == 0 {
-		return nil
-	}
-	dir := filepath.Join(ds.hookDir, ds.hookRunID)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	path := filepath.Join(ds.hookDir, "pending_tag_patch.json")
-	data, err := json.MarshalIndent(map[string]interface{}{
-		"hook_run_id": ds.hookRunID,
-		"deviations":  deviations,
-		"recorded_at": time.Now(),
-	}, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0o600)
 }

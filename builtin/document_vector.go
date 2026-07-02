@@ -373,18 +373,37 @@ func isMarkdownHeading(line string) bool {
 
 // SearchDocuments 在 store 的向量索引中搜尋，回傳 top-N 結果。
 func SearchDocuments(store *Store, query string, vec Vectorizer, limit int) ([]DocumentSearchResult, error) {
-	return SearchDocumentsInDir(store.VectorsDir(), query, vec, limit, func(docID string) (string, string, string) {
-		metas, err := store.List()
-		if err != nil {
-			return docID, "", ""
-		}
-		for _, m := range metas {
-			if m.DocID == docID {
-				return m.DisplayName, m.Format, m.WA3ID
+	return SearchDocumentsInDir(store.VectorsDir(), query, vec, limit, storeMetaLookup(store), "document")
+}
+
+// SearchDocumentsWithVector 同 SearchDocuments，但吃呼叫端已算好的 query 向量，
+// 讓多目錄搜尋共用同一次 Vectorize（dense 模式下省掉一次 embedding HTTP 呼叫）。
+func SearchDocumentsWithVector(store *Store, queryVec Vector, limit int) ([]DocumentSearchResult, error) {
+	return SearchDocumentsInDirWithVector(store.VectorsDir(), queryVec, limit, storeMetaLookup(store), "document")
+}
+
+// storeMetaLookup 建 docID→DocMeta 的一次性查表（lazy：第一次查才讀）。
+// 舊版 closure 是每查一個 index 就重跑一次 store.List()——List() 會把 docs 目錄
+// 每個 JSON 都讀進來解析，等於每次搜尋做 O(索引數 × 文件數) 的磁碟 I/O。
+func storeMetaLookup(store *Store) func(string) (string, string, string) {
+	var (
+		once sync.Once
+		byID map[string]DocMeta
+	)
+	return func(docID string) (string, string, string) {
+		once.Do(func() {
+			byID = make(map[string]DocMeta)
+			if metas, err := store.List(); err == nil {
+				for _, m := range metas {
+					byID[m.DocID] = m
+				}
 			}
+		})
+		if m, ok := byID[docID]; ok {
+			return m.DisplayName, m.Format, m.WA3ID
 		}
 		return docID, "", ""
-	}, "document")
+	}
 }
 
 // ── 向量索引記憶體快取（stage 0：只解速度瓶頸，不改索引格式、不加依賴）──
@@ -454,12 +473,17 @@ func SearchDocumentsInDir(vectorsDir, query string, vec Vectorizer, limit int, m
 	if query == "" {
 		return nil, nil
 	}
-	if limit <= 0 {
-		limit = defaultVectorLimit
-	}
 	queryVec, err := vec.Vectorize(query)
 	if err != nil {
 		return nil, fmt.Errorf("document_vector: vectorize query: %w", err)
+	}
+	return SearchDocumentsInDirWithVector(vectorsDir, queryVec, limit, metaLookup, source)
+}
+
+// SearchDocumentsInDirWithVector 同 SearchDocumentsInDir，但吃已算好的 query 向量。
+func SearchDocumentsInDirWithVector(vectorsDir string, queryVec Vector, limit int, metaLookup func(string) (string, string, string), source string) ([]DocumentSearchResult, error) {
+	if limit <= 0 {
+		limit = defaultVectorLimit
 	}
 	entries, err := os.ReadDir(vectorsDir)
 	if err != nil {
@@ -471,6 +495,10 @@ func SearchDocumentsInDir(vectorsDir, query string, vec Vectorizer, limit int, m
 	var results []DocumentSearchResult
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		// stamp 檔（reference_index_stamp）跟索引同目錄也是 .json 結尾，不是索引本體。
+		if strings.HasSuffix(entry.Name(), ".stamp.json") {
 			continue
 		}
 		// 走記憶體快取：mtime+size 未變就免讀磁碟、免重解析（解析才是熱路徑瓶頸）。

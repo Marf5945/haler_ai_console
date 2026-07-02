@@ -57,16 +57,3 @@ func (p osMasterKeyProvider) store(key [32]byte) error {
 	}
 	return nil
 }
-
-func decodeMasterKey(raw []byte) ([32]byte, error) {
-	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(raw)))
-	if err != nil {
-		return [32]byte{}, err
-	}
-	if len(decoded) != 32 {
-		return [32]byte{}, fmt.Errorf("master key length=%d want 32", len(decoded))
-	}
-	var key [32]byte
-	copy(key[:], decoded)
-	return key, nil
-}

@@ -144,13 +144,6 @@ func listenWithFallback(addr string) (net.Listener, string, error) {
 	return fallback, fallback.Addr().String(), nil
 }
 
-func URLFromEnvOrDefault() string {
-	if env := os.Getenv("AI_CONSOLE_TRACE_URL"); env != "" {
-		return env
-	}
-	return URL()
-}
-
 func Record(node, traceID string, data interface{}) {
 	store.Lock()
 	defer store.Unlock()

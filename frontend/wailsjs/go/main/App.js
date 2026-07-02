@@ -38,8 +38,8 @@ export function AddVLReviewCard(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['AddVLReviewCard'](arg1, arg2, arg3, arg4, arg5);
 }
 
-export function AddW3ATrustedDeveloper(arg1, arg2, arg3) {
-  return window['go']['main']['App']['AddW3ATrustedDeveloper'](arg1, arg2, arg3);
+export function AddWA3TrustedDeveloper(arg1, arg2, arg3) {
+  return window['go']['main']['App']['AddWA3TrustedDeveloper'](arg1, arg2, arg3);
 }
 
 export function AlbumPhotoImage(arg1) {
@@ -84,10 +84,6 @@ export function AutoDetectCLI() {
 
 export function BootstrapScheduledSkill(arg1) {
   return window['go']['main']['App']['BootstrapScheduledSkill'](arg1);
-}
-
-export function BuildAndSaveSkillDraft(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['main']['App']['BuildAndSaveSkillDraft'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function BuildCodeContext(arg1, arg2) {
@@ -230,8 +226,8 @@ export function CreateDestructiveReviewCard(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['CreateDestructiveReviewCard'](arg1, arg2, arg3, arg4);
 }
 
-export function CreateDocumentW3A(arg1) {
-  return window['go']['main']['App']['CreateDocumentW3A'](arg1);
+export function CreateDocumentWA3(arg1) {
+  return window['go']['main']['App']['CreateDocumentWA3'](arg1);
 }
 
 export function CreateScheduledJob(arg1, arg2, arg3, arg4) {
@@ -398,10 +394,6 @@ export function ExportMediaWithSidecar(arg1, arg2) {
   return window['go']['main']['App']['ExportMediaWithSidecar'](arg1, arg2);
 }
 
-export function ExportPersonaHandler(arg1, arg2, arg3) {
-  return window['go']['main']['App']['ExportPersonaHandler'](arg1, arg2, arg3);
-}
-
 export function ExportProjectBackupHandler(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['ExportProjectBackupHandler'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -566,8 +558,8 @@ export function GetLearningReplayPlan(arg1) {
   return window['go']['main']['App']['GetLearningReplayPlan'](arg1);
 }
 
-export function GetMediaW3AInfo(arg1) {
-  return window['go']['main']['App']['GetMediaW3AInfo'](arg1);
+export function GetMediaWA3Info(arg1) {
+  return window['go']['main']['App']['GetMediaWA3Info'](arg1);
 }
 
 export function GetMemoryHealth() {
@@ -662,20 +654,8 @@ export function GetSubExportCapabilities() {
   return window['go']['main']['App']['GetSubExportCapabilities']();
 }
 
-export function GetSubExportDesktopDirectory() {
-  return window['go']['main']['App']['GetSubExportDesktopDirectory']();
-}
-
-export function GetSubExportFallbackDirectory() {
-  return window['go']['main']['App']['GetSubExportFallbackDirectory']();
-}
-
 export function GetSummaryModelSettings() {
   return window['go']['main']['App']['GetSummaryModelSettings']();
-}
-
-export function GetTTSPackStatus() {
-  return window['go']['main']['App']['GetTTSPackStatus']();
 }
 
 export function GetTabOrder() {
@@ -702,16 +682,12 @@ export function GetURLProvenance(arg1) {
   return window['go']['main']['App']['GetURLProvenance'](arg1);
 }
 
-export function GetVisualLearningPermissionStatus() {
-  return window['go']['main']['App']['GetVisualLearningPermissionStatus']();
-}
-
 export function GetVoiceSettings() {
   return window['go']['main']['App']['GetVoiceSettings']();
 }
 
-export function GetW3ATransferGuidance() {
-  return window['go']['main']['App']['GetW3ATransferGuidance']();
+export function GetWA3TransferGuidance() {
+  return window['go']['main']['App']['GetWA3TransferGuidance']();
 }
 
 export function GetWebSearchConfig() {
@@ -962,8 +938,8 @@ export function ListVideoFiles() {
   return window['go']['main']['App']['ListVideoFiles']();
 }
 
-export function ListW3ATrustedDevelopers() {
-  return window['go']['main']['App']['ListW3ATrustedDevelopers']();
+export function ListWA3TrustedDevelopers() {
+  return window['go']['main']['App']['ListWA3TrustedDevelopers']();
 }
 
 export function MapCanonicalLabel(arg1, arg2, arg3) {
@@ -1018,10 +994,6 @@ export function NormalizeSchedulerDraft(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['NormalizeSchedulerDraft'](arg1, arg2, arg3, arg4, arg5);
 }
 
-export function NotifyStatusRail(arg1, arg2, arg3, arg4) {
-  return window['go']['main']['App']['NotifyStatusRail'](arg1, arg2, arg3, arg4);
-}
-
 export function OpenExternalURL(arg1) {
   return window['go']['main']['App']['OpenExternalURL'](arg1);
 }
@@ -1044,10 +1016,6 @@ export function PollStatusRail() {
 
 export function PollTelegramChatID(arg1) {
   return window['go']['main']['App']['PollTelegramChatID'](arg1);
-}
-
-export function PrepareCloudTTSText(arg1) {
-  return window['go']['main']['App']['PrepareCloudTTSText'](arg1);
 }
 
 export function PrepareLearningDigest(arg1) {
@@ -1422,10 +1390,6 @@ export function SelectFloatingCandidate(arg1) {
   return window['go']['main']['App']['SelectFloatingCandidate'](arg1);
 }
 
-export function SelectPersonaExportDirectory() {
-  return window['go']['main']['App']['SelectPersonaExportDirectory']();
-}
-
 export function SelectProjectBackupExportDirectory() {
   return window['go']['main']['App']['SelectProjectBackupExportDirectory']();
 }
@@ -1484,6 +1448,14 @@ export function SetBrowserPreference(arg1, arg2) {
 
 export function SetEmbeddingConfig(arg1, arg2) {
   return window['go']['main']['App']['SetEmbeddingConfig'](arg1, arg2);
+}
+
+export function SetFloatingAvatarOverlayChatMode(arg1) {
+  return window['go']['main']['App']['SetFloatingAvatarOverlayChatMode'](arg1);
+}
+
+export function SetFloatingAvatarOverlayMetadata(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SetFloatingAvatarOverlayMetadata'](arg1, arg2, arg3);
 }
 
 export function SetHighlightWeight(arg1, arg2, arg3) {

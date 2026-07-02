@@ -146,18 +146,6 @@ func (a *App) findDianliaoReferencePath(keyword string) string {
 
 func ptrResp(r skill_step.CLIResponse) *skill_step.CLIResponse { return &r }
 
-func isDianliaoDoneText(text string) bool {
-	return skill_flow.MatchWord(text, dianliaoDoneWords)
-}
-
-func isDianliaoMoreText(text string) bool {
-	return skill_flow.MatchWord(text, dianliaoMoreWords)
-}
-
-func isDianliaoCancelText(text string) bool {
-	return skill_flow.MatchWord(text, dianliaoCancelWords)
-}
-
 // normalizeMachineInput 連續剝掉「機台/名稱/是/為/：」等前綴與分隔，回乾淨的機台名稱。
 func normalizeMachineInput(text string) string {
 	s := strings.TrimSpace(text)

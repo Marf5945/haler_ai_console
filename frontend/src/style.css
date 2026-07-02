@@ -10473,8 +10473,8 @@
 }
 /* 全身/半身：頭像按鈕放大成人物框，沿用 fullBody 圖，半身只露上半 */
 .floating-avatar-body-active .floating-avatar-button {
-  width: 200px;
-  height: 360px;
+  width: var(--floating-avatar-frame-width, 200px);
+  height: var(--floating-avatar-frame-height, 360px);
   border-radius: 0;
   background: transparent;
   overflow: visible;

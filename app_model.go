@@ -7,14 +7,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
 	"ui_console/adapter/adapter_registry"
 	"ui_console/adapter/wa3_media"
 	"ui_console/data/conversation"
-	"ui_console/data/memory"
 	"ui_console/internal/urlsafe"
 	"ui_console/internal/voice"
 	"ui_console/orchestration/skill_step"
@@ -35,32 +33,6 @@ func (a *App) InstallVoiceBaseModel() (voice.State, error) {
 
 func (a *App) RemoveVoiceBaseModel() (voice.State, error) {
 	return a.voiceService.RemoveManagedModel(a.currentPanelLanguage())
-}
-
-func (a *App) PrepareCloudTTSText(text string) voice.CloudTTSEgressPreview {
-	return prepareCloudTTSEgressPreview(text)
-}
-
-func prepareCloudTTSEgressPreview(text string) voice.CloudTTSEgressPreview {
-	masked, records := memory.RedactBeforeWrite(text)
-	types := map[string]bool{}
-	for _, r := range records {
-		if r.Type != "" {
-			types[r.Type] = true
-		}
-	}
-	hitTypes := make([]string, 0, len(types))
-	for typ := range types {
-		hitTypes = append(hitTypes, typ)
-	}
-	sort.Strings(hitTypes)
-	return voice.CloudTTSEgressPreview{
-		Allowed:              len(records) == 0,
-		RequiresConfirmation: len(records) > 0,
-		MaskedText:           masked,
-		HitCount:             len(records),
-		HitTypes:             hitTypes,
-	}
 }
 
 // isQuotaExhaustedError 判斷字串是否為配額／限流類錯誤。

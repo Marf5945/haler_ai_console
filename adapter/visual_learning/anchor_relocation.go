@@ -205,7 +205,7 @@ func recordedCropTemplate(anchor *WindowsClickAnchorResult) (visualSignature, in
 }
 
 func findBestCropTemplateMatch(template visualSignature, imageData []byte, width, height, templateWidth, templateHeight int) (PixelBBox, float64) {
-	stride := clampInt(minInt(templateWidth, templateHeight)/8, 2, 10)
+	stride := clampInt(min(templateWidth, templateHeight)/8, 2, 10)
 	best := PixelBBox{}
 	bestScore := -1.0
 	for y := 0; y <= height-templateHeight; y += stride {

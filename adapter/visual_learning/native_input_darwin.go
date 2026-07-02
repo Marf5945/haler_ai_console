@@ -1127,7 +1127,7 @@ func (n *NativeInput) emitKeyboard(keyCode int, flags uint64, text string) {
 		Timestamp:     time.Now(),
 		Action:        action,
 		Text:          text,
-		Key:           firstNonEmptyKey(key, strings.TrimSpace(text)),
+		Key:           firstNonEmptyString(key, strings.TrimSpace(text)),
 		KeyCode:       keyCode,
 		Modifiers:     modifiers,
 		WindowTitle:   front.Title,
@@ -1190,15 +1190,6 @@ func nativeKeyName(keyCode int) string {
 	}
 	if keyCode >= 0 && keyCode < len(macKeyCodeNames) {
 		return macKeyCodeNames[keyCode]
-	}
-	return ""
-}
-
-func firstNonEmptyKey(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
 	}
 	return ""
 }

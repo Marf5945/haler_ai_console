@@ -12305,8 +12305,8 @@
   font-weight: 700;
 }
 .floating-avatar-body-active .floating-avatar-button {
-  width: 200px;
-  height: 360px;
+  width: var(--floating-avatar-frame-width, 200px);
+  height: var(--floating-avatar-frame-height, 360px);
   border-radius: 0;
   background: transparent;
   overflow: visible;

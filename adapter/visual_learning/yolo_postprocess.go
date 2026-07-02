@@ -303,13 +303,13 @@ func computeIoU(a, b rawDetection) float32 {
 	by2 := b.cy + b.h/2
 
 	// 交集區域
-	ix1 := maxf(ax1, bx1)
-	iy1 := maxf(ay1, by1)
-	ix2 := minf(ax2, bx2)
-	iy2 := minf(ay2, by2)
+	ix1 := max(ax1, bx1)
+	iy1 := max(ay1, by1)
+	ix2 := min(ax2, bx2)
+	iy2 := min(ay2, by2)
 
-	iw := maxf(0, ix2-ix1)
-	ih := maxf(0, iy2-iy1)
+	iw := max(0, ix2-ix1)
+	ih := max(0, iy2-iy1)
 	intersection := iw * ih
 
 	// 聯集區域
@@ -341,20 +341,4 @@ func clampf(v, lo, hi float32) float32 {
 		return hi
 	}
 	return v
-}
-
-// minf 回傳兩個 float32 的較小值。
-func minf(a, b float32) float32 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// maxf 回傳兩個 float32 的較大值。
-func maxf(a, b float32) float32 {
-	if a > b {
-		return a
-	}
-	return b
 }

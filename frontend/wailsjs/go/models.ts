@@ -16,7 +16,6 @@ export namespace browser_pref {
 	}
 
 }
-
 export namespace controlseal {
 
 	export class Settings {
@@ -661,6 +660,7 @@ export namespace main {
 
 	export class AlbumPhotoView {
 	    id: string;
+	    code: string;
 	    createdAt: string;
 	    personaName: string;
 	    scene: string;
@@ -676,6 +676,7 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
+	        this.code = source["code"];
 	        this.createdAt = source["createdAt"];
 	        this.personaName = source["personaName"];
 	        this.scene = source["scene"];
@@ -1671,38 +1672,6 @@ export namespace main {
 	        this.agent_id = source["agent_id"];
 	    }
 	}
-	export class SkillDraftSaveResult {
-	    manifest?: skill_step.SkillManifest;
-	    problems: string[];
-
-	    static createFrom(source: any = {}) {
-	        return new SkillDraftSaveResult(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.manifest = this.convertValues(source["manifest"], skill_step.SkillManifest);
-	        this.problems = source["problems"];
-	    }
-
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
 	export class SkillExecutionDecision {
 	    decision: string;
 	    resolve_id: string;
@@ -2439,6 +2408,7 @@ export namespace settings {
 	}
 	export class Persona {
 	    id: string;
+	    code: string;
 	    name: string;
 	    icon: string;
 	    avatarUrl: string;
@@ -2457,6 +2427,7 @@ export namespace settings {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
+	        this.code = source["code"];
 	        this.name = source["name"];
 	        this.icon = source["icon"];
 	        this.avatarUrl = source["avatarUrl"];
@@ -2500,6 +2471,7 @@ export namespace settings {
 	    adapterModelChoices?: Record<string, string>;
 	    embeddingConfig?: EmbeddingConfig;
 	    removedDefaultPersonaIds?: string[];
+	    installEpoch?: string;
 
 	    static createFrom(source: any = {}) {
 	        return new State(source);
@@ -2515,6 +2487,7 @@ export namespace settings {
 	        this.adapterModelChoices = source["adapterModelChoices"];
 	        this.embeddingConfig = this.convertValues(source["embeddingConfig"], EmbeddingConfig);
 	        this.removedDefaultPersonaIds = source["removedDefaultPersonaIds"];
+	        this.installEpoch = source["installEpoch"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -3464,26 +3437,6 @@ export namespace visual_learning {
 
 export namespace voice {
 
-	export class CloudTTSEgressPreview {
-	    allowed: boolean;
-	    requiresConfirmation: boolean;
-	    maskedText: string;
-	    hitCount: number;
-	    hitTypes: string[];
-
-	    static createFrom(source: any = {}) {
-	        return new CloudTTSEgressPreview(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.allowed = source["allowed"];
-	        this.requiresConfirmation = source["requiresConfirmation"];
-	        this.maskedText = source["maskedText"];
-	        this.hitCount = source["hitCount"];
-	        this.hitTypes = source["hitTypes"];
-	    }
-	}
 	export class CommandRoute {
 	    matched: boolean;
 	    action: string;
@@ -3625,7 +3578,7 @@ export namespace voice {
 
 }
 
-export namespace w3a_media {
+export namespace wa3_media {
 
 	export class PollutionReport {
 	    high_freq_score: number;

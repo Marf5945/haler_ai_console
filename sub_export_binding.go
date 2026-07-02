@@ -19,7 +19,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -316,38 +315,10 @@ func ensureLandedSubExport(tempExportDir, landedPath, expectedSystemCode string)
 	return validateLandedSubExport(landedPath, expectedSystemCode)
 }
 
-func (a *App) GetSubExportDesktopDirectory() (string, error) {
-	return defaultSubExportDirectory()
-}
-
-func (a *App) GetSubExportFallbackDirectory() (string, error) {
-	if runtime.GOOS == "darwin" {
-		if dir, err := frontFinderDirectory(); err == nil && dir != "" {
-			return dir, nil
-		}
-	}
-	return defaultSubExportDirectory()
-}
-
 func defaultSubExportDirectory() (string, error) {
 	home, _ := os.UserHomeDir()
 	startDir := filepath.Join(home, "Desktop")
 	return startDir, nil
-}
-
-func frontFinderDirectory() (string, error) {
-	script := `tell application "Finder"
-if (count of Finder windows) > 0 then
-POSIX path of (target of front Finder window as alias)
-else
-POSIX path of (desktop as alias)
-end if
-end tell`
-	out, err := exec.Command("osascript", "-e", script).Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
 }
 
 func (a *App) SelectSubExportDirectory() (string, error) {
@@ -574,13 +545,6 @@ func normalizePortableToolRefs(refs []subexport.ToolRef) []subexport.ToolRef {
 		out = append(out, ref)
 	}
 	return out
-}
-
-func exportModeFromString(mode string) subexport.ExportMode {
-	if mode == "export_remove" {
-		return subexport.ExportRemove
-	}
-	return subexport.ExportCopy
 }
 
 func removeSubAfterExport(a *App, projectRoot, subID string) error {

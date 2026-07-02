@@ -113,6 +113,26 @@ func (a *App) searchWebDirect(query string, limit int) (interface{}, error) {
 	return frontendDTO(outcome), err
 }
 
+// maybeHandleChatLaneWebSearch 是閒聊通道（上方互動、懸浮頭像閒聊）唯一的工具特例：
+// 只認明確的網路搜尋指令（網路搜尋／上網查／網路 <關鍵字>…），其他一律回歸純聊天。
+// 刻意不接 URL 讀取、模糊搜尋澄清等主路由機制——閒聊就該像單純的聊天機器人，
+// 特例只有「網路搜尋」和「拍照」（拍照走 ConfirmCommemorativePhoto，另一條路）。
+// 出境機密閘門照走（gateSearchEgress），使用者回「好／取消」由 resume 接手。
+func (a *App) maybeHandleChatLaneWebSearch(userText, sessionID, traceID string) (*skill_step.CLIResponse, bool) {
+	if resp, handled := a.maybeResumePendingSearchEgress(userText, sessionID, traceID); handled {
+		return resp, true
+	}
+	req, ok := websearch.ParseUserQuery(userText)
+	if !ok {
+		return nil, false
+	}
+	if resp, gated := a.gateSearchEgress(req, sessionID, traceID); gated {
+		return resp, true
+	}
+	resp := a.executeWebSearch(req, traceID)
+	return &resp, true
+}
+
 func (a *App) maybeHandleWebSearch(userText, sessionID, traceID string) (*skill_step.CLIResponse, bool) {
 	// SEC-06: URL 讀取（含 pending 確認）優先於搜尋——單一掛載點覆蓋所有路由。
 	if resp, handled := a.maybeHandleURLFetch(userText, sessionID, traceID); handled {

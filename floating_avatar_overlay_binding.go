@@ -14,7 +14,8 @@ func (a *App) EnterFloatingAvatarOverlay(personaID string, mode string, state st
 	if err != nil {
 		return err
 	}
-	return showFloatingAvatarOverlay(imagePath, x, y, maxW, maxH, a.handleFloatingAvatarOverlayAction)
+	overlayMode := normalizeOverlayMode(mode)
+	return showFloatingAvatarOverlay(imagePath, overlayMode, x, y, maxW, maxH, a.handleFloatingAvatarOverlayAction)
 }
 
 func (a *App) EnterFloatingAvatarOverlayImage(imageData []byte, mode string, x int, y int) error {
@@ -31,7 +32,7 @@ func (a *App) EnterFloatingAvatarOverlayImage(imageData []byte, mode string, x i
 		return err
 	}
 	maxW, maxH := overlayModeSize(overlayMode)
-	return showFloatingAvatarOverlay(out, x, y, maxW, maxH, a.handleFloatingAvatarOverlayAction)
+	return showFloatingAvatarOverlay(out, overlayMode, x, y, maxW, maxH, a.handleFloatingAvatarOverlayAction)
 }
 
 func (a *App) ExitFloatingAvatarOverlay() error {
@@ -44,11 +45,19 @@ func (a *App) GetFloatingAvatarOverlayPosition() map[string]int {
 	return map[string]int{"x": x, "y": y}
 }
 
-func (a *App) handleFloatingAvatarOverlayAction(action string) {
+func (a *App) SetFloatingAvatarOverlayChatMode(enabled bool) {
+	setFloatingAvatarOverlayChatMode(enabled)
+}
+
+func (a *App) SetFloatingAvatarOverlayMetadata(personaName string, replyText string, placeholder string) {
+	setFloatingAvatarOverlayMetadata(personaName, replyText, placeholder)
+}
+
+func (a *App) handleFloatingAvatarOverlayAction(action string, text string) {
 	if action == "" {
 		action = "restore"
 	}
-	a.eventBus.Emit("floating_avatar:menu_action", map[string]string{"action": action})
+	a.eventBus.Emit("floating_avatar:menu_action", map[string]string{"action": action, "text": text})
 }
 
 func (a *App) resolveFloatingAvatarOverlayImage(personaID string, mode string, state string) (string, int, int, error) {
@@ -63,9 +72,11 @@ func (a *App) resolveFloatingAvatarOverlayImage(personaID string, mode string, s
 		pack = persona_avatar.DefaultPixelPack(personaID)
 	}
 
-	if normalizeOverlayMode(mode) == "full" {
+	overlayMode := normalizeOverlayMode(mode)
+	if overlayMode == "full" {
 		if path := findOverlayAssetPath("persona_fullbody", overlayPackFolder(pack), overlayFullBodyName(state)); path != "" {
-			return path, 200, 360, nil
+			maxW, maxH := overlayModeSize(overlayMode)
+			return path, maxW, maxH, nil
 		}
 	}
 
@@ -98,14 +109,16 @@ func (a *App) resolveFloatingAvatarOverlayImage(personaID string, mode string, s
 }
 
 func normalizeOverlayMode(mode string) string {
-	if strings.EqualFold(mode, "full") {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "full":
 		return "full"
 	}
 	return "head"
 }
 
 func overlayModeSize(mode string) (int, int) {
-	if normalizeOverlayMode(mode) == "full" {
+	switch normalizeOverlayMode(mode) {
+	case "full":
 		return 200, 360
 	}
 	return 96, 96

@@ -215,8 +215,8 @@ func (a *App) OrganizeSystemMarks(agentID string) (int, error) {
 				ConversationID: agentID,
 				MessageID:      item.MessageID,
 				ColorSlot:      slot,
-				StartOffset:    runeLen(item.Text[:maxInt(start, 0)]),
-				EndOffset:      runeLen(item.Text[:maxInt(start, 0)]) + runeLen(term),
+				StartOffset:    runeLen(item.Text[:max(start, 0)]),
+				EndOffset:      runeLen(item.Text[:max(start, 0)]) + runeLen(term),
 				Quote:          term,
 				Weight:         conf,
 				Confidence:     conf,
@@ -464,13 +464,6 @@ func newSystemMarkID() string {
 }
 
 func runeLen(s string) int { return len([]rune(s)) }
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
 
 // ───────────────────────── GC 淘汰 ─────────────────────────
 

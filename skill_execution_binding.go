@@ -32,11 +32,6 @@ type SkillExecutionDecision struct {
 	Message      string                  `json:"message,omitempty"` // 需確認/無 skill 時給前端的提示文字
 }
 
-type SkillDraftSaveResult struct {
-	Manifest *skill_step.SkillManifest `json:"manifest"`
-	Problems []string                  `json:"problems"`
-}
-
 // findManifestForExec 從歸檔取出指定 skill 的 manifest（含 lifecycle）。
 func (a *App) findManifestForExec(skillID string) *skill_step.SkillManifest {
 	if skillID == "" {
@@ -187,6 +182,58 @@ func (a *App) ExecuteSkillMessage(adapterID, sessionID, userText, traceID string
 
 const searchSummaryPromptSentinel = "[[AI_CONSOLE_SEARCH_SUMMARY]]"
 
+// quickChatPromptSentinel 標記懸浮頭像「閒聊模式」的訊息：這類訊息已由前端
+// 組好完整人格 prompt，直接叫模型即可，跳過 keyword/judge 兩段路由。
+// 好處：少 2~3 次模型往返（回覆快很多），也不會被 judge 誤判成搜尋意圖
+// 而回出「你想搜尋哪一類？」這種答非所問。
+const quickChatPromptSentinel = "[[AI_CONSOLE_QUICK_CHAT]]"
+
+func isQuickChatPrompt(userText string) bool {
+	return strings.HasPrefix(strings.TrimSpace(userText), quickChatPromptSentinel)
+}
+
+func stripQuickChatSentinel(userText string) string {
+	text := strings.TrimSpace(userText)
+	return strings.TrimSpace(strings.TrimPrefix(text, quickChatPromptSentinel))
+}
+
+// quickChatRawPrefix 標記 payload 第一行是「使用者原話」（單行），
+// 供後端判斷唯一的閒聊工具特例：明確的網路搜尋指令。
+const quickChatRawPrefix = "[[RAW]]"
+
+// splitQuickChatPayload 拆出使用者原話與完整閒聊 prompt。
+func splitQuickChatPayload(payload string) (raw string, prompt string) {
+	rest, ok := strings.CutPrefix(payload, quickChatRawPrefix)
+	if !ok {
+		return "", payload
+	}
+	line, remainder, _ := strings.Cut(rest, "\n")
+	return strings.TrimSpace(line), strings.TrimSpace(remainder)
+}
+
+// executeQuickChatPrompt 讓閒聊模式直達模型（CLI/API/本機 adapter 都走 callRawModel）。
+// 閒聊通道唯二特例：明講的網路搜尋（走 maybeHandleChatLaneWebSearch）與拍照
+// （另走 ConfirmCommemorativePhoto）；其餘一律純聊天，像單純的聊天機器人。
+func (a *App) executeQuickChatPrompt(adapterID, sessionID, userText, traceID string) (*skill_step.CLIResponse, error) {
+	raw, prompt := splitQuickChatPayload(stripQuickChatSentinel(userText))
+	if prompt == "" {
+		return &skill_step.CLIResponse{Text: "想聊點什麼？"}, nil
+	}
+	if raw != "" {
+		if resp, handled := a.maybeHandleChatLaneWebSearch(raw, sessionID, traceID); handled {
+			return resp, nil
+		}
+	}
+	debugtrace.Record("go.quick_chat.direct_model", traceID, map[string]interface{}{
+		"text_len": len([]rune(prompt)),
+	})
+	out, err := a.callRawModel(adapterID, "avatar-chat:"+sessionID, prompt, traceID)
+	if err != nil {
+		return nil, err
+	}
+	return &skill_step.CLIResponse{Text: strings.TrimSpace(out), Action: "閒聊", Next: actionchain.StandbyNext}, nil
+}
+
 func isSearchSummaryPrompt(userText string) bool {
 	return strings.HasPrefix(strings.TrimSpace(userText), searchSummaryPromptSentinel)
 }
@@ -301,15 +348,6 @@ func (a *App) ConfirmAndExecuteSkillExecution(resolveID, sessionID, choice, adap
 // 此處只負責產生並驗證草稿，持久化由呼叫端依 archive 佈局接線。
 func (a *App) BuildSkillDraft(skillID, displayName string, actionTags, domainTags []string, chain *skill_step.ExpectedChain) (*skill_step.SkillManifest, []string) {
 	return skill_eval.BuildPendingDraft(skillID, displayName, actionTags, domainTags, chain)
-}
-
-func (a *App) BuildAndSaveSkillDraft(skillID, displayName string, actionTags, domainTags []string, chain *skill_step.ExpectedChain) (*SkillDraftSaveResult, error) {
-	draft, problems := skill_eval.BuildPendingDraft(skillID, displayName, actionTags, domainTags, chain)
-	saved, err := a.skillArchive.SavePendingDraft(draft)
-	if err != nil {
-		return nil, err
-	}
-	return &SkillDraftSaveResult{Manifest: saved, Problems: problems}, nil
 }
 
 func (a *App) resolveSkillForActionTarget(actionTarget, sessionID string) (*skill_step.ResolveResult, error) {

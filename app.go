@@ -2357,8 +2357,12 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	chatTimeout := 45 * time.Second
+	if isLocalAdapter {
+		chatTimeout = 180 * time.Second
+	}
 	// SEC-05 2a: Safe Client，policy 由 PolicyForLLMEndpoint 集中決定。
-	client := urlsafe.NewSafeClient(urlsafe.PolicyForLLMEndpoint(cfg.ProviderID, cfg.BaseURL), "llm_chat", 45*time.Second)
+	client := urlsafe.NewSafeClient(urlsafe.PolicyForLLMEndpoint(cfg.ProviderID, cfg.BaseURL), "llm_chat", chatTimeout)
 	// 本回合若有附圖（API 路徑）：消費暫存圖片，於 buildOpenAIRequestBody 內以 base64 內嵌，不落地。
 	stagedImages := takeSessionImages(sessionID)
 	// 多模態大腦直送圖（既有行為）；但純文字 API 模型會對 image_url 回 400，
@@ -2399,6 +2403,19 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 				"error":      err.Error(),
 			})
 			if _, wakeErr := a.wakeOllamaAdapter(localAdapterInfo); wakeErr == nil {
+				res, err = doRequest(prompt)
+			} else {
+				debugtrace.Record("go.SendAPIMessage.local.wake_error", traceID, map[string]interface{}{
+					"adapter_id": adapterID,
+					"error":      wakeErr.Error(),
+				})
+			}
+		} else if err != nil && isLocalAdapter && strings.Contains(localAdapterInfo.Endpoint, ":1234") && isLlamaCPPAdapter(localAdapterInfo) {
+			debugtrace.Record("go.SendAPIMessage.local.wake_retry", traceID, map[string]interface{}{
+				"adapter_id": adapterID,
+				"error":      err.Error(),
+			})
+			if _, wakeErr := a.wakeLlamaCPPAdapter(localAdapterInfo); wakeErr == nil {
 				res, err = doRequest(prompt)
 			} else {
 				debugtrace.Record("go.SendAPIMessage.local.wake_error", traceID, map[string]interface{}{

@@ -544,11 +544,40 @@ func (a *App) refreshAdapterRuntimeHealth() {
 	defer a.adapterHealthMu.Unlock()
 	for _, adapter := range a.adapterRegistry.ListAvailable() {
 		kind := strings.TrimSpace(adapter.Kind)
+		if kind == "local" {
+			a.checkLocalAdapterRuntimeHealth(adapter)
+			continue
+		}
 		if kind != "" && kind != "cli" {
 			continue
 		}
 		a.checkAdapterRuntimeHealth(adapter)
 	}
+}
+
+func (a *App) checkLocalAdapterRuntimeHealth(adapter adapter_registry.Adapter) {
+	endpoint := strings.TrimSpace(adapter.Endpoint)
+	if endpoint == "" {
+		a.setAdapterRuntimeStatusWithMessage(adapter.ID, adapter_registry.StatusDegraded, "local adapter endpoint is empty")
+		return
+	}
+	if strings.Contains(endpoint, ":11434") || strings.Contains(strings.ToLower(adapter.ID+" "+adapter.Name), "ollama") {
+		if pingOllamaTags(ollamaBaseURL(endpoint), 1200*time.Millisecond) {
+			a.setAdapterRuntimeStatusWithMessage(adapter.ID, adapter_registry.StatusOnline, "")
+			return
+		}
+		a.setAdapterRuntimeStatusWithMessage(adapter.ID, adapter_registry.StatusDegraded, "Ollama local endpoint did not respond")
+		return
+	}
+	if strings.Contains(endpoint, ":1234") {
+		if pingOpenAIModelsEndpoint(endpoint, 1200*time.Millisecond) {
+			a.setAdapterRuntimeStatusWithMessage(adapter.ID, adapter_registry.StatusOnline, "")
+			return
+		}
+		a.setAdapterRuntimeStatusWithMessage(adapter.ID, adapter_registry.StatusDegraded, "OpenAI-compatible local endpoint did not respond")
+		return
+	}
+	a.setAdapterRuntimeStatusWithMessage(adapter.ID, adapter_registry.StatusDegraded, "unknown local adapter endpoint")
 }
 
 func (a *App) checkAdapterRuntimeHealth(adapter adapter_registry.Adapter) {

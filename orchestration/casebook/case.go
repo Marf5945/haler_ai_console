@@ -54,8 +54,8 @@ func IsCoreTag(tag string) bool {
 type CaseRecord struct {
 	RunID   string `json:"run_id"`
 	NodeID  string `json:"node_id"`
-	Goal    string `json:"goal"`              // run 的目標摘要（來自 GoalContract）
-	Title   string `json:"title,omitempty"`   // 節點標題
+	Goal    string `json:"goal"`               // run 的目標摘要（來自 GoalContract）
+	Title   string `json:"title,omitempty"`    // 節點標題
 	GroupID string `json:"group_id,omitempty"` // 同一原始任務的批次分組鍵（預設=RunID）
 
 	Expected  string `json:"expected,omitempty"`  // plan 階段 planner 給的一句話預期

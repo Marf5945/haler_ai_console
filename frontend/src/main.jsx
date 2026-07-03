@@ -1,8 +1,22 @@
 import React from 'react'
 import {createRoot} from 'react-dom/client'
 import App from './App'
+import PopoutChat from './popout/PopoutChat'
 import { getCurrentLanguage } from './locales/useI18n'
 import { injectFontFaces } from './fontFaces'
+
+// 釘選對話框（popout）子視窗模式偵測：
+// popout 子行程會在 index.html 注入 <meta name="haler-popout" content="<base64 JSON>">，
+// 讀到就改渲染輕量聊天殼（PopoutChat），否則照常渲染主控台。
+function readPopoutBoot() {
+    const meta = document.querySelector('meta[name="haler-popout"]')
+    if (!meta?.content) return null
+    try {
+        return JSON.parse(atob(meta.content))
+    } catch (_) {
+        return {}
+    }
+}
 
 function ErrorScreen({error, title = 'AI Console error'}) {
     const message = error?.stack || error?.message || String(error || 'Unknown startup error')
@@ -51,10 +65,11 @@ try {
     injectFontFaces()
     const startupLang = getCurrentLanguage()
     document.documentElement.lang = startupLang
+    const popoutBoot = readPopoutBoot()
     root.render(
         <React.StrictMode>
             <RootErrorBoundary>
-                <App/>
+                {popoutBoot ? <PopoutChat boot={popoutBoot}/> : <App/>}
             </RootErrorBoundary>
         </React.StrictMode>
     )

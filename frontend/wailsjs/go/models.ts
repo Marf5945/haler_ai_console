@@ -899,6 +899,36 @@ export namespace main {
 	        this.draft = source["draft"];
 	    }
 	}
+	export class GGUFImportJob {
+	    jobId: string;
+	    source: string;
+	    modelName: string;
+
+	    static createFrom(source: any = {}) {
+	        return new GGUFImportJob(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.jobId = source["jobId"];
+	        this.source = source["source"];
+	        this.modelName = source["modelName"];
+	    }
+	}
+	export class GGUFSuggestion {
+	    name: string;
+	    path: string;
+
+	    static createFrom(source: any = {}) {
+	        return new GGUFSuggestion(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.path = source["path"];
+	    }
+	}
 	export class GoProgramAuthoringCatalogItem {
 	    run_id: string;
 	    program_id: string;
@@ -1505,6 +1535,28 @@ export namespace main {
 	        this.binaryFound = source["binaryFound"];
 	        this.daemonRunning = source["daemonRunning"];
 	        this.binaryPath = source["binaryPath"];
+	    }
+	}
+	export class PopoutInfo {
+	    agent_id: string;
+	    name: string;
+	    adapter_id: string;
+	    is_api: boolean;
+	    persona_name: string;
+	    locale: string;
+
+	    static createFrom(source: any = {}) {
+	        return new PopoutInfo(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.agent_id = source["agent_id"];
+	        this.name = source["name"];
+	        this.adapter_id = source["adapter_id"];
+	        this.is_api = source["is_api"];
+	        this.persona_name = source["persona_name"];
+	        this.locale = source["locale"];
 	    }
 	}
 	export class ReadinessGateState {

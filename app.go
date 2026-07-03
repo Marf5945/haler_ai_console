@@ -3707,6 +3707,37 @@ func (a *App) PreviewExternalLink(url string) interface{} {
 			Reason:   "Ollama 程式本體不能當 CLI adapter；請貼包含 blobs / manifests 的模型庫資料夾，例如 %%%USERPROFILE%%%\\.ollama\\models。",
 		})
 	}
+	// 貼到「裝著 GGUF 的資料夾」→ 引導改貼單一檔案（前端建議清單會列出附近的 .gguf）。
+	if info, statErr := os.Stat(expandUserPath(url)); statErr == nil && info.IsDir() {
+		if hits := listGGUFWithin(expandUserPath(url)); len(hits) > 0 {
+			sample := make([]string, 0, 3)
+			for i, h := range hits {
+				if i >= 3 {
+					break
+				}
+				sample = append(sample, h.Name)
+			}
+			return frontendDTO(external_link.PreviewResult{
+				URL:      expandUserPath(url),
+				LinkType: external_link.LinkUnsupported,
+				Valid:    false,
+				Reason:   fmt.Sprintf("這個資料夾裡找到 %d 個 GGUF 檔（例：%s）。請貼單一 .gguf 檔案路徑，或點下方建議直接帶入。", len(hits), strings.Join(sample, "、")),
+			})
+		}
+	}
+	// GGUF 模型檔（本地 .gguf 或 https .gguf URL）→ 確認後背景匯入成 Ollama 本地模型。
+	if isGGUFImportSource(url) {
+		action := "將以 ollama create 匯入為本地模型"
+		if isGGUFRemoteURL(url) {
+			action = "將下載後以 ollama create 匯入為本地模型"
+		}
+		return frontendDTO(external_link.PreviewResult{
+			URL:      expandUserPath(url),
+			LinkType: external_link.LinkAdapterCandidate,
+			Valid:    true,
+			Reason:   fmt.Sprintf("偵測到 GGUF 模型檔：%s「%s」，完成後自動加入本機模型清單。", action, ggufModelName(url)),
+		})
+	}
 	if cli, err := adapter_registry.ResolveCustomCLI("", url); err == nil && cli.Found {
 		return frontendDTO(external_link.PreviewResult{
 			URL:      cli.Path,
@@ -3759,6 +3790,19 @@ func (a *App) RegisterExternalLink(url, label string) (interface{}, error) {
 	}
 	if adapter_registry.IsOllamaExecutablePath(expandUserPath(url)) {
 		return nil, fmt.Errorf("ollama.exe 不能當 CLI adapter；請貼 Ollama 模型庫資料夾，例如 %%USERPROFILE%%\\.ollama\\models")
+	}
+	// GGUF 模型檔 → 起背景匯入 job（下載 + ollama create），進度走 gguf:import_* 事件。
+	if isGGUFImportSource(url) {
+		job, err := a.StartGGUFImport(url)
+		if err != nil {
+			return nil, err
+		}
+		return frontendDTO(&external_link.ExternalLink{
+			ID:       "gguf-import-" + job.ModelName,
+			URL:      job.Source,
+			LinkType: external_link.LinkAdapterCandidate,
+			Label:    fmt.Sprintf("GGUF 模型匯入：%s（背景執行中）", job.ModelName),
+		}), nil
 	}
 	// 先檢查是否為 CLI adapter 路徑——如果是，只走 adapter_registry
 	if cli, err := a.adapterRegistry.RegisterCustomCLI("", url); err == nil && cli.Found {
@@ -3922,6 +3966,9 @@ func (a *App) RemoveReferenceFile(path string) error {
 func importReferenceFileToDir(sourcePath, referenceDir string) (ReferenceFile, error) {
 	if sourcePath == "" {
 		return ReferenceFile{}, fmt.Errorf("reference: source path is empty")
+	}
+	if strings.EqualFold(filepath.Ext(sourcePath), ".gguf") {
+		return ReferenceFile{}, fmt.Errorf("reference: GGUF model files must be added as local model adapters, not reference files")
 	}
 	info, err := os.Stat(sourcePath)
 	if err != nil {

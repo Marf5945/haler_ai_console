@@ -19,9 +19,9 @@ import (
 
 const (
 	taskExperienceFile     = "experience.jsonl"
-	taskExperienceMaxKeep  = 100      // 讀取端只看最近 N 筆
+	taskExperienceMaxKeep  = 100       // 讀取端只看最近 N 筆
 	taskExperienceMaxFile  = 256 << 10 // 檔案超過此大小時重寫保留尾段
-	taskExperienceMaxMatch = 3        // 注入最多幾筆
+	taskExperienceMaxMatch = 3         // 注入最多幾筆
 )
 
 // TaskExperience 一筆任務經驗（刻意精簡：planner 只需要「什麼任務、成敗、敗在哪」）。

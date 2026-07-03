@@ -12,9 +12,10 @@ import (
 // dianliao_bom_match.go — 電料模糊解析：本地粗篩 → 模型精選 → fallback。
 //
 // 回傳 (resolved, status)：
-//   status="no_db"：找不到電料編碼紀錄檔。
-//   status="none" ：DB 有讀到但找不到相符。
-//   status="ok"   ：resolved 至少一筆；len==1 表示可自動帶入，>1 表示要列選項。
+//
+//	status="no_db"：找不到電料編碼紀錄檔。
+//	status="none" ：DB 有讀到但找不到相符。
+//	status="ok"   ：resolved 至少一筆；len==1 表示可自動帶入，>1 表示要列選項。
 func (a *App) resolveDianliaoItem(sessionID, traceID, query string) ([]builtin.DianliaoRecord, string) {
 	dbPath := a.findDianliaoReferencePath("編碼紀錄")
 	if dbPath == "" {

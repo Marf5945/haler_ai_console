@@ -38,14 +38,14 @@ const skillUsageSchemaVersion = "v1"
 // skill_id 與 display_name 都要存：匯出偵測用 ID 比對 data/skills/[id]，
 // 顯示名稱則留給人讀與舊資料的 fallback 比對。
 type SkillUsageRecord struct {
-	SchemaVersion string `json:"schema_version"`        // 固定 skillUsageSchemaVersion
-	EventType     string `json:"event_type"`            // 固定 "skill_usage"
-	SkillID       string `json:"skill_id"`              // 歸檔 skill ID（如 go-program-產出電料bom）
-	DisplayName   string `json:"display_name"`          // 顯示名稱（如 產出電料Bom）
-	AgentID       string `json:"agent_id"`              // 執行當下的 agent（main 或 sub-xxx）
-	SessionID     string `json:"session_id,omitempty"`  // 對話 session
-	TraceID       string `json:"trace_id,omitempty"`    // debugtrace 追蹤 ID
-	ExecutedAt    string `json:"executed_at"`           // RFC3339 執行完成時間
+	SchemaVersion string `json:"schema_version"`       // 固定 skillUsageSchemaVersion
+	EventType     string `json:"event_type"`           // 固定 "skill_usage"
+	SkillID       string `json:"skill_id"`             // 歸檔 skill ID（如 go-program-產出電料bom）
+	DisplayName   string `json:"display_name"`         // 顯示名稱（如 產出電料Bom）
+	AgentID       string `json:"agent_id"`             // 執行當下的 agent（main 或 sub-xxx）
+	SessionID     string `json:"session_id,omitempty"` // 對話 session
+	TraceID       string `json:"trace_id,omitempty"`   // debugtrace 追蹤 ID
+	ExecutedAt    string `json:"executed_at"`          // RFC3339 執行完成時間
 }
 
 // recordSkillUsage 是 skill 執行成功後的統一記錄入口。

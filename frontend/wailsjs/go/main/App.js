@@ -890,6 +890,10 @@ export function ListPendingPackages() {
   return window['go']['main']['App']['ListPendingPackages']();
 }
 
+export function ListPinnedPopouts() {
+  return window['go']['main']['App']['ListPinnedPopouts']();
+}
+
 export function ListPixelAvatarPacks() {
   return window['go']['main']['App']['ListPixelAvatarPacks']();
 }
@@ -1016,6 +1020,10 @@ export function OrganizeSystemMarks(arg1) {
 
 export function PauseScheduledJob(arg1) {
   return window['go']['main']['App']['PauseScheduledJob'](arg1);
+}
+
+export function PinOutConversation(arg1) {
+  return window['go']['main']['App']['PinOutConversation'](arg1);
 }
 
 export function PollStatusRail() {
@@ -1502,6 +1510,10 @@ export function StartDraftSandbox(arg1) {
   return window['go']['main']['App']['StartDraftSandbox'](arg1);
 }
 
+export function StartGGUFImport(arg1) {
+  return window['go']['main']['App']['StartGGUFImport'](arg1);
+}
+
 export function StartGoProgramAuthoring(arg1, arg2, arg3) {
   return window['go']['main']['App']['StartGoProgramAuthoring'](arg1, arg2, arg3);
 }
@@ -1550,6 +1562,10 @@ export function SubmitTaskLoopInput(arg1, arg2, arg3) {
   return window['go']['main']['App']['SubmitTaskLoopInput'](arg1, arg2, arg3);
 }
 
+export function SuggestGGUFFiles(arg1) {
+  return window['go']['main']['App']['SuggestGGUFFiles'](arg1);
+}
+
 export function SwitchRemoteBridgeMode(arg1, arg2) {
   return window['go']['main']['App']['SwitchRemoteBridgeMode'](arg1, arg2);
 }
@@ -1560,6 +1576,10 @@ export function TestRemoteBridgeConnection(arg1) {
 
 export function TranscribeVoiceWAV(arg1, arg2) {
   return window['go']['main']['App']['TranscribeVoiceWAV'](arg1, arg2);
+}
+
+export function UnpinConversation(arg1) {
+  return window['go']['main']['App']['UnpinConversation'](arg1);
 }
 
 export function UnregisterAdapter(arg1) {

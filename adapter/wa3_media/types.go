@@ -94,10 +94,10 @@ func (v VerificationStatus) IsTrainingSafe() bool {
 type MediaScope string
 
 const (
-	ScopeImage MediaScope = "image"
-	ScopeAudio MediaScope = "audio"
-	ScopeVideo MediaScope = "future_video" // 未來擴充
-	ScopeDocument MediaScope = "document"        // §9A 文檔來源證明
+	ScopeImage    MediaScope = "image"
+	ScopeAudio    MediaScope = "audio"
+	ScopeVideo    MediaScope = "future_video" // 未來擴充
+	ScopeDocument MediaScope = "document"     // §9A 文檔來源證明
 )
 
 // ──────────────────────────────────────────────

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -52,33 +53,96 @@ func scanOllamaModels() []SummaryModelOption {
 			return parseOllamaListOutput(string(out))
 		}
 	}
+	// CLI 不在（或掛了）但 daemon 在跑 → 直接問 /api/tags，比檔案掃描準。
+	if models := scanOllamaModelsViaAPI("http://localhost:11434"); len(models) > 0 {
+		return models
+	}
 	if models := scanOllamaModelLibrary(os.Getenv("OLLAMA_MODELS")); len(models) > 0 {
 		return models
 	}
-	home, _ := os.UserHomeDir()
-	if home == "" {
-		return nil
+	if home, _ := os.UserHomeDir(); home != "" {
+		if models := scanOllamaModelLibrary(filepath.Join(home, "ollama")); len(models) > 0 {
+			return models
+		}
+		if models := scanOllamaModelLibrary(filepath.Join(home, ".ollama", "models")); len(models) > 0 {
+			return models
+		}
 	}
-	if models := scanOllamaModelLibrary(filepath.Join(home, "ollama")); len(models) > 0 {
-		return models
-	}
-	return scanOllamaModelLibrary(filepath.Join(home, ".ollama", "models"))
+	// Linux systemd 服務模式：daemon 以 ollama 使用者跑，模型庫在它的家目錄。
+	return scanOllamaModelLibrary(systemOllamaModelDir())
 }
 
 func resolveOllamaExecutable() string {
 	if path, err := exec.LookPath("ollama"); err == nil {
 		return path
 	}
-	for _, path := range []string{
+	// Windows：exe 沒有 unix 執行位，只驗存在即可；預設裝在 %LOCALAPPDATA%\Programs\Ollama。
+	if runtime.GOOS == "windows" {
+		var candidates []string
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			candidates = append(candidates, filepath.Join(localAppData, "Programs", "Ollama", "ollama.exe"))
+		}
+		if programFiles := os.Getenv("ProgramFiles"); programFiles != "" {
+			candidates = append(candidates, filepath.Join(programFiles, "Ollama", "ollama.exe"))
+		}
+		for _, path := range candidates {
+			if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+				return path
+			}
+		}
+		return ""
+	}
+	// macOS + Linux 常見安裝位置（Linux：官方 install.sh → /usr/local/bin、
+	// deb/rpm → /usr/bin、snap → /snap/bin、使用者自裝 → ~/.local/bin）。
+	candidates := []string{
 		"/opt/homebrew/bin/ollama",
 		"/usr/local/bin/ollama",
+		"/usr/bin/ollama",
+		"/snap/bin/ollama",
 		"/Applications/Ollama.app/Contents/Resources/ollama",
-	} {
+	}
+	if home, _ := os.UserHomeDir(); home != "" {
+		candidates = append(candidates, filepath.Join(home, ".local", "bin", "ollama"))
+	}
+	for _, path := range candidates {
 		if info, err := os.Stat(path); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
 			return path
 		}
 	}
 	return ""
+}
+
+// scanOllamaModelsViaAPI — CLI 不可用時的 HTTP fallback：GET /api/tags。
+// 沿用 scanLMStudioModels 的 SEC-05 / SEC-W09 防護（PolicyLocalLLM + 1MB 上限）。
+func scanOllamaModelsViaAPI(baseURL string) []SummaryModelOption {
+	client := urlsafe.NewSafeClient(urlsafe.PolicyLocalLLM, "model_scan", 800*time.Millisecond)
+	resp, err := client.Get(baseURL + "/api/tags")
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
+		return nil
+	}
+	options := make([]SummaryModelOption, 0, len(payload.Models))
+	for _, m := range payload.Models {
+		id := strings.TrimSpace(m.Name)
+		if id == "" || !isOllamaGenerativeModelID(id) {
+			continue
+		}
+		options = append(options, SummaryModelOption{
+			Provider: "ollama",
+			ID:       id,
+			Label:    "Ollama - " + id,
+			Endpoint: "http://localhost:11434",
+		})
+	}
+	return options
 }
 
 func parseOllamaListOutput(out string) []SummaryModelOption {

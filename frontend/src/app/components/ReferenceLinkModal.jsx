@@ -3,11 +3,14 @@ import useI18n from '../../locales/useI18n';
 // I-5 (#I-502): two-step flow. Preview shows link_type before Register.
 export default function ReferenceLinkModal({value, linkPreview, error, suggestions, onCancel, onChange, onUseSuggestion, onPreview, onConfirm}) {
   const {t} = useI18n();
+  // GGUF 匯入 preview 的 reason 也含「本機模型」字樣，要先於模型庫判斷。
+  const isGGUFImportPreview = linkPreview?.link_type === 'adapter_candidate' &&
+    /gguf/i.test(`${value || ''} ${linkPreview?.url || ''} ${linkPreview?.reason || ''}`);
   const isOllamaModelLibraryPreview = linkPreview?.link_type === 'adapter_candidate' &&
     /ollama|模型庫|本機模型|blobs|manifests|\.ollama[\\/]+models/i.test(`${value || ''} ${linkPreview?.url || ''} ${linkPreview?.reason || ''}`);
   const getLinkTypeLabel = () => ({
     external_service: t('link.externalService'),
-    adapter_candidate: isOllamaModelLibraryPreview ? '本地模型 Adapter' : 'CLI Adapter',
+    adapter_candidate: isGGUFImportPreview ? 'GGUF 模型匯入' : isOllamaModelLibraryPreview ? '本地模型 Adapter' : 'CLI Adapter',
     llm_provider_candidate: t('link.llmApiInterface'),
     documentation: t('link.docLinkShort'),
     shared_source: t('link.sharedSource'),

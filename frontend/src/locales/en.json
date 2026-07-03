@@ -1300,6 +1300,8 @@
     "unnamedSubagent": "Unnamed subagent",
     "switchToMain": "Switch to main agent",
     "haoraTitle": "Click to switch; double-click to rename; drag to Finder to export",
+    "pinOut": "Pin out as a separate window (uses current persona & model, isolated memory)",
+    "pinnedTitle": "Pinned out as a separate window with isolated memory; click to bring back",
     "dragTitle": "Subagent drag action",
     "dragNativeFailed": "Windows native drag did not finish. Try dragging to the desktop or an open File Explorer folder."
   },

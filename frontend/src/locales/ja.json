@@ -1326,6 +1326,8 @@
     "unnamedSubagent": "無名の subagent",
     "switchToMain": "メインエージェントへ切替",
     "haoraTitle": "クリックで切替、ダブルクリックで名前変更、Finder へドラッグしてエクスポート",
+    "pinOut": "独立ウィンドウとしてピン留め（現在のペルソナとモデルを使用、記憶は独立）",
+    "pinnedTitle": "独立ウィンドウにピン留め中（記憶は独立）。クリックでメインに戻す",
     "dragTitle": "Subagent ドラッグ操作",
     "dragNativeFailed": "Windows native drag が完了しませんでした。デスクトップまたは開いている File Explorer フォルダへドラッグしてみてください。"
   },

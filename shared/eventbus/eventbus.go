@@ -71,6 +71,12 @@ const (
 
 	// Web search setup
 	EventWebSearchConfigRequired = "web_search:config_required"
+
+	// GGUF 匯入（引用連結貼 .gguf → 下載 → ollama create → 本地模型）
+	EventGGUFImportStarted  = "gguf:import_started"
+	EventGGUFImportProgress = "gguf:import_progress"
+	EventGGUFImportDone     = "gguf:import_done"
+	EventGGUFImportFailed   = "gguf:import_failed"
 )
 
 // Bus is the central event dispatcher. Holds the Wails context for EventsEmit.

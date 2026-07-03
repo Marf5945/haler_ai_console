@@ -28,7 +28,12 @@ hr "1/5 gofmt（格式）"
 if go fmt ./... 2>&1 | sed 's/^/    /'; then ok "格式化完成"; else no "gofmt 失敗"; fi
 
 hr "2/5 go vet"
-if go vet ./... 2>&1 | sed 's/^/    /'; then ok "vet 乾淨"; else no "vet 有問題"; fi
+# unsafeptr 例外：adapter/visual_learning/*_windows.go 與 native_drag_windows.go 的
+# Windows COM 回呼／syscall 以 uintptr 承接 OS 指標再轉回 unsafe.Pointer（this/riid/
+# lParam/ppv/ptr 及兩處指標算術）。這是正確且必要的 OS 互操作寫法——指標來自
+# GlobalAlloc／COM 非受管記憶體，GC 不會搬移；盲目改寫的風險遠高於警告本身。
+# 故僅關閉 unsafeptr 這單一分析器，其餘 vet 檢查（printf／結構標籤／lostcancel…）全保留。
+if go vet -unsafeptr=false ./... 2>&1 | sed 's/^/    /'; then ok "vet 乾淨（unsafeptr 例外：Windows interop）"; else no "vet 有問題"; fi
 
 hr "3/5 go build ./..."
 if go build ./... 2>&1 | sed 's/^/    /'; then ok "build 成功"; else no "build 失敗"; fi
@@ -38,7 +43,12 @@ if go test ./... 2>&1 | sed 's/^/    /'; then ok "全部測試通過"; else no "
 
 hr "5/5 行為錨點（grep 確認本批修正在位）"
 chk(){ if grep -q "$2" "$1" 2>/dev/null; then ok "$3"; else no "$3（找不到 $2）"; fi; }
-chk tool_readiness.go 'containsLocationHint(userText)'                "地點誤問：readiness 看原始訊息"
+# 反向錨點：驗證某符號「已被移除」仍在位（找到＝反而失敗）。
+chkabsent(){ if grep -q "$2" "$1" 2>/dev/null; then no "$3（$2 仍在，應已移除）"; else ok "$3"; fi; }
+# 這批把關鍵字驅動的「缺地點就問」臆測（containsLocationHint / isContextSensitiveWebQuery）
+# 整個廢除，澄清改由 judge 決定（見 tool_readiness.go 檔首說明）。故這裡驗證的是
+# 「該臆測已不存在」，而非舊符號在位——舊錨點 'containsLocationHint(userText)' 已過時。
+chkabsent tool_readiness.go 'func containsLocationHint'               "地點誤問臆測已移除，澄清交給 judge"
 chk shared/websearch/service.go 'func queryLanguage'                  "語言感知排序：queryLanguage 在位"
 chk shared/websearch/service.go 'rankByAuthority(req.Query'           "語言感知排序：Search 帶 query"
 chk shared/controlseal/seal.go 'for attempt := 0'                     "controlseal：rand 重試退化"

@@ -1321,6 +1321,8 @@
     "unnamedSubagent": "Subagente sin nombre",
     "switchToMain": "Cambiar al agente principal",
     "haoraTitle": "Haz clic para cambiar; doble clic para renombrar; arrastra al Finder para exportar",
+    "pinOut": "Fijar como ventana independiente (usa la persona y el modelo actuales, memoria aislada)",
+    "pinnedTitle": "Fijada como ventana independiente con memoria aislada; haz clic para recuperarla",
     "dragTitle": "Acción de arrastrar subagente",
     "dragNativeFailed": "El arrastre nativo de Windows no finalizó. Intenta arrastrar al escritorio o a una carpeta abierta del Explorador de archivos."
   },

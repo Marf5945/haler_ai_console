@@ -2151,6 +2151,48 @@
     box-shadow: 0 0 16px rgba(255,186,85,.95), 0 0 32px rgba(235,136,4,.45);
   }
 
+  /* 圖釘：釘選對話成獨立 OS 視窗。平時淡出，滑過分頁才浮現。 */
+  .haora-pin {
+    @apply absolute left-1.5 top-1/2 grid place-items-center rounded;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 18px;
+    color: rgba(255,186,85,.55);
+    opacity: 0;
+    transition: opacity .15s ease, color .15s ease, background .15s ease;
+    cursor: pointer;
+  }
+
+  .haora-card:hover .haora-pin {
+    opacity: 1;
+  }
+
+  .haora-pin:hover {
+    color: #1a1200;
+    background: #ffba55;
+  }
+
+  /* 釘選中的分頁：對話記憶由獨立視窗獨佔，主視窗鎖定；點擊＝收回。 */
+  .haora-card-pinned {
+    @apply flex items-center justify-center gap-1.5;
+    cursor: pointer;
+    opacity: .55;
+    border-style: dashed;
+  }
+
+  .haora-card-pinned .haora-pin-active {
+    @apply static grid;
+    transform: none;
+    opacity: 1;
+    color: #ffba55;
+    width: auto;
+    height: auto;
+  }
+
+  .haora-card-pinned:hover {
+    opacity: .85;
+  }
+
   .top-function-stack {
     @apply relative col-start-2 row-start-3 z-20 grid gap-2;
   }

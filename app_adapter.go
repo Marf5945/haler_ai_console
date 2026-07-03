@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"ui_console/data/storage"
 	"ui_console/internal/urlsafe"
 	"ui_console/shared/eventbus"
+	"ui_console/shared/executil"
 	"ui_console/shared/taborder"
 )
 
@@ -334,6 +336,10 @@ func (a *App) WakeLocalAdapter(adapterID string) (interface{}, error) {
 		result, err := a.wakeOllamaAdapter(adapter)
 		return frontendDTO(result), err
 	}
+	if strings.Contains(adapter.Endpoint, ":1234") && isLlamaCPPAdapter(adapter) {
+		result, err := a.wakeLlamaCPPAdapter(adapter)
+		return frontendDTO(result), err
+	}
 	if strings.Contains(adapter.Endpoint, ":1234") {
 		if pingOpenAIModelsEndpoint(adapter.Endpoint, 800*time.Millisecond) {
 			a.setAdapterRuntimeStatus(adapterID, adapter_registry.StatusOnline)
@@ -343,6 +349,97 @@ func (a *App) WakeLocalAdapter(adapterID string) (interface{}, error) {
 		return nil, fmt.Errorf("LM Studio 尚未啟動；請先在 LM Studio 啟動 local server")
 	}
 	return nil, fmt.Errorf("unknown local adapter endpoint: %s", adapter.Endpoint)
+}
+
+func isLlamaCPPAdapter(adapter adapter_registry.Adapter) bool {
+	identity := strings.ToLower(adapter.ID + " " + adapter.Name)
+	return strings.Contains(identity, "llamacpp") || strings.Contains(identity, "llama.cpp")
+}
+
+func (a *App) wakeLlamaCPPAdapter(adapter adapter_registry.Adapter) (map[string]string, error) {
+	if pingOpenAIModelsEndpoint(adapter.Endpoint, 800*time.Millisecond) {
+		a.setAdapterRuntimeStatus(adapter.ID, adapter_registry.StatusOnline)
+		return map[string]string{"status": "online", "message": "llama.cpp 已在線"}, nil
+	}
+	ggufPath := expandUserPath(adapter.Path)
+	if !strings.EqualFold(filepath.Ext(ggufPath), ".gguf") {
+		a.setAdapterRuntimeStatus(adapter.ID, adapter_registry.StatusDegraded)
+		return nil, fmt.Errorf("llama.cpp adapter 缺少 GGUF 模型路徑")
+	}
+	if info, err := os.Stat(ggufPath); err != nil || info.IsDir() {
+		a.setAdapterRuntimeStatus(adapter.ID, adapter_registry.StatusDegraded)
+		if err != nil {
+			return nil, fmt.Errorf("找不到 GGUF 模型檔：%w", err)
+		}
+		return nil, fmt.Errorf("GGUF 模型路徑不是檔案：%s", ggufPath)
+	}
+	serverPath := resolveLlamaServerExecutable(ggufPath)
+	if serverPath == "" {
+		a.setAdapterRuntimeStatus(adapter.ID, adapter_registry.StatusDegraded)
+		return nil, fmt.Errorf("找不到 llama-server.exe；請確認 tools\\llama-cpp 仍在小助理資料夾內")
+	}
+	cmd := executil.Command(serverPath, "-m", ggufPath, "--host", "127.0.0.1", "--port", "1234", "-c", "2048", "-ngl", "0")
+	cmd.Dir = filepath.Dir(serverPath)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		a.setAdapterRuntimeStatus(adapter.ID, adapter_registry.StatusDegraded)
+		return nil, err
+	}
+	go func() { _ = cmd.Wait() }()
+	for i := 0; i < 60; i++ {
+		if pingOpenAIModelsEndpoint(adapter.Endpoint, 500*time.Millisecond) {
+			a.setAdapterRuntimeStatus(adapter.ID, adapter_registry.StatusOnline)
+			return map[string]string{"status": "online", "message": "llama.cpp 已啟動"}, nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	a.setAdapterRuntimeStatus(adapter.ID, adapter_registry.StatusDegraded)
+	return nil, fmt.Errorf("llama.cpp 已嘗試啟動，但 API 尚未回應：%s", adapter.Endpoint)
+}
+
+func resolveLlamaServerExecutable(ggufPath string) string {
+	roots := []string{}
+	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
+		roots = append(roots, filepath.Dir(exe))
+	}
+	if cwd, err := os.Getwd(); err == nil && strings.TrimSpace(cwd) != "" {
+		roots = append(roots, cwd)
+	}
+	if ggufPath != "" {
+		roots = append(roots, filepath.Dir(ggufPath))
+	}
+	seen := map[string]bool{}
+	for _, root := range roots {
+		for dir := filepath.Clean(root); dir != "." && dir != string(filepath.Separator); dir = filepath.Dir(dir) {
+			if seen[dir] {
+				break
+			}
+			seen[dir] = true
+			if found := firstLlamaServerIn(filepath.Join(dir, "tools", "llama-cpp")); found != "" {
+				return found
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+		}
+	}
+	return ""
+}
+
+func firstLlamaServerIn(root string) string {
+	matches, err := filepath.Glob(filepath.Join(root, "*", "llama-server.exe"))
+	if err != nil || len(matches) == 0 {
+		return ""
+	}
+	sort.Strings(matches)
+	for i := len(matches) - 1; i >= 0; i-- {
+		if info, err := os.Stat(matches[i]); err == nil && !info.IsDir() {
+			return matches[i]
+		}
+	}
+	return ""
 }
 
 // wakeOllamaAdapter — registry path：包 wakeOllamaDaemon 並在前後更新 adapter 狀態。

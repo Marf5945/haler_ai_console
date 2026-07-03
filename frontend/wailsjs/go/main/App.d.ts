@@ -21,6 +21,7 @@ import {health} from '../models';
 import {persona_avatar} from '../models';
 import {settings} from '../models';
 import {memory} from '../models';
+import {debugtrace} from '../models';
 import {browser_pref} from '../models';
 import {taborder} from '../models';
 
@@ -468,6 +469,8 @@ export function ListPendingCandidates():Promise<any>;
 
 export function ListPendingPackages():Promise<any>;
 
+export function ListPinnedPopouts():Promise<Array<main.PopoutInfo>>;
+
 export function ListPixelAvatarPacks():Promise<Array<Record<string, string>>>;
 
 export function ListProjectDocuments():Promise<any>;
@@ -531,6 +534,8 @@ export function OpenVisualLearningPermissionSettings(arg1:string):Promise<void>;
 export function OrganizeSystemMarks(arg1:string):Promise<number>;
 
 export function PauseScheduledJob(arg1:string):Promise<void>;
+
+export function PinOutConversation(arg1:main.PopoutInfo):Promise<void>;
 
 export function PollStatusRail():Promise<statusrail.View>;
 
@@ -774,6 +779,8 @@ export function StageSessionImages(arg1:string,arg2:Array<string>):Promise<numbe
 
 export function StartDraftSandbox(arg1:string):Promise<string>;
 
+export function StartGGUFImport(arg1:string):Promise<main.GGUFImportJob>;
+
 export function StartGoProgramAuthoring(arg1:string,arg2:string,arg3:string):Promise<main.GoProgramAuthoringResult>;
 
 export function StartHookRun(arg1:string,arg2:string):Promise<string>;
@@ -798,11 +805,15 @@ export function StopURLVisualLearning():Promise<any>;
 
 export function SubmitTaskLoopInput(arg1:string,arg2:string,arg3:string):Promise<dag.DAGRun>;
 
+export function SuggestGGUFFiles(arg1:string):Promise<Array<main.GGUFSuggestion>>;
+
 export function SwitchRemoteBridgeMode(arg1:string,arg2:string):Promise<any>;
 
 export function TestRemoteBridgeConnection(arg1:string):Promise<any>;
 
 export function TranscribeVoiceWAV(arg1:string,arg2:string):Promise<voice.TranscriptResult>;
+
+export function UnpinConversation(arg1:string):Promise<void>;
 
 export function UnregisterAdapter(arg1:string):Promise<void>;
 

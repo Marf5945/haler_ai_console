@@ -1320,6 +1320,8 @@
     "unnamedSubagent": "이름 없는 서브에이전트",
     "switchToMain": "메인 에이전트로 전환",
     "haoraTitle": "클릭하면 전환, 더블클릭하면 이름 변경, Finder로 끌면 내보내기",
+    "pinOut": "독립 창으로 고정 (현재 페르소나·모델 사용, 기억 독립)",
+    "pinnedTitle": "독립 창으로 고정됨 (기억 독립). 클릭하면 메인으로 되돌림",
     "dragTitle": "서브에이전트 끌기 동작",
     "dragNativeFailed": "Windows 네이티브 끌기가 완료되지 않았어요. 바탕화면이나 열린 파일 탐색기 폴더로 끌어 보세요."
   },

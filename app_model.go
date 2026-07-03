@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -240,7 +241,7 @@ func wakeOllamaDaemon(baseURL, modelDirHint string) error {
 	}
 	ollamaPath := resolveOllamaExecutable()
 	if ollamaPath == "" {
-		return fmt.Errorf("找不到 Ollama CLI，請安裝 Ollama 或加入 /opt/homebrew/bin/ollama")
+		return fmt.Errorf("找不到 Ollama 執行檔，請先安裝 Ollama（Windows：%%LOCALAPPDATA%%\\Programs\\Ollama；macOS：/opt/homebrew/bin；Linux：/usr/local/bin 或 /usr/bin）")
 	}
 	cmd := executil.Command(ollamaPath, "serve")
 	cmd.Stdout = io.Discard
@@ -268,6 +269,7 @@ func resolveOllamaModelDir(adapterPath string) string {
 		os.Getenv("OLLAMA_MODELS"),
 		userOllamaModelDir(),
 		defaultOllamaModelDir(),
+		systemOllamaModelDir(),
 	} {
 		candidate = expandUserPath(candidate)
 		if isOllamaModelLibrary(candidate) {
@@ -291,6 +293,15 @@ func defaultOllamaModelDir() string {
 		return ""
 	}
 	return filepath.Join(home, ".ollama", "models")
+}
+
+// systemOllamaModelDir — Linux systemd 服務模式的預設模型庫
+// （daemon 以 ollama 使用者跑，家目錄在 /usr/share/ollama）。其他平台回空字串。
+func systemOllamaModelDir() string {
+	if runtime.GOOS != "linux" {
+		return ""
+	}
+	return "/usr/share/ollama/.ollama/models"
 }
 
 func ollamaBaseURL(endpoint string) string {

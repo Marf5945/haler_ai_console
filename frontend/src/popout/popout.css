@@ -1,0 +1,194 @@
+/* popout.css — 釘選對話框子視窗樣式，沿用主控台黑金主題。 */
+
+html, body, #root {
+  height: 100%;
+}
+
+.popout-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #0a0a0a;
+  color: #f5f0e6;
+  font-family: system-ui, -apple-system, 'Segoe UI', 'Noto Sans TC', sans-serif;
+  font-size: 14px;
+}
+
+.popout-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: linear-gradient(180deg, #f2a33c, #d98a1f);
+  color: #1a1200;
+  user-select: none;
+  cursor: default;
+}
+
+.popout-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.popout-title strong {
+  font-size: 14px;
+  font-weight: 900;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.popout-title span {
+  font-size: 11px;
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.popout-pin {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.22);
+  color: #1a1200;
+  cursor: pointer;
+  flex: none;
+}
+
+.popout-pin:hover {
+  background: rgba(0, 0, 0, 0.38);
+  color: #fff;
+}
+
+.popout-busy {
+  font-weight: 900;
+  flex: none;
+}
+
+.popout-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.popout-messages::-webkit-scrollbar {
+  width: 8px;
+}
+
+.popout-messages::-webkit-scrollbar-thumb {
+  background: rgba(255, 186, 85, 0.5);
+  border-radius: 999px;
+}
+
+.popout-row {
+  display: flex;
+}
+
+.popout-row-user {
+  justify-content: flex-end;
+}
+
+.popout-row-assistant,
+.popout-row-system {
+  justify-content: flex-start;
+}
+
+.popout-bubble {
+  max-width: 82%;
+  padding: 8px 11px;
+  border-radius: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.popout-row-user .popout-bubble {
+  background: #f2a33c;
+  color: #1a1200;
+  border-bottom-right-radius: 4px;
+}
+
+.popout-row-assistant .popout-bubble {
+  background: #1c1c1c;
+  border: 1px solid #333;
+  border-bottom-left-radius: 4px;
+}
+
+.popout-row-system .popout-bubble {
+  background: transparent;
+  border: 1px dashed #444;
+  color: #9a9a9a;
+  font-size: 12px;
+}
+
+.popout-bubble-pending {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.popout-banner {
+  padding: 10px 12px;
+  border: 1px solid #a33;
+  border-radius: 8px;
+  background: rgba(160, 40, 40, 0.15);
+  color: #ff9a8a;
+  font-size: 13px;
+}
+
+.popout-error {
+  margin: 0 12px 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(160, 40, 40, 0.2);
+  color: #ff9a8a;
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.popout-composer {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid #2a2a2a;
+  background: #101010;
+}
+
+.popout-composer input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid #3a3a3a;
+  background: #050505;
+  color: #f5f0e6;
+  outline: none;
+}
+
+.popout-composer input:focus {
+  border-color: #f2a33c;
+}
+
+.popout-composer button {
+  padding: 9px 16px;
+  border-radius: 8px;
+  border: none;
+  background: #f2a33c;
+  color: #1a1200;
+  font-weight: 900;
+  cursor: pointer;
+  flex: none;
+}
+
+.popout-composer button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

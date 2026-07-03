@@ -57,6 +57,8 @@ import {
   ListExternalLinksByType,
   PreviewExternalLink,
   RegisterExternalLink,
+  StartGGUFImport,
+  SuggestGGUFFiles,
   RemoveExternalLink,
   RejectPackageInstall,
   ReorderPersonas,
@@ -1766,6 +1768,56 @@ function App() {
   useHighlight({enabled: true, conversationId: activeConversationId});
   const activeConversationIdRef = useRef('main');
   const loadedConversationIdsRef = useRef(new Set(['main']));
+  // 釘選對話框（popout）：被釘成獨立 OS 視窗的 sub 對話清單。
+  // 釘選期間該分頁在主視窗鎖定（記憶由子視窗獨佔），點擊分頁＝收回。
+  const [pinnedPopouts, setPinnedPopouts] = useState([]);
+  const pinnedPopoutsRef = useRef([]);
+  pinnedPopoutsRef.current = pinnedPopouts || [];
+  useEffect(() => {
+    // 啟動時與後端同步一次（開發熱重載時清單不會遺失）。
+    callWails(() => window.go?.main?.App?.ListPinnedPopouts?.())
+      .then((list) => setPinnedPopouts(Array.isArray(list) ? list : []))
+      .catch(() => {});
+    const offPopoutChanged = EventsOn('popout:changed', (list) => {
+      const next = Array.isArray(list) ? list : [];
+      const nextIds = new Set(next.map((item) => item?.agent_id));
+      // 回彈的對話：popout 期間記憶檔已被子視窗更新，強制從 talk_full.md 重讀。
+      (pinnedPopoutsRef.current || []).forEach((item) => {
+        if (item?.agent_id && !nextIds.has(item.agent_id)) {
+          loadConversationMessages(item.agent_id, {force: true});
+        }
+      });
+      setPinnedPopouts(next);
+    });
+    return () => { offPopoutChanged?.(); };
+  }, []);
+
+  function pinOutConversation(haora) {
+    if (!haora || haora.isMain) return; // 只有 MAIN 能調動所有記憶，主haㄌer不可釘出
+    const agentId = haora.id || haora.name;
+    const adapter = resolveAdapterFromRefs();
+    const payload = {
+      agent_id: agentId,
+      name: haora.name || agentId,
+      // 釘選當下「吃當前主人格和模型」：綁定現用 adapter/model 與主人格名。
+      adapter_id: adapter?.id || activeAdapterIdRef.current || '',
+      is_api: isAPIAdapter(adapter),
+      persona_name: mainPersona?.name || '',
+      locale: useI18n.getState().language || 'zh-TW',
+    };
+    // 若釘出的分頁正在使用，先切回主haㄌer，避免主/子視窗同時寫同一份記憶。
+    if (activeHaoraId === agentId || activeHaoraId === haora.name) setActiveHaoraId(null);
+    callWails(() => window.go?.main?.App?.PinOutConversation?.(payload))
+      .catch((err) => {
+        setToolResult({toolId: 'subagent', ok: false, message: String(err?.message || err)});
+      });
+  }
+
+  function unpinConversation(haora) {
+    const agentId = haora?.id || haora?.name;
+    if (!agentId) return;
+    callWails(() => window.go?.main?.App?.UnpinConversation?.(agentId)).catch(() => {});
+  }
   const messages = messagesByAgent[activeConversationId] || [];
   useSystemMarks({messages, conversationId: activeConversationId});
   const [cliInspectorLog, setCliInspectorLog] = useState(null);
@@ -2553,6 +2605,21 @@ function App() {
         .catch(() => {});
     });
 
+    // GGUF 匯入（引用連結貼 .gguf → 下載 → ollama create）進度 / 完成 / 失敗
+    const offGGUFProgress = EventsOn('gguf:import_progress', (payload) => {
+      const phase = payload?.phase === 'download' ? 'GGUF 下載中' : 'GGUF 建立模型中';
+      const pct = typeof payload?.percent === 'number' ? ` ${payload.percent}%` : '';
+      setToolResult({toolId: 'reference-link', ok: true, message: `${phase}${pct}：${payload?.model || ''}`});
+    });
+    const offGGUFDone = EventsOn('gguf:import_done', (payload) => {
+      const note = payload?.note ? `（${payload.note}）` : '';
+      setToolResult({toolId: 'reference-link', ok: true, message: `GGUF 模型已建立：${payload?.model || ''}${note}`});
+      refreshAvailableAdapters().catch(() => {});
+    });
+    const offGGUFFailed = EventsOn('gguf:import_failed', (payload) => {
+      setToolResult({toolId: 'reference-link', ok: false, message: `GGUF 匯入失敗：${payload?.error || ''}`});
+    });
+
     // Sidecar 狀態事件：監聽 Node sidecar 的生命週期變化。
     // 當 sidecar 啟動失敗或崩潰時，在主聊天區顯示錯誤提示，
     // 讓使用者立即知道 CLI 通道斷了，而非送出訊息後一片空白。
@@ -2970,6 +3037,9 @@ function App() {
       offAdapterStatus();
       offAdapterModelCleared();
       offToolsChanged();
+      offGGUFProgress();
+      offGGUFDone();
+      offGGUFFailed();
       offDagStarted();
       offDagNodeDone();
       offDagCompleted();
@@ -7009,6 +7079,17 @@ function App() {
     for (const path of importPaths) {
       try {
         const name = String(path || '').split(/[\/]/).pop() || t('system.unnamedFile');
+        // GGUF 是模型不是文件：改走 Ollama 匯入（ollama create），完成後進 Adapter 清單。
+        // 不複製進引用庫——7GB 的模型檔複製一份太傷，匯入後 blob 會進 Ollama 自己的模型庫。
+        if (/\.gguf$/i.test(name)) {
+          try {
+            const job = await callWails(() => StartGGUFImport(path));
+            setToolResult({toolId: 'doc-entrance', ok: true, message: `GGUF 模型匯入已開始：${job?.modelName || name}（背景執行，完成後自動加入 Adapter）`});
+          } catch (error) {
+            setToolResult({toolId: 'doc-entrance', ok: false, message: error?.message || 'GGUF 模型匯入失敗'});
+          }
+          continue;
+        }
         let referencePathForStatus = path;
         let referenceImportReady = false;
         setReferenceFiles((current) => appendUniqueReferenceFile(current, {
@@ -7236,7 +7317,19 @@ function App() {
       return;
     }
     try {
-      const detected = await callWails(AutoDetectCLI);
+      // GGUF：以貼上的路徑為中心，上下一層資料夾找 .gguf（貼錯檔名 / 貼到資料夾都能救）。
+      const value = referenceLinkValue.trim();
+      const [detected, ggufNearby] = await Promise.all([
+        callWails(AutoDetectCLI).catch(() => []),
+        value ? callWails(() => SuggestGGUFFiles(value)).catch(() => []) : Promise.resolve([]),
+      ]);
+      const ggufSuggestions = (ggufNearby || [])
+        .filter((item) => item?.path)
+        .map((item) => ({
+          name: `GGUF 模型：${item.name || item.path}`,
+          path: item.path,
+          detected: true,
+        }));
       const detectedSuggestions = (detected || [])
         .filter((item) => item?.found && item?.path && item?.supported !== false)
         .map((item) => ({
@@ -7244,7 +7337,7 @@ function App() {
           path: item.path,
           detected: true,
         }));
-      setLinkPreviewSuggestions(detectedSuggestions.slice(0, 6));
+      setLinkPreviewSuggestions([...ggufSuggestions, ...detectedSuggestions].slice(0, 6));
     } catch {
       setLinkPreviewSuggestions([]);
     }
@@ -7512,9 +7605,10 @@ function App() {
     try {
       const link = await callWails(() => RegisterExternalLink(value, value));
       const isAdapterCandidate = link?.link_type === 'adapter_candidate' || linkPreview?.link_type === 'adapter_candidate';
-      const isOllamaLibrary = isAdapterCandidate && /ollama/i.test(`${link?.label || ''} ${link?.url || ''} ${linkPreview?.reason || ''}`);
+      const isGGUFImport = isAdapterCandidate && /gguf/i.test(`${link?.label || ''} ${link?.url || ''} ${linkPreview?.reason || ''}`);
+      const isOllamaLibrary = !isGGUFImport && isAdapterCandidate && /ollama/i.test(`${link?.label || ''} ${link?.url || ''} ${linkPreview?.reason || ''}`);
       const isSharedSource = link?.link_type === 'shared_source' || linkPreview?.link_type === 'shared_source';
-      setToolResult({toolId: 'reference-link', ok: true, message: isSharedSource ? t('link.addedSharedSource') : isAdapterCandidate ? (isOllamaLibrary ? t('link.addedOllama') : t('link.addedCLI')) : t('link.addedLink')});
+      setToolResult({toolId: 'reference-link', ok: true, message: isSharedSource ? t('link.addedSharedSource') : isAdapterCandidate ? (isGGUFImport ? 'GGUF 匯入已開始（背景執行，完成後自動加入本機模型）' : isOllamaLibrary ? t('link.addedOllama') : t('link.addedCLI')) : t('link.addedLink')});
       // 註冊成功後刷新三路分流資料
       refreshExternalLinks();
       if (isAdapterCandidate) {
@@ -9061,6 +9155,9 @@ function App() {
               greeting={state.greeting}
               haoras={state.haoras}
               subagentTabs={subagentTabs}
+              pinnedPopouts={pinnedPopouts}
+              onHaoraPinOut={pinOutConversation}
+              onHaoraUnpin={unpinConversation}
               personaJob={mainPersona.identity || personaJob}
               personaName={mainPersona.name || personaName}
               dagRun={dagRun}
@@ -10657,6 +10754,7 @@ function looksLikeReferenceLocalPath(path) {
 function isInvalidReferencePlaceholder(file) {
   const path = String(file?.path || '').trim();
   const name = String(file?.name || '').trim();
+  if (/\.gguf$/i.test(path) || /\.gguf$/i.test(name)) return true;
   return (
     file?.status === 'error'
     && !path
@@ -11114,7 +11212,12 @@ function Sidebar({
         const rawKind = String(a.kind || '').toLowerCase();
         const inferredKind = rawKind || (String(id || '').startsWith('llm-api-') ? 'api' : ((a.name || id || '').toLowerCase() === 'main' ? 'main' : 'cli'));
         const rawName = a.name || a.id;
-        const localProviderName = String(rawName || id || '').toLowerCase().includes('lm studio') ? 'LM Studio' : 'Ollama';
+        const localIdentity = String(`${rawName || ''} ${id || ''} ${a.endpoint || ''}`).toLowerCase();
+        const localProviderName = localIdentity.includes('llamacpp') || localIdentity.includes('llama.cpp')
+          ? 'llama.cpp'
+          : localIdentity.includes('lm studio')
+            ? 'LM Studio'
+            : 'Ollama';
         return {
           key: id,
           name: rawName,
@@ -11961,6 +12064,7 @@ function TopConsole({
   panelTheme = 'onanegiku', taskLoopRounds = {}, taskLoopReply = {}, onTaskLoopReplyChange = () => {},
   subExportCapabilities,
   activeHaoraId, onHaoraSelect, onRenameHaora, onHaorasReordered, onSubagentsChanged,
+  pinnedPopouts = [], onHaoraPinOut, onHaoraUnpin,
 }) {
   const {t} = useI18n();
   const safeReviewState = normalizeReviewState(reviewState);
@@ -12720,6 +12824,30 @@ function TopConsole({
               ? !haoraItems.some((item) => !item.isMain && (item.id === activeHaoraId || item.name === activeHaoraId))
               : (haora.id === activeHaoraId || haora.name === activeHaoraId);
             const isEditingHaora = editingHaoraKey === haora.key;
+            // 釘選中的分頁：記憶由獨立視窗獨佔，主視窗鎖定；點擊＝收回。
+            const isPinnedOut = !haora.isMain && (pinnedPopouts || []).some((item) => (
+              item?.agent_id === haora.id || item?.agent_id === haora.name
+            ));
+            if (isPinnedOut) {
+              return (
+                <button
+                  className="haora-card haora-card-pinned"
+                  type="button"
+                  key={haora.key}
+                  data-haora-key={haora.key}
+                  draggable={false}
+                  title={t('subagent.pinnedTitle')}
+                  onClick={() => onHaoraUnpin?.(haora)}
+                >
+                  <span className="haora-pin haora-pin-active" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="12" height="12">
+                      <path fill="currentColor" d="M14.6 2.6a1 1 0 0 1 1.4 0l5.4 5.4a1 1 0 0 1 0 1.4l-1.2 1.2a1 1 0 0 1-1 .25l-.9-.27-3.8 3.8.3 2.9a1 1 0 0 1-.29.82l-.9.9a1 1 0 0 1-1.41 0l-3.3-3.3-5 5a1 1 0 0 1-1.41-1.41l5-5-3.3-3.3a1 1 0 0 1 0-1.41l.9-.9a1 1 0 0 1 .83-.29l2.9.3 3.8-3.8-.28-.9a1 1 0 0 1 .25-1z"/>
+                    </svg>
+                  </span>
+                  <span>{haora.name}</span>
+                </button>
+              );
+            }
             if (isEditingHaora) {
               return (
                 <div
@@ -12782,6 +12910,27 @@ function TopConsole({
                 <span>{haora.name}</span>
                 {/* 亮點只跟著目前 active 的 haㄌer/sub。 */}
                 {isActiveHaora && <i aria-hidden="true"/>}
+                {/* 圖釘：把這個對話釘成獨立 OS 視窗（吃當前主人格與模型，記憶獨立）。 */}
+                {!haora.isMain && (
+                  <span
+                    className="haora-pin"
+                    role="button"
+                    tabIndex={-1}
+                    title={t('subagent.pinOut')}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      event.preventDefault();
+                      onHaoraPinOut?.(haora);
+                    }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onPointerUp={(event) => event.stopPropagation()}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                  >
+                    <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
+                      <path fill="currentColor" d="M14.6 2.6a1 1 0 0 1 1.4 0l5.4 5.4a1 1 0 0 1 0 1.4l-1.2 1.2a1 1 0 0 1-1 .25l-.9-.27-3.8 3.8.3 2.9a1 1 0 0 1-.29.82l-.9.9a1 1 0 0 1-1.41 0l-3.3-3.3-5 5a1 1 0 0 1-1.41-1.41l5-5-3.3-3.3a1 1 0 0 1 0-1.41l.9-.9a1 1 0 0 1 .83-.29l2.9.3 3.8-3.8-.28-.9a1 1 0 0 1 .25-1z"/>
+                    </svg>
+                  </span>
+                )}
               </button>
             );
           })}

@@ -1304,6 +1304,8 @@
     "unnamedSubagent": "未命名 subagent",
     "switchToMain": "切換到主haㄌer",
     "haoraTitle": "單擊切換；雙擊修改名稱；拖到 Finder 匯出",
+    "pinOut": "釘選成獨立視窗（吃當前主人格與模型，記憶獨立）",
+    "pinnedTitle": "已釘選為獨立視窗，記憶獨立運作中；點擊收回主視窗",
     "dragTitle": "Subagent 拖曳操作",
     "dragNativeFailed": "Windows 原生拖曳沒有完成。請先試著拖到桌面或已開啟的檔案總管資料夾。"
   },

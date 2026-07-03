@@ -37,6 +37,20 @@ func cspMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
+	// 釘選對話框（popout）子行程模式：只開小視窗殼，不跑主控台/排程/sidecar。
+	// 注意：必須在 NewApp / SingleInstanceLock 之前分流，否則會被單一實例鎖擋下。
+	if popArgs := parsePopoutArgs(os.Args); popArgs != nil {
+		popoutAssets, subErr := fs.Sub(assets, "frontend/dist")
+		if subErr != nil {
+			println("Error:", subErr.Error())
+			return
+		}
+		if runErr := runPopoutWindow(popoutAssets, popArgs); runErr != nil {
+			println("Error:", runErr.Error())
+		}
+		return
+	}
+
 	// Create an instance of the app structure
 	app := NewApp()
 	// Phase G：LaunchAgent 以 --scheduled-wake 喚醒 → 隱藏視窗最小背景模式啟動。
@@ -81,6 +95,10 @@ func main() {
 		// §30: 關閉視窗時攔截，讓前端顯示「存成 sub」對話框
 		OnBeforeClose: func(ctx context.Context) (prevent bool) {
 			return app.beforeClose(ctx)
+		},
+		// 釘選視窗是子行程：主程式退出時一併收掉，避免孤兒視窗。
+		OnShutdown: func(ctx context.Context) {
+			popouts.shutdown()
 		},
 		Bind: []interface{}{
 			app,

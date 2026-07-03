@@ -25,7 +25,7 @@ var adapterModelPresets = map[string][]string{
 		"gemini-3.1-flash-lite",
 		"gemini-3.1-pro-preview",
 	},
-	"claude-cli": {"sonnet", "opus", "haiku"},
+	"claude-cli": {"sonnet", "opus", "haiku", "fable"},
 	"codex-cli":  {"gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2"},
 }
 
@@ -104,6 +104,23 @@ func (a *App) describeAdapterModelCatalog(adapterID string) adapterModelCatalog 
 			Source:     "preset-fallback",
 			CLIVersion: version,
 			Note:       cliSourceNote(cliPath, "Gemini CLI bundle could not be inspected, so this is the app fallback list."),
+		}
+	case id == "claude-cli":
+		version, cliPath := a.adapterCLIExecutableVersion(id)
+		if options := a.scanClaudeCLIModelOptions(id); len(options) > 0 {
+			options = appendUniqueStrings(options, adapterModelPresets[id]...)
+			return adapterModelCatalog{
+				Options:    options,
+				Source:     "bundle-scan",
+				CLIVersion: version,
+				Note:       cliSourceNote(cliPath, "Read from the installed Claude CLI bundle."),
+			}
+		}
+		return adapterModelCatalog{
+			Options:    copyStringSlice(adapterModelPresets[id]),
+			Source:     "preset-fallback",
+			CLIVersion: version,
+			Note:       cliSourceNote(cliPath, "Claude CLI bundle could not be inspected, so this is the app fallback list."),
 		}
 	case id == "codex-cli":
 		version, cliPath := a.adapterCLIExecutableVersion(id)
@@ -208,6 +225,65 @@ func scanGeminiCLIModelOptionsFromExecutable(cliPath string) []string {
 	return out
 }
 
+func (a *App) scanClaudeCLIModelOptions(adapterID string) []string {
+	if a == nil || a.adapterRegistry == nil {
+		return nil
+	}
+	cliPath, err := a.adapterRegistry.ResolveExecutable(adapterID)
+	if err != nil || strings.TrimSpace(cliPath) == "" {
+		return nil
+	}
+	return scanClaudeCLIModelOptionsFromExecutable(cliPath)
+}
+
+func scanClaudeCLIModelOptionsFromExecutable(cliPath string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, root := range claudeCLIBundleRoots(cliPath) {
+		for _, name := range []string{"sdk-tools.d.ts", "sdk.d.ts", "index.d.ts", "cli.js", "index.js"} {
+			path := filepath.Join(root, name)
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			for _, model := range parseClaudeModelDefinitions(string(raw)) {
+				if seen[model] {
+					continue
+				}
+				seen[model] = true
+				out = append(out, model)
+			}
+		}
+	}
+	sortClaudeModels(out)
+	return out
+}
+
+func claudeCLIBundleRoots(cliPath string) []string {
+	cliPath = strings.TrimSpace(cliPath)
+	if cliPath == "" {
+		return nil
+	}
+	base := filepath.Dir(cliPath)
+	dirs := []string{
+		filepath.Join(base, "node_modules", "@anthropic-ai", "claude-code"),
+		filepath.Join(base, "..", "node_modules", "@anthropic-ai", "claude-code"),
+		filepath.Join(base, "..", "..", "node_modules", "@anthropic-ai", "claude-code"),
+		filepath.Join(base, "..", "lib", "node_modules", "@anthropic-ai", "claude-code"),
+	}
+	out := make([]string, 0, len(dirs))
+	seen := map[string]bool{}
+	for _, dir := range dirs {
+		clean := filepath.Clean(dir)
+		if clean == "." || seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		out = append(out, clean)
+	}
+	return out
+}
+
 func geminiCLIBundleRoots(cliPath string) []string {
 	cliPath = strings.TrimSpace(cliPath)
 	if cliPath == "" {
@@ -232,6 +308,8 @@ func geminiCLIBundleRoots(cliPath string) []string {
 }
 
 var geminiModelDefinitionRE = regexp.MustCompile(`"((?:auto-)?gemini-[0-9][A-Za-z0-9._-]*)"\s*:\s*\{(?s:[^{}]|\{[^{}]*\})*?isVisible:\s*true`)
+var claudeModelUnionRE = regexp.MustCompile(`model\??:\s*((?:"[A-Za-z0-9._-]+"\s*\|\s*)+"[A-Za-z0-9._-]+")`)
+var quotedClaudeModelRE = regexp.MustCompile(`"([A-Za-z0-9._-]+)"`)
 var cliVersionRE = regexp.MustCompile(`\b(?:v)?(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9._-]+)?)\b`)
 
 func parseGeminiModelDefinitions(raw string) []string {
@@ -262,9 +340,52 @@ func normalizeGeminiModelID(model string) string {
 	return model
 }
 
+func parseClaudeModelDefinitions(raw string) []string {
+	matches := claudeModelUnionRE.FindAllStringSubmatch(raw, -1)
+	out := []string{}
+	seen := map[string]bool{}
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		for _, quoted := range quotedClaudeModelRE.FindAllStringSubmatch(match[1], -1) {
+			if len(quoted) < 2 {
+				continue
+			}
+			model := normalizeClaudeModelID(quoted[1])
+			if model == "" || seen[model] {
+				continue
+			}
+			seen[model] = true
+			out = append(out, model)
+		}
+	}
+	sortClaudeModels(out)
+	return out
+}
+
+func normalizeClaudeModelID(model string) string {
+	model = strings.ToLower(strings.TrimSpace(model))
+	switch model {
+	case "sonnet", "opus", "haiku", "fable":
+		return model
+	default:
+		if strings.HasPrefix(model, "claude-") {
+			return strings.TrimPrefix(model, "claude-")
+		}
+	}
+	return ""
+}
+
 func sortGeminiModels(models []string) {
 	sort.SliceStable(models, func(i, j int) bool {
 		return geminiModelRank(models[i]) < geminiModelRank(models[j])
+	})
+}
+
+func sortClaudeModels(models []string) {
+	sort.SliceStable(models, func(i, j int) bool {
+		return claudeModelRank(models[i]) < claudeModelRank(models[j])
 	})
 }
 
@@ -280,6 +401,21 @@ func geminiModelRank(model string) string {
 		tier = "9"
 	}
 	return tier + "|" + m
+}
+
+func claudeModelRank(model string) string {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "sonnet":
+		return "0"
+	case "opus":
+		return "1"
+	case "haiku":
+		return "2"
+	case "fable":
+		return "3"
+	default:
+		return "9|" + strings.ToLower(strings.TrimSpace(model))
+	}
 }
 
 func copyStringSlice(values []string) []string {

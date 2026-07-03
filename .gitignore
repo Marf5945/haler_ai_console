@@ -4,6 +4,7 @@
 
 # === Go 建置產物 ===
 .gocache/
+.gomodcache/
 /ui_console
 *.exe
 *.exe~
@@ -38,6 +39,7 @@ frontend/public/fonts/*.woff2
 *.bak2
 *.backup
 *.orig
+CLEANUP_REPORT.md
 
 # === IDE / 編輯器 ===
 .idea/

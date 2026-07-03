@@ -2346,7 +2346,7 @@ function App() {
     return nextChoices;
   }
 
-  async function refreshAdapterModelOptionsForAdapters(adapters = []) {
+  async function refreshAdapterModelOptionsForAdapters(adapters = [], choices = adapterModelChoicesRef.current) {
     const out = {};
     for (const adapter of adapters) {
       const id = adapter?.id || adapter?.name;
@@ -2355,7 +2355,7 @@ function App() {
       if (Array.isArray(opts) && opts.length > 0) out[id] = opts;
     }
     setAdapterModelOptions(out);
-    await reconcileAdapterModelChoicesAgainstOptions(adapterModelChoicesRef.current, out);
+    await reconcileAdapterModelChoicesAgainstOptions(choices, out);
     return out;
   }
 
@@ -2376,16 +2376,9 @@ function App() {
     (async () => {
       try {
         const choices = await callWails(GetAdapterModelChoices).catch(() => ({}));
-        const out = {};
-        for (const a of adapterList) {
-          const id = a.id || a.name;
-          if (!id) continue;
-          const opts = await callWails(() => ListAdapterModelOptions(id)).catch(() => null);
-          if (Array.isArray(opts) && opts.length > 0) out[id] = opts;
-        }
         if (cancelled) return;
-        setAdapterModelOptions(out);
-        await reconcileAdapterModelChoicesAgainstOptions(choices || {}, out);
+        setAdapterModelChoices(choices || {});
+        await refreshAdapterModelOptionsForAdapters(adapterList, choices || {});
       } catch (_) { /* silent — badge 只是輔助，失敗不要中斷 UI */ }
     })();
     return () => { cancelled = true; };

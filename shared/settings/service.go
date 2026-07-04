@@ -407,7 +407,7 @@ func normalizeBuiltInPersonaDefaults(personas []Persona) []Persona {
 		switch personas[index].ID {
 		case "persona-b":
 			// Migrate only untouched default slots; user-authored persona text wins.
-			if personas[index].Name == "" || personas[index].Name == "人格 B" {
+			if personas[index].Name == "" || personas[index].Name == "人格 B" || personas[index].Name == "厭世叔" {
 				personas[index].Name = "厭世大叔"
 			}
 			if personas[index].Identity == "" {

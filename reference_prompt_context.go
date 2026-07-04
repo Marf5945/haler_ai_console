@@ -301,6 +301,12 @@ func formatDocSearchContext(keywords []string, results []builtin.DocumentSearchR
 		source := "匯入文件"
 		if r.Source == "reference" {
 			source = "引用文件"
+			// 資料區程式碼卡片：用 tag＋摘要代替內文片段，省得系統翻整支程式。
+			if meta, ok := codeArtifactMetaByFileName(r.DisplayName); ok {
+				sb.WriteString(fmt.Sprintf("- 檔名=%s；來源=資料區程式碼；語言=%s；tag=%s；摘要=%s；相關度=%.2f\n",
+					name, meta.LanguageLabel, sanitizeDocSearchText(strings.Join(meta.Tags, "、")), sanitizeDocSearchText(meta.Summary), r.Score))
+				continue
+			}
 		}
 		sb.WriteString(fmt.Sprintf("- 檔名=%s；來源=%s；相關度=%.2f；內容=%s\n", name, source, r.Score, snip))
 	}

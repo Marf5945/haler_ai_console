@@ -9,6 +9,9 @@ const MEMORY_TAG_RE = /\[?([SD]-\d+)(?::[^\]]*)?\]?/g;
 const MEMORY_TAG_ONLY_RE = /^\[?([SD]-\d+)(?::[^\]]*)?\]?$/;
 const GO_PROGRAM_TOKEN_RE = /\[\[go-program:([^\]]+)\]\]/g;
 const GO_PROGRAM_TOKEN_ONLY_RE = /^\[\[go-program:([^\]]+)\]\]$/;
+// 資料區程式碼「展開」按鈕 token（後端 captureCodeArtifactFromDirectAnswer 產生）。
+const CODE_ARTIFACT_TOKEN_RE = /\[\[code-artifact:([^\]]+)\]\]/g;
+const CODE_ARTIFACT_TOKEN_ONLY_RE = /^\[\[code-artifact:([^\]]+)\]\]$/;
 const COLLAPSE_LINE_LIMIT = 3;
 const COLLAPSE_CHAR_LIMIT = 520;
 
@@ -78,17 +81,32 @@ function renderRichText(text, {kind, onInjectText, tChat}) {
   if (
     !new RegExp(MESSAGE_URL_RE.source).test(text) &&
     !new RegExp(MEMORY_TAG_RE.source).test(text) &&
-    !new RegExp(GO_PROGRAM_TOKEN_RE.source).test(text)
+    !new RegExp(GO_PROGRAM_TOKEN_RE.source).test(text) &&
+    !new RegExp(CODE_ARTIFACT_TOKEN_RE.source).test(text)
   ) return <>{text}</>;
-  const tokenRe = new RegExp(`${GO_PROGRAM_TOKEN_RE.source}|${MESSAGE_URL_RE.source}|${MEMORY_TAG_RE.source}`, 'g');
+  const tokenRe = new RegExp(`${CODE_ARTIFACT_TOKEN_RE.source}|${GO_PROGRAM_TOKEN_RE.source}|${MESSAGE_URL_RE.source}|${MEMORY_TAG_RE.source}`, 'g');
   const nodes = [];
   let lastIndex = 0;
   for (const match of text.matchAll(tokenRe)) {
     if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
     const raw = match[0];
+    const codeArtifactFile = raw.match(CODE_ARTIFACT_TOKEN_ONLY_RE)?.[1];
     const runID = raw.match(GO_PROGRAM_TOKEN_ONLY_RE)?.[1];
     const tag = raw.match(MEMORY_TAG_ONLY_RE)?.[1];
-    if (runID) {
+    if (codeArtifactFile) {
+      nodes.push(
+        <span className="code-artifact-token" key={`code-artifact-${match.index}`}>
+          <button
+            type="button"
+            className="code-artifact-expand-token-btn"
+            onClick={(event) => {
+              event.stopPropagation();
+              window.dispatchEvent(new CustomEvent('code-artifact:expand', {detail: {fileName: codeArtifactFile}}));
+            }}
+          >展開</button>
+        </span>
+      );
+    } else if (runID) {
       nodes.push(
         <span className="go-program-token" key={`go-program-${match.index}-${runID}`}>
           <button

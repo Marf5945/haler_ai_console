@@ -224,7 +224,7 @@ func buildToolRoutingDecisionPrompt(systemPrompt string, userText string, lookup
 		"網路路由：凡需網路搜尋才能判斷的變動資料，如網路、即時、今天、今日、最新、現在等關鍵字→網路。",
 		"提問時機：查詢結果明顯取決於缺失的關鍵資訊（如地點/日期/個人身分/星座）時，先輸出 提問ㄌ<具體問題>ㄌ待命，不要硬搜；但只問會改變結果的關鍵資訊，能直接答就別問。",
 		"操作：明確重現/回放/照做/執行已保存操作且 saved_operations 明確→操作；只有 recent_operations 不算明確。",
-		"判斷=製作獨立程式(產出 .go 等程式檔)→程式; 使用既有/已安裝 skill，或要既有 skill 處理資料/表格/CSV/XLSX/JSON並輸出→流程（流程的 target 必須是 available_skills 區塊裡的 SkillID，不可自創名稱）; 找操作候選→查詢; 找本機資料/文件/skill/記憶/對話/trace/專案→搜尋; 無法判斷本機或網路且缺必要資訊→提問; 明顯聊天→閒聊",
+		"判斷=使用者明確要建立/保存/新增本 app 可執行的小程式或 skill（產出 .go 等程式檔）→程式；若只是要求在回覆中貼出 HTML/CSS/JS/Python/程式碼/單一檔範例，不要走程式，交一般模型回答。使用既有/已安裝 skill，或要既有 skill 處理資料/表格/CSV/XLSX/JSON並輸出→流程（流程的 target 必須是 available_skills 區塊裡的 SkillID，不可自創名稱）; 找操作候選→查詢; 找本機資料/文件/skill/記憶/對話/trace/專案→搜尋; 無法判斷本機或網路且缺必要資訊→提問; 明顯聊天→閒聊",
 	}, " ")
 	routingRules += fmt.Sprintf(" 搜尋意圖必須三選一：網路%s<query>%s%s、搜尋%s<query>%s文件、提問%s%s%s%s；不確定就提問，不要自然語言回答。",
 		actionchain.Separator, actionchain.Separator, actionchain.StandbyNext,

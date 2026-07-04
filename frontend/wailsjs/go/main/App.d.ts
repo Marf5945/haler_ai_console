@@ -109,6 +109,8 @@ export function ClearWebSearchConfig():Promise<any>;
 
 export function CommitPreview():Promise<any>;
 
+export function CompileCodeArtifact(arg1:string):Promise<main.CodeCompileResult>;
+
 export function CompleteOnboardingStep(arg1:string):Promise<onboarding.State>;
 
 export function ComputeDryRunConfidence(arg1:number,arg2:number,arg3:number):Promise<number>;
@@ -134,6 +136,8 @@ export function ConfirmSkillArchive(arg1:string):Promise<any>;
 export function ConfirmSkillExecution(arg1:string,arg2:string,arg3:string):Promise<main.SkillExecutionDecision>;
 
 export function ConfirmTelegramChatID(arg1:string,arg2:string):Promise<void>;
+
+export function CopyCodeArtifactToClipboard(arg1:string):Promise<void>;
 
 export function CreateDAGRun(arg1:string,arg2:string):Promise<dag.DAGRun>;
 
@@ -217,6 +221,8 @@ export function ExitFloatingAvatarNative():Promise<void>;
 
 export function ExitFloatingAvatarOverlay():Promise<void>;
 
+export function ExportCodeArtifactToFolder(arg1:string):Promise<string>;
+
 export function ExportDocumentToPath(arg1:string):Promise<string>;
 
 export function ExportGroup(arg1:string,arg2:string):Promise<string>;
@@ -265,6 +271,8 @@ export function GetBrowserPreference():Promise<any>;
 
 export function GetCanonicalLabelSchema():Promise<Array<visual_learning.CanonicalLabel>>;
 
+export function GetCodeArtifactDetail(arg1:string):Promise<main.CodeArtifactDetail>;
+
 export function GetConfigPublic():Promise<health.ConfigPublic>;
 
 export function GetConsoleState():Promise<main.ConsoleState>;
@@ -310,8 +318,6 @@ export function GetMediaWA3Info(arg1:string):Promise<any>;
 export function GetMemoryHealth():Promise<health.MemoryHealth>;
 
 export function GetMemoryPipelineState():Promise<memory.PipelineState>;
-
-export function GetMonitorLinks():Promise<debugtrace.LinkSnapshot>;
 
 export function GetNativeOCRStatus():Promise<visual_learning.OCRStatus>;
 
@@ -435,6 +441,8 @@ export function ListAvailableAdapters():Promise<any>;
 
 export function ListAvatarPresets():Promise<Array<persona_avatar.StylePreset>>;
 
+export function ListCodeArtifacts():Promise<Array<main.CodeArtifactMeta>>;
+
 export function ListDAGRuns():Promise<Array<dag.DAGRun>>;
 
 export function ListDAGRunsFromIndex(arg1:number,arg2:string):Promise<Array<dag.DAGRunSummary>>;
@@ -508,6 +516,8 @@ export function MarkSkillFirstUseExplained():Promise<any>;
 export function MarkToolAvailable(arg1:string):Promise<void>;
 
 export function MarkToolUnavailable(arg1:string,arg2:string):Promise<void>;
+
+export function NativeDragExportCodeArtifactBundle(arg1:string):Promise<main.NativeReferenceFileDragResult>;
 
 export function NativeDragExportGoProgramAuthoring(arg1:string):Promise<main.NativeGoProgramDragExportResult>;
 
@@ -808,6 +818,8 @@ export function SubmitTaskLoopInput(arg1:string,arg2:string,arg3:string):Promise
 export function SuggestGGUFFiles(arg1:string):Promise<Array<main.GGUFSuggestion>>;
 
 export function SwitchRemoteBridgeMode(arg1:string,arg2:string):Promise<any>;
+
+export function TestLLMAPIConnection(arg1:string,arg2:string,arg3:string,arg4:string):Promise<any>;
 
 export function TestRemoteBridgeConnection(arg1:string):Promise<any>;
 

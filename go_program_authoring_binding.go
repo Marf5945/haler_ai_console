@@ -54,6 +54,32 @@ func (a *App) maybeHandleGoProgramAuthoring(decision toolRoutingDecision, sessio
 	if strings.TrimSpace(decision.Action) != "程式" {
 		return false, skill_step.CLIResponse{}
 	}
+	if isDirectCodeAnswerRequest(userText) {
+		debugtrace.Record("go.goProgram.authoring.skip_direct_code_answer", traceID, map[string]interface{}{
+			"target": decision.Target,
+		})
+		return false, skill_step.CLIResponse{}
+	}
+	// 意圖不清（看不出要「純程式碼」還是「新 skill」）→ 對話框上方掛泡泡讓使用者選，
+	// 避免誤走 skill 產生路徑。點泡泡後帶原文重送，各自命中對應路由。
+	if codeIntentAmbiguous(userText) {
+		question := "想要哪一種？純程式碼會收進資料區（引用文件）；新的 skill 會走安裝流程。"
+		if ok, _ := a.storeClarification(sessionID, decision.Action, decision.Target, userText, question); ok {
+			setCustomFloatingCandidates(question, []FloatingCandidate{
+				{ID: "code-intent-pure", Label: "我想要純程式碼", Draft: "我想要純程式碼：" + strings.TrimSpace(userText)},
+				{ID: "code-intent-skill", Label: "我想要新的 skill", Draft: "我想要新的skill：" + strings.TrimSpace(userText)},
+			}, traceID)
+			debugtrace.Record("go.goProgram.authoring.intent_bubble", traceID, map[string]interface{}{
+				"target": decision.Target,
+			})
+			return true, skill_step.CLIResponse{
+				Text:   question,
+				Action: decision.Action,
+				Target: decision.Target,
+				Next:   actionchain.QuestionNext,
+			}
+		}
+	}
 	if question, need := goProgramAuthoringClarification(userText); need {
 		if ok, reason := a.storeClarification(sessionID, decision.Action, decision.Target, userText, question); !ok {
 			debugtrace.Record("go.goProgram.authoring.clarification_exhausted", traceID, map[string]interface{}{

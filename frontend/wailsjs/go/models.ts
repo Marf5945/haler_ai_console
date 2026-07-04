@@ -16,6 +16,7 @@ export namespace browser_pref {
 	}
 
 }
+
 export namespace controlseal {
 
 	export class Settings {
@@ -711,6 +712,130 @@ export namespace main {
 	        this.memoryTag = source["memoryTag"];
 	        this.seed = source["seed"];
 	        this.model = source["model"];
+	    }
+	}
+	export class CodeArtifactMark {
+	    slot: number;
+	    startOffset: number;
+	    endOffset: number;
+	    quote: string;
+
+	    static createFrom(source: any = {}) {
+	        return new CodeArtifactMark(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.slot = source["slot"];
+	        this.startOffset = source["startOffset"];
+	        this.endOffset = source["endOffset"];
+	        this.quote = source["quote"];
+	    }
+	}
+	export class CodeArtifactMeta {
+	    file_name: string;
+	    display_name: string;
+	    kind: string;
+	    language: string;
+	    language_label: string;
+	    tags: string[];
+	    summary: string;
+	    created_at: string;
+	    marks?: CodeArtifactMark[];
+	    compile_status?: string;
+	    compile_detail?: string;
+	    content_sha?: string;
+	    binary_path?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new CodeArtifactMeta(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.file_name = source["file_name"];
+	        this.display_name = source["display_name"];
+	        this.kind = source["kind"];
+	        this.language = source["language"];
+	        this.language_label = source["language_label"];
+	        this.tags = source["tags"];
+	        this.summary = source["summary"];
+	        this.created_at = source["created_at"];
+	        this.marks = this.convertValues(source["marks"], CodeArtifactMark);
+	        this.compile_status = source["compile_status"];
+	        this.compile_detail = source["compile_detail"];
+	        this.content_sha = source["content_sha"];
+	        this.binary_path = source["binary_path"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class CodeArtifactDetail {
+	    meta: CodeArtifactMeta;
+	    content: string;
+	    path: string;
+
+	    static createFrom(source: any = {}) {
+	        return new CodeArtifactDetail(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.meta = this.convertValues(source["meta"], CodeArtifactMeta);
+	        this.content = source["content"];
+	        this.path = source["path"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+
+	export class CodeCompileResult {
+	    status: string;
+	    message: string;
+	    output?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new CodeCompileResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.status = source["status"];
+	        this.message = source["message"];
+	        this.output = source["output"];
 	    }
 	}
 	export class ConsoleState {
@@ -1542,7 +1667,9 @@ export namespace main {
 	    name: string;
 	    adapter_id: string;
 	    is_api: boolean;
+	    persona_id: string;
 	    persona_name: string;
+	    model: string;
 	    locale: string;
 
 	    static createFrom(source: any = {}) {
@@ -1555,7 +1682,9 @@ export namespace main {
 	        this.name = source["name"];
 	        this.adapter_id = source["adapter_id"];
 	        this.is_api = source["is_api"];
+	        this.persona_id = source["persona_id"];
 	        this.persona_name = source["persona_name"];
+	        this.model = source["model"];
 	        this.locale = source["locale"];
 	    }
 	}

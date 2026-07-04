@@ -102,6 +102,10 @@ func (a *App) resolveSkillExecution(actionTarget, sessionID string) (*SkillExecu
 // userText → action target → resolve/decision → inject → SendCLI/API。
 // no_skill 會走一般訊息流程；need_confirm/candidate/review 交回前端處理。
 func (a *App) ExecuteSkillMessage(adapterID, sessionID, userText, traceID string) (*SkillExecutionDecision, error) {
+	return a.executeSkillMessageWithOverrides(adapterID, sessionID, userText, traceID, "", "")
+}
+
+func (a *App) executeSkillMessageWithOverrides(adapterID, sessionID, userText, traceID, personaID, modelOverride string) (*SkillExecutionDecision, error) {
 	if isSearchSummaryPrompt(userText) {
 		resp, err := a.executeSearchSummaryPrompt(adapterID, sessionID, userText, traceID)
 		if err != nil {
@@ -116,7 +120,7 @@ func (a *App) ExecuteSkillMessage(adapterID, sessionID, userText, traceID string
 	}
 	actionTarget, ok := a.inferSkillActionTarget(userText)
 	if !ok {
-		resp, err := a.sendSkillMessage(adapterID, sessionID, userText, traceID)
+		resp, err := a.sendSkillMessageWithOverrides(adapterID, sessionID, userText, traceID, personaID, modelOverride)
 		if err != nil {
 			return nil, err
 		}
@@ -150,7 +154,7 @@ func (a *App) ExecuteSkillMessage(adapterID, sessionID, userText, traceID string
 	}
 	switch skill_eval.ExecDecision(out.Decision) {
 	case skill_eval.ExecAuto:
-		resp, err := a.sendSkillMessage(adapterID, sessionID, userText, traceID)
+		resp, err := a.sendSkillMessageWithOverrides(adapterID, sessionID, userText, traceID, personaID, modelOverride)
 		if err != nil {
 			if geneSkillID != "" {
 				a.emitHookGenePaused(geneSkillID, invocationID)
@@ -167,7 +171,7 @@ func (a *App) ExecuteSkillMessage(adapterID, sessionID, userText, traceID string
 			a.emitHookGeneDataLeft(geneSkillID, invocationID, true)
 		}
 	case skill_eval.ExecNoSkill:
-		resp, err := a.sendSkillMessage(adapterID, sessionID, userText, traceID)
+		resp, err := a.sendSkillMessageWithOverrides(adapterID, sessionID, userText, traceID, personaID, modelOverride)
 		if err != nil {
 			return nil, err
 		}
@@ -398,6 +402,10 @@ func (a *App) resolveSkillForActionTarget(actionTarget, sessionID string) (*skil
 }
 
 func (a *App) sendSkillMessage(adapterID, sessionID, userText, traceID string) (*skill_step.CLIResponse, error) {
+	return a.sendSkillMessageWithOverrides(adapterID, sessionID, userText, traceID, "", "")
+}
+
+func (a *App) sendSkillMessageWithOverrides(adapterID, sessionID, userText, traceID, personaID, modelOverride string) (*skill_step.CLIResponse, error) {
 	if strings.TrimSpace(adapterID) == "" {
 		adapterID = a.defaultSkillExecutionAdapterID()
 	}
@@ -424,9 +432,9 @@ func (a *App) sendSkillMessage(adapterID, sessionID, userText, traceID string) (
 		"is_local":   isLocal,
 	})
 	if isAPI {
-		return a.SendAPIMessage(adapterID, sessionID, userText, traceID)
+		return a.sendAPIMessageWithOverrides(adapterID, sessionID, userText, traceID, personaID, modelOverride)
 	}
-	return a.SendCLIMessage(adapterID, sessionID, userText, traceID)
+	return a.sendCLIMessageWithOverrides(adapterID, sessionID, userText, traceID, modelOverride, personaID)
 }
 
 func (a *App) defaultSkillExecutionAdapterID() string {
@@ -648,6 +656,12 @@ func (a *App) maybeHandlePendingSkillConfirm(userText, sessionID, traceID string
 // decision.Target 不是既有 skill 時回 false，讓後續路由（程式/搜尋等）接手。
 func (a *App) maybeHandleSkillFlow(decision toolRoutingDecision, sessionID, traceID, userText string) (bool, skill_step.CLIResponse) {
 	if strings.TrimSpace(decision.Action) != "流程" {
+		return false, skill_step.CLIResponse{}
+	}
+	if isDirectCodeAnswerRequest(userText) {
+		debugtrace.Record("go.skillFlow.skip_direct_code_answer", traceID, map[string]interface{}{
+			"target": decision.Target,
+		})
 		return false, skill_step.CLIResponse{}
 	}
 	if strings.TrimSpace(decision.Target) == "builtin.scheduler" {

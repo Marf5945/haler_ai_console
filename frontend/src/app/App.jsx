@@ -2,6 +2,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 import '../tailwind.css';
 import MessageRow from '../components/chat/MessageRow';
+import CodeArtifactModal from '../components/CodeArtifactModal';
 import useHighlight from '../components/highlight/useHighlight';
 import '../components/highlight/highlight.css';
 import useSystemMarks from '../components/highlight/useSystemMarks';
@@ -130,6 +131,7 @@ import {
   RegisterCustomCLI,
   RegisterLLMAPIAdapter,
   ConfirmRegisterLLMAPIAdapter,
+  TestLLMAPIConnection,
   RenameAdapter,
   UnregisterAdapter,
   EnableDetectedCLI,
@@ -239,6 +241,11 @@ import {
   FinalizeNativeReferenceFileExport,
   ImportReferenceFile,
   ListReferenceFiles,
+  ListCodeArtifacts,
+  GetCodeArtifactDetail,
+  ExportCodeArtifactToFolder,
+  CopyCodeArtifactToClipboard,
+  NativeDragExportCodeArtifactBundle,
   ImportVideoFile,
   ListVideoFiles,
   ListReferenceImages,
@@ -1392,6 +1399,15 @@ function replaceComposerPendingMessage(messages, traceId, replacement) {
   return next;
 }
 
+function updateComposerPendingMessage(messages, traceId, replacement) {
+  const needle = `${composerPendingMarker}${traceId}`;
+  const index = messages.findIndex((message) => String(message || '').includes(needle));
+  if (index < 0) return messages;
+  const next = [...messages];
+  next[index] = replacement;
+  return next;
+}
+
 const visualLearningInteractiveSelector = [
   'button',
   'a[href]',
@@ -1613,6 +1629,10 @@ function App() {
   const [copyConfirmTool, setCopyConfirmTool] = useState(null);
   const [skillExportDialog, setSkillExportDialog] = useState(null);
   const [referenceFiles, setReferenceFiles] = useState([]);
+  // 資料區程式碼卡片 meta（file_name → meta）＋展開彈窗
+  const [codeArtifacts, setCodeArtifacts] = useState({});
+  const [codeArtifactModal, setCodeArtifactModal] = useState(null);
+  const codeArtifactActivityLogsRef = useRef({});
   const [referenceExportDialog, setReferenceExportDialog] = useState(null);
   const [searchSummaryExportDialog, setSearchSummaryExportDialog] = useState(null);
   const [sharedSourceActionDialog, setSharedSourceActionDialog] = useState(null);
@@ -1796,13 +1816,16 @@ function App() {
     if (!haora || haora.isMain) return; // 只有 MAIN 能調動所有記憶，主haㄌer不可釘出
     const agentId = haora.id || haora.name;
     const adapter = resolveAdapterFromRefs();
+    const adapterID = adapter?.id || activeAdapterIdRef.current || '';
     const payload = {
       agent_id: agentId,
       name: haora.name || agentId,
       // 釘選當下「吃當前主人格和模型」：綁定現用 adapter/model 與主人格名。
-      adapter_id: adapter?.id || activeAdapterIdRef.current || '',
+      adapter_id: adapterID,
       is_api: isAPIAdapter(adapter),
+      persona_id: mainPersona?.id || '',
       persona_name: mainPersona?.name || '',
+      model: adapterModelChoicesRef.current?.[adapterID] || adapter?.model || '',
       locale: useI18n.getState().language || 'zh-TW',
     };
     // 若釘出的分頁正在使用，先切回主haㄌer，避免主/子視窗同時寫同一份記憶。
@@ -2833,6 +2856,21 @@ function App() {
       }
     });
 
+    const offCodeArtifactActivity = EventsOn('code_artifact:activity', (payload) => {
+      const entry = normalizeCodeArtifactActivity(payload);
+      if (!entry?.traceId) return;
+      const currentEntries = codeArtifactActivityLogsRef.current[entry.traceId] || [];
+      const nextEntries = [...currentEntries, entry].slice(-40);
+      codeArtifactActivityLogsRef.current[entry.traceId] = nextEntries;
+      const conversationId = activeConversationIdRef.current || 'main';
+      const progressText = formatCodeArtifactActivityProgress(nextEntries);
+      setConversationMessages(conversationId, (prev) => updateComposerPendingMessage(
+        prev,
+        entry.traceId,
+        makeComposerPendingMessage(entry.traceId, progressText),
+      ));
+    });
+
     const offSchedulerRequested = EventsOn('scheduler:action_requested', (payload) => {
       const rawText = String(payload?.raw || '').trim();
       const fallbackText = [payload?.action, payload?.target, payload?.next].filter(Boolean).join(' ');
@@ -3068,6 +3106,7 @@ function App() {
       offRBPrimaryChanged();
       offRBDiscordStatus();
       offRBInbound();
+      offCodeArtifactActivity();
       offSchedulerRequested();
       offSchedulerReminder();
       offWA3Verified();
@@ -3259,10 +3298,57 @@ function App() {
     }
   }
 
+  function normalizeCodeArtifactActivity(payload) {
+    const traceId = String(payload?.trace_id || payload?.traceId || '').trim();
+    if (!traceId) return null;
+    const status = String(payload?.status || 'running').trim() || 'running';
+    const title = String(payload?.title || payload?.phase || '資料區程式處理中').trim();
+    const detail = String(payload?.detail || '').trim();
+    const fileName = String(payload?.file_name || payload?.fileName || '').trim();
+    const attempt = Number(payload?.attempt || 0);
+    const at = String(payload?.at || new Date().toISOString()).trim();
+    return {traceId, status, title, detail, fileName, attempt, at};
+  }
+
+  function formatCodeArtifactActivityLine(entry, index) {
+    const prefix = entry.status === 'success' ? '完成' : entry.status === 'failed' ? '失敗' : entry.status === 'warning' ? '注意' : '進行中';
+    const attemptText = entry.attempt > 0 ? `（第 ${entry.attempt} 輪）` : '';
+    const detailText = entry.detail ? `：${entry.detail}` : '';
+    return `${index + 1}. ${prefix} ${entry.title}${attemptText}${detailText}`;
+  }
+
+  function formatCodeArtifactActivityProgress(entries) {
+    const visibleEntries = entries.slice(-5);
+    const latest = visibleEntries[visibleEntries.length - 1];
+    const title = latest?.title || '資料區程式處理中';
+    return [
+      `資料區程式正在處理：${title}`,
+      ...visibleEntries.map((entry, index) => formatCodeArtifactActivityLine(entry, Math.max(0, entries.length - visibleEntries.length) + index)),
+    ].join('\n');
+  }
+
+  function formatCodeArtifactActivityTranscript(entries) {
+    if (!entries.length) return '';
+    return [
+      '',
+      '',
+      '處理過程（完成後可展開檢查）：',
+      ...entries.map((entry, index) => formatCodeArtifactActivityLine(entry, index)),
+    ].join('\n');
+  }
+
+  function appendCodeArtifactActivityTranscript(traceId, text) {
+    const entries = codeArtifactActivityLogsRef.current?.[traceId] || [];
+    if (!entries.length) return text;
+    delete codeArtifactActivityLogsRef.current[traceId];
+    return `${text}${formatCodeArtifactActivityTranscript(entries)}`;
+  }
+
   async function finishComposerExecution({resp, payload, apiAdapter, traceId, conversationId, clearPendingTimers}) {
     // 使用者已按停止鈕中斷此 trace：丟棄遲到的結果，不覆蓋「已中斷」訊息。
     if (cancelledChatTracesRef.current.has(traceId)) {
       cancelledChatTracesRef.current.delete(traceId);
+      delete codeArtifactActivityLogsRef.current[traceId];
       clearPendingTimers?.();
       return;
     }
@@ -3330,12 +3416,15 @@ function App() {
       }
     }
     if (cliResp?.auth_required) {
-      setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, `Ai:${cliResp.text || t('system.authRequired')}`));
+      const messageText = appendCodeArtifactActivityTranscript(traceId, cliResp.text || t('system.authRequired'));
+      setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, `Ai:${messageText}`));
     } else if (cliResp?.text) {
-      setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, `Ai:${cliResp.text}`));
-      persistConversationEntry(conversationId, 'assistant', cliResp.text, traceId).catch(() => {});
+      const messageText = appendCodeArtifactActivityTranscript(traceId, cliResp.text);
+      setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, `Ai:${messageText}`));
+      persistConversationEntry(conversationId, 'assistant', messageText, traceId).catch(() => {});
     } else if (cliResp?.error) {
-      setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, `[${t('system.sysLabel')}] ${cliResp.error}`));
+      const messageText = appendCodeArtifactActivityTranscript(traceId, cliResp.error);
+      setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, `[${t('system.sysLabel')}] ${messageText}`));
     }
   }
 
@@ -3421,6 +3510,7 @@ function App() {
     // 使用者已按停止鈕中斷此 trace：吞掉被 kill 的子程序錯誤，不覆蓋「已中斷」訊息。
     if (cancelledChatTracesRef.current.has(traceId)) {
       cancelledChatTracesRef.current.delete(traceId);
+      delete codeArtifactActivityLogsRef.current[traceId];
       clearPendingTimers?.();
       return;
     }
@@ -3437,7 +3527,8 @@ function App() {
       error: errorMsg,
       finished_at: new Date().toISOString(),
     }));
-    setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, t('system.sendFail', { error: errorMsg })));
+    const messageText = appendCodeArtifactActivityTranscript(traceId, t('system.sendFail', { error: errorMsg }));
+    setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, messageText));
   }
 
   async function confirmSkillExecutionChoice(choice) {
@@ -6901,11 +6992,17 @@ function App() {
 
   async function refreshReferenceFiles() {
     // §3.1.11 影片存 data/videos，與引用庫合併成同一份清單顯示
-    const [files, videos, images] = await Promise.all([
+    const [files, videos, images, codeMetaList] = await Promise.all([
       callWails(ListReferenceFiles).catch(() => []),
       callWails(ListVideoFiles).catch(() => []),
       callWails(ListReferenceImages).catch(() => []),
+      callWails(ListCodeArtifacts).catch(() => []),
     ]);
+    const codeMap = {};
+    (Array.isArray(codeMetaList) ? codeMetaList : []).forEach((meta) => {
+      if (meta?.file_name) codeMap[meta.file_name] = meta;
+    });
+    setCodeArtifacts(codeMap);
     const loadedFiles = [
       ...(Array.isArray(files) ? files : []),
       ...(Array.isArray(videos) ? videos : []),
@@ -6913,6 +7010,54 @@ function App() {
     ];
     setReferenceFiles((current) => mergeReferenceLibraryFiles(current, loadedFiles));
     return loadedFiles;
+  }
+
+  useEffect(() => {
+    const onExpand = (event) => {
+      const fileName = event?.detail?.fileName;
+      if (fileName) openCodeArtifactModal(fileName);
+    };
+    window.addEventListener('code-artifact:expand', onExpand);
+    return () => window.removeEventListener('code-artifact:expand', onExpand);
+  }, []);
+
+  // 自動回修覆寫檔案後（code_artifact:updated）：刷新卡片；彈窗開著同一支就重載內容。
+  useEffect(() => {
+    let off = null;
+    try {
+      off = EventsOn('code_artifact:updated', (meta) => {
+        refreshReferenceFiles().catch(() => {});
+        const fileName = meta?.file_name;
+        if (!fileName) return;
+        setCodeArtifactModal((current) => {
+          if (current?.meta?.file_name === fileName) {
+            callWails(() => GetCodeArtifactDetail(fileName))
+              .then((detail) => { if (detail) setCodeArtifactModal(detail); })
+              .catch(() => {});
+          }
+          return current;
+        });
+      });
+    } catch (_) { /* binding 未就緒（測試環境）忽略 */ }
+    return () => { try { off?.(); } catch (_) {} };
+  }, []);
+
+  async function openCodeArtifactModal(fileName) {
+    try {
+      const detail = await callWails(() => GetCodeArtifactDetail(fileName));
+      if (detail) setCodeArtifactModal(detail);
+    } catch (err) {
+      setToolResult({toolId: 'code-artifact', ok: false, message: String(err?.message || err)});
+    }
+  }
+
+  async function exportCodeArtifactToFolder(fileName) {
+    try {
+      const landed = await callWails(() => ExportCodeArtifactToFolder(fileName));
+      if (landed) setToolResult({toolId: 'code-artifact', ok: true, message: '已匯出程式碼：' + landed});
+    } catch (err) {
+      setToolResult({toolId: 'code-artifact', ok: false, message: '匯出失敗：' + String(err?.message || err)});
+    }
   }
 
   function formatReferenceNativeDropDetail(result) {
@@ -6995,9 +7140,18 @@ function App() {
       return null;
     }
     try {
-      const result = await callWails(() => NativeDragExportReferenceFile(file.path));
+      const codeMeta = codeArtifacts[file.name];
+      const isBundle = Boolean(codeMeta?.binary_path);
+      const result = isBundle
+        ? await callWails(() => NativeDragExportCodeArtifactBundle(file.name))
+        : await callWails(() => NativeDragExportReferenceFile(file.path));
       if (result?.status === 'success' && result?.landed_path) {
-        showNativeReferenceExportDialog(result, file);
+        if (isBundle) {
+          // 資料夾（原始碼＋執行檔）落地：不進單檔的移除/複製選單
+          setToolResult({toolId: 'code-artifact', ok: true, message: '已拖出資料夾（原始碼＋執行檔）：' + result.landed_path});
+        } else {
+          showNativeReferenceExportDialog(result, file);
+        }
       } else if (result?.status !== 'cancelled') {
         setToolResult({toolId: 'doc-entrance', ok: false, message: result?.message || '引用文件拖曳失敗'});
         await refreshReferenceFiles();
@@ -7352,6 +7506,7 @@ function App() {
       fireworks: 'accounts/fireworks/models/llama-v3p1-70b-instruct',
       cerebras: 'llama3.1-8b',
       huggingface: 'openai/gpt-oss-120b:cerebras',
+      'nvidia-nim': 'meta/llama-3.1-8b-instruct',
     };
     return defaults[providerID] || '';
   }
@@ -7445,19 +7600,41 @@ function App() {
     }
   }
 
-  function previewLLMAPIConnection() {
+  async function previewLLMAPIConnection() {
     if (!llmAPISetup) return;
     const missing = [];
     if (!llmAPISetup.apiKey?.trim()) missing.push('API Key');
     if (!llmAPISetup.baseURL?.trim()) missing.push('Base URL');
     if (!llmAPISetup.model?.trim()) missing.push('Model');
-    setToolResult({
-      toolId: 'reference-link',
-      ok: missing.length === 0,
-      message: missing.length
-        ? t('link.missingFields', { fields: missing.join('、') })
-        : t('link.fieldsComplete'),
-    });
+    if (missing.length) {
+      setToolResult({
+        toolId: 'reference-link',
+        ok: false,
+        message: t('link.missingFields', { fields: missing.join('、') }),
+      });
+      return;
+    }
+    // 真的打一發：確認連得上、金鑰對、模型存在。
+    setToolResult({ toolId: 'reference-link', ok: true, message: t('llmSetup.testing') });
+    try {
+      const result = await callWails(() => TestLLMAPIConnection(
+        llmAPISetup.providerId || 'generic-api',
+        llmAPISetup.baseURL || '',
+        llmAPISetup.model || '',
+        llmAPISetup.apiKey || '',
+      ));
+      setToolResult({
+        toolId: 'reference-link',
+        ok: !!result?.ok,
+        message: result?.message || (result?.ok ? t('llmSetup.testOk') : t('llmSetup.testFail')),
+      });
+    } catch (error) {
+      setToolResult({
+        toolId: 'reference-link',
+        ok: false,
+        message: t('llmSetup.testFail') + '：' + (error?.message || String(error)),
+      });
+    }
   }
 
   async function saveAdapterRename() {
@@ -9307,6 +9484,7 @@ function App() {
           onToolActivate={activateTool}
           isToolPopupOpen={toolPopupsOpen.right}
           referenceFiles={referenceFiles}
+          activeCodeFileName={codeArtifactModal?.meta?.file_name || ''}
           sharedLinks={extSharedLinks}
           isLearningEnabled={learningEnabled}
           isRecordingEnabled={recordingEnabled}
@@ -9706,6 +9884,13 @@ function App() {
             {label: '總是允許', onClick: () => confirmSkillExecutionChoice('always')},
             {label: t('common.cancel'), onClick: () => confirmSkillExecutionChoice('cancel')},
           ]}
+        />
+      )}
+      {codeArtifactModal && (
+        <CodeArtifactModal
+          detail={codeArtifactModal}
+          onClose={() => setCodeArtifactModal(null)}
+          onExport={exportCodeArtifactToFolder}
         />
       )}
       {referenceExportDialog && (
@@ -10837,10 +11022,27 @@ function getBundledAvatarPackUrl(pack, state = 'idle') {
   return '';
 }
 
+let monitorLinkCache = null;
+let monitorLinkPending = null;
+
 function postDebugTrace(node, traceId, data) {
-  void node;
-  void traceId;
-  void data;
+  resolveMonitorTraceURL()
+    .then((url) => {
+      if (!url) return null;
+      const endpoint = `${String(url || '').replace(/\/$/, '')}/trace`;
+      return fetch(endpoint, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({node, trace_id: traceId, data}),
+      });
+    })
+    .catch(() => {});
+}
+
+function resolveMonitorTraceURL() {
+  monitorLinkCache = {url: ''};
+  monitorLinkPending = null;
+  return Promise.resolve('');
 }
 
 function makeDebugTraceID(scope) {
@@ -10930,6 +11132,17 @@ function normalizeLockedPersonas(personas = [], removedDefaultPersonaIds = []) {
 }
 
 const defaultPersonaCopy = {
+  'persona-b': {
+    name: () => _t('persona.defaultNameB'),
+    identity: () => _t('persona.defaultIdentityB'),
+    personality: () => '',
+    legacyNames: ['人格 B', '厭世叔', '厭世大叔', 'Grumpy Uncle', 'Tío Gruñón', 'Tio Rabugento', '不機嫌おじさん', '심술쟁이 아저씨', 'ลุงขี้บ่น'],
+    legacyIdentities: [
+      '厭世社畜但帥帥的粗眉硬漢助手',
+      'A world-weary office drone — still handsome, thick-browed, and tough',
+    ],
+    legacyPersonalities: [''],
+  },
   'persona-d': {
     name: () => _t('persona.defaultNameD'),
     identity: () => _t('persona.defaultIdentityD'),
@@ -12837,7 +13050,7 @@ function TopConsole({
                       <path fill="currentColor" d="M14.6 2.6a1 1 0 0 1 1.4 0l5.4 5.4a1 1 0 0 1 0 1.4l-1.2 1.2a1 1 0 0 1-1 .25l-.9-.27-3.8 3.8.3 2.9a1 1 0 0 1-.29.82l-.9.9a1 1 0 0 1-1.41 0l-3.3-3.3-5 5a1 1 0 0 1-1.41-1.41l5-5-3.3-3.3a1 1 0 0 1 0-1.41l.9-.9a1 1 0 0 1 .83-.29l2.9.3 3.8-3.8-.28-.9a1 1 0 0 1 .25-1z"/>
                     </svg>
                   </span>
-                  <span>{haora.name}</span>
+                  <span className="haora-name">{haora.name}</span>
                 </button>
               );
             }
@@ -12900,7 +13113,7 @@ function TopConsole({
                 onLostPointerCapture={finishHaoraDrag}
                 onDoubleClick={(event) => startInlineHaoraRename(event, haora)}
               >
-                <span>{haora.name}</span>
+                <span className="haora-name">{haora.name}</span>
                 {/* 亮點只跟著目前 active 的 haㄌer/sub。 */}
                 {isActiveHaora && <i aria-hidden="true"/>}
                 {/* 圖釘：把這個對話釘成獨立 OS 視窗（吃當前主人格與模型，記憶獨立）。 */}
@@ -12909,6 +13122,7 @@ function TopConsole({
                     className="haora-pin"
                     role="button"
                     tabIndex={-1}
+                    aria-label={t('subagent.pinOut')}
                     title={t('subagent.pinOut')}
                     onClick={(event) => {
                       event.stopPropagation();
@@ -14642,6 +14856,7 @@ function RightRail({
   learningDigestReady,
   sourceTrustHint,
   referenceFiles,
+  activeCodeFileName = '',
   sharedLinks = [],
   onLearningToggle,
   onRecordingToggle,
@@ -14897,9 +15112,10 @@ function RightRail({
         {referenceFiles.map((file, index) => {
           const fileKey = referenceFileKey(file) || `${file.path}-${index}`;
           const isDragging = draggedReferenceKey === fileKey;
+          const isActiveCode = Boolean(activeCodeFileName) && file.name === activeCodeFileName;
           return (
             <div
-              className={`reference-file-name${isDragging ? ' reference-file-dragging' : ''}`}
+              className={`reference-file-name${isDragging ? ' reference-file-dragging' : ''}${isActiveCode ? ' reference-file-code-active' : ''}`}
               data-status={file.status || 'ready'}
               data-draggable="true"
               draggable

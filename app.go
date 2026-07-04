@@ -527,7 +527,7 @@ func appDataRoot() string {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.startHookGeneRecorder()
-	debugtrace.Record("go.startup", "", map[string]interface{}{})
+	debugtrace.Record("go.startup", "", nil)
 	// SEC-06: 清掉上次未正常停止的 ephemeral browser profile（冪等）。
 	_ = a.CleanupEphemeralProfiles()
 	// #7: Inject Wails context into event bus so it can emit to frontend.
@@ -628,12 +628,6 @@ func (a *App) startup(ctx context.Context) {
 			fmt.Fprintf(os.Stderr, "warning: scheduler start failed: %v\n", err)
 		}
 	}()
-}
-
-// GetMonitorLinks is kept for older generated frontends; the local HTTP trace
-// viewer is disabled for the public build surface.
-func (a *App) GetMonitorLinks() debugtrace.LinkSnapshot {
-	return debugtrace.LinkSnapshot{}
 }
 
 type ConsoleState struct {
@@ -1625,7 +1619,15 @@ func (a *App) ensureSidecarRunning() error {
 // 自動從 InjectionStore 取得當前 session 的 SkillInjection 並附加。
 // 若 CLIAdapter 尚未設定（cliAdapter == nil），回傳 stub 回應。
 func (a *App) SendCLIMessage(adapterID string, sessionID string, userText string, traceID string) (*skill_step.CLIResponse, error) {
-	resp, err := a.sendCLIMessage(adapterID, sessionID, userText, traceID, "")
+	return a.sendCLIMessageWithOverrides(adapterID, sessionID, userText, traceID, "", "")
+}
+
+func (a *App) sendCLIMessageWithOverrides(adapterID string, sessionID string, userText string, traceID string, modelOverride string, personaID string) (*skill_step.CLIResponse, error) {
+	resp, err := a.sendCLIMessage(adapterID, sessionID, userText, traceID, modelOverride, personaID)
+	return a.finishCLIMessage(adapterID, resp, err, traceID)
+}
+
+func (a *App) finishCLIMessage(adapterID string, resp *skill_step.CLIResponse, err error, traceID string) (*skill_step.CLIResponse, error) {
 	// 配額／限流即時偵測：模型額度用盡時，UI 不該看到原始錯誤，改提示切換模型。
 	if notice, hit := quotaSwitchModelNotice(adapterID, resp, err); hit {
 		debugtrace.Record("go.SendCLIMessage.quota_exhausted", traceID, map[string]interface{}{
@@ -1674,7 +1676,7 @@ func cliResponseErrorString(resp *skill_step.CLIResponse) string {
 	return resp.Error
 }
 
-func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string, traceID string, modelOverride string) (*skill_step.CLIResponse, error) {
+func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string, traceID string, modelOverride string, personaID string) (*skill_step.CLIResponse, error) {
 	// === 診斷 log：記錄每次 CLI 呼叫的關鍵參數，方便追蹤問題 ===
 	log.Printf("SendCLIMessage: adapter=%q session=%q text_len=%d", adapterID, sessionID, len(userText))
 	// DEBUG_TRACE_REMOVE: Captures the Wails binding input with full dev-mode text.
@@ -1695,7 +1697,12 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 	}
 	actionTags := a.syncActionTagsToCLIAdapter(traceID)
 	isTaskProgressInternal := isTaskProgressTraceID(traceID)
+	directCodeAnswer := !isTaskProgressInternal && isDirectCodeAnswerRequest(userText)
 	if !isTaskProgressInternal {
+		// 資料區程式碼控制訊息（編譯泡泡）：進路由前先攔。
+		if resp, handled := a.maybeHandleCodeArtifactControl(adapterID, userText, sessionID, traceID); handled {
+			return resp, nil
+		}
 		// 懸浮頭像閒聊：直達模型，跳過 keyword/judge 路由（快、且不會被判成搜尋）。
 		if isQuickChatPrompt(userText) {
 			return a.executeQuickChatPrompt(adapterID, sessionID, userText, traceID)
@@ -1703,45 +1710,47 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 		if isSearchSummaryPrompt(userText) {
 			return a.executeSearchSummaryPrompt(adapterID, sessionID, userText, traceID)
 		}
-		if resp, handled := a.maybeHandleResourceGate(userText, sessionID, traceID); handled {
-			debugtrace.Record("go.SendCLIMessage.resource_gate.direct", traceID, map[string]interface{}{
-				"text":   resp.Text,
-				"action": resp.Action,
-				"target": resp.Target,
-				"next":   resp.Next,
-			})
-			return resp, nil
-		}
-		if resp, handled := a.consumeDagIntentAffirmation(sessionID, userText, traceID); handled {
-			debugtrace.Record("go.SendCLIMessage.dag_intent.affirmed", traceID, map[string]interface{}{
-				"target": resp.Target,
-			})
-			return resp, nil
-		}
-		if rejudgeText, handled := a.consumePendingToolAnswer(sessionID, userText, traceID); handled {
-			// Step 2：補答後不沿用舊 decision，改用乾淨 re-judge 文字重跑完整 routing（第二次 judge）。
-			userText = rejudgeText
-			debugtrace.Record("go.SendCLIMessage.rejudge_after_clarification", traceID, map[string]interface{}{
-				"rejudge_text": rejudgeText,
-			})
-		}
-		if resp, handled := a.maybeHandleWebSearch(userText, sessionID, traceID); handled {
-			debugtrace.Record("go.SendCLIMessage.web_search.direct", traceID, map[string]interface{}{
-				"text":          resp.Text,
-				"error":         resp.Error,
-				"auth_required": false,
-				"auth_url":      "",
-			})
-			return resp, nil
-		}
-		if resp, handled := a.maybeHandleLocalSearch(userText, sessionID, traceID); handled {
-			debugtrace.Record("go.SendAPIMessage.local_search.direct", traceID, map[string]interface{}{
-				"text":          resp.Text,
-				"error":         resp.Error,
-				"auth_required": false,
-				"auth_url":      "",
-			})
-			return resp, nil
+		if !directCodeAnswer {
+			if resp, handled := a.maybeHandleResourceGate(userText, sessionID, traceID); handled {
+				debugtrace.Record("go.SendCLIMessage.resource_gate.direct", traceID, map[string]interface{}{
+					"text":   resp.Text,
+					"action": resp.Action,
+					"target": resp.Target,
+					"next":   resp.Next,
+				})
+				return resp, nil
+			}
+			if resp, handled := a.consumeDagIntentAffirmation(sessionID, userText, traceID); handled {
+				debugtrace.Record("go.SendCLIMessage.dag_intent.affirmed", traceID, map[string]interface{}{
+					"target": resp.Target,
+				})
+				return resp, nil
+			}
+			if rejudgeText, handled := a.consumePendingToolAnswer(sessionID, userText, traceID); handled {
+				// Step 2：補答後不沿用舊 decision，改用乾淨 re-judge 文字重跑完整 routing（第二次 judge）。
+				userText = rejudgeText
+				debugtrace.Record("go.SendCLIMessage.rejudge_after_clarification", traceID, map[string]interface{}{
+					"rejudge_text": rejudgeText,
+				})
+			}
+			if resp, handled := a.maybeHandleWebSearch(userText, sessionID, traceID); handled {
+				debugtrace.Record("go.SendCLIMessage.web_search.direct", traceID, map[string]interface{}{
+					"text":          resp.Text,
+					"error":         resp.Error,
+					"auth_required": false,
+					"auth_url":      "",
+				})
+				return resp, nil
+			}
+			if resp, handled := a.maybeHandleLocalSearch(userText, sessionID, traceID); handled {
+				debugtrace.Record("go.SendAPIMessage.local_search.direct", traceID, map[string]interface{}{
+					"text":          resp.Text,
+					"error":         resp.Error,
+					"auth_required": false,
+					"auth_url":      "",
+				})
+				return resp, nil
+			}
 		}
 	}
 
@@ -1846,7 +1855,47 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 		return nil, err
 	}
 
-	personaPrompt := a.buildMainComposerPrompt(a.getActivePersona())
+	if directCodeAnswer {
+		if question, need := a.maybeConfirmCodeArtifactLanguage(userText, sessionID, traceID); need {
+			return &skill_step.CLIResponse{Text: question}, nil
+		}
+		prompt := buildDirectCodeAnswerPrompt(userText)
+		debugtrace.Record("go.SendCLIMessage.direct_code_answer", traceID, map[string]interface{}{
+			"adapter_id": adapterID,
+			"prompt_len": len([]rune(prompt)),
+			"prompt":     prompt,
+			"note":       "direct code answer bypasses action-chain routing",
+		})
+		resp, err := a.cliAdapter.SendMessage(skill_step.CLIMessageOptions{
+			AdapterID:      adapterID,
+			CLIPath:        cliPath,
+			SessionID:      sessionID,
+			UserText:       prompt,
+			Model:          strings.TrimSpace(modelOverride),
+			SystemPrompt:   "",
+			ContinuityKey:  conversationContinuityKey("composer-direct-code", sessionID),
+			TraceID:        traceID,
+			SkipContinuity: true,
+		})
+		if err != nil {
+			a.setAdapterRuntimeStatus(adapterID, adapter_registry.StatusDegraded)
+			return nil, err
+		}
+		debugtrace.Record("go.SendCLIMessage.direct_code_answer.response", traceID, map[string]interface{}{
+			"adapter_id":    adapterID,
+			"response_len":  len([]rune(resp.Text)),
+			"response_text": resp.Text,
+			"error":         resp.Error,
+		})
+		if strings.TrimSpace(resp.Error) == "" {
+			if replaced, saved := a.captureCodeArtifactFromDirectAnswer(userText, resp.Text, sessionID, traceID); saved {
+				resp.Text = replaced
+			}
+		}
+		return &resp, nil
+	}
+
+	personaPrompt := a.buildMainComposerPrompt(a.personaByID(personaID))
 	if bg := a.formatToolBackgroundContext(sessionID); bg != "" {
 		personaPrompt += "\n\n" + bg + "\n回答或組織工具結果時，只能使用已補充背景與工具結果，不可新增未確認的地點、時間、數字或來源。"
 	}
@@ -2246,7 +2295,11 @@ func shouldRepairAdapterModelChoice(adapterID, currentModel, publicErr string) b
 
 // SendAPIMessage sends a composer message through an LLM API adapter.
 func (a *App) SendAPIMessage(adapterID string, sessionID string, userText string, traceID string) (*skill_step.CLIResponse, error) {
-	resp, err := a.sendAPIMessageImpl(adapterID, sessionID, userText, traceID)
+	return a.sendAPIMessageWithOverrides(adapterID, sessionID, userText, traceID, "", "")
+}
+
+func (a *App) sendAPIMessageWithOverrides(adapterID string, sessionID string, userText string, traceID string, personaID string, modelOverride string) (*skill_step.CLIResponse, error) {
+	resp, err := a.sendAPIMessageImpl(adapterID, sessionID, userText, traceID, personaID, modelOverride)
 	// 配額／限流即時偵測（同 CLI 路徑）。task-progress 內部呼叫交給 planner 自己
 	// 的 transient 處理，避免把錯誤改寫成文字打亂其重試／澄清流程。
 	if !isTaskProgressTraceID(traceID) {
@@ -2262,7 +2315,7 @@ func (a *App) SendAPIMessage(adapterID string, sessionID string, userText string
 	return resp, err
 }
 
-func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText string, traceID string) (*skill_step.CLIResponse, error) {
+func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText string, traceID string, personaID string, modelOverride string) (*skill_step.CLIResponse, error) {
 	debugtrace.Record("go.SendAPIMessage.enter", traceID, map[string]interface{}{
 		"adapter_id": adapterID,
 		"session_id": sessionID,
@@ -2270,7 +2323,12 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 	})
 	actionTags := a.syncActionTagsToCLIAdapter(traceID)
 	isTaskProgressInternal := isTaskProgressTraceID(traceID)
+	directCodeAnswer := !isTaskProgressInternal && isDirectCodeAnswerRequest(userText)
 	if !isTaskProgressInternal {
+		// 資料區程式碼控制訊息（編譯泡泡）：進路由前先攔。
+		if resp, handled := a.maybeHandleCodeArtifactControl(adapterID, userText, sessionID, traceID); handled {
+			return resp, nil
+		}
 		// 懸浮頭像閒聊：直達模型，跳過 keyword/judge 路由（快、且不會被判成搜尋）。
 		if isQuickChatPrompt(userText) {
 			return a.executeQuickChatPrompt(adapterID, sessionID, userText, traceID)
@@ -2278,45 +2336,47 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 		if isSearchSummaryPrompt(userText) {
 			return a.executeSearchSummaryPrompt(adapterID, sessionID, userText, traceID)
 		}
-		if resp, handled := a.maybeHandleResourceGate(userText, sessionID, traceID); handled {
-			debugtrace.Record("go.SendAPIMessage.resource_gate.direct", traceID, map[string]interface{}{
-				"text":   resp.Text,
-				"action": resp.Action,
-				"target": resp.Target,
-				"next":   resp.Next,
-			})
-			return resp, nil
-		}
-		if resp, handled := a.consumeDagIntentAffirmation(sessionID, userText, traceID); handled {
-			debugtrace.Record("go.SendAPIMessage.dag_intent.affirmed", traceID, map[string]interface{}{
-				"target": resp.Target,
-			})
-			return resp, nil
-		}
-		if rejudgeText, handled := a.consumePendingToolAnswer(sessionID, userText, traceID); handled {
-			// Step 2：補答後重跑完整 routing（第二次 judge），不沿用舊 decision。
-			userText = rejudgeText
-			debugtrace.Record("go.SendAPIMessage.rejudge_after_clarification", traceID, map[string]interface{}{
-				"rejudge_text": rejudgeText,
-			})
-		}
-		if resp, handled := a.maybeHandleWebSearch(userText, sessionID, traceID); handled {
-			debugtrace.Record("go.SendAPIMessage.web_search.direct", traceID, map[string]interface{}{
-				"text":          resp.Text,
-				"error":         resp.Error,
-				"auth_required": false,
-				"auth_url":      "",
-			})
-			return resp, nil
-		}
-		// 與 CLI 路徑對齊：API 路徑同樣在進判斷前處理本機搜尋／列出 skill，
-		// 否則「列出你有的 skill」會被判為閒聊、交給模型自答。
-		if resp, handled := a.maybeHandleLocalSearch(userText, sessionID, traceID); handled {
-			debugtrace.Record("go.SendAPIMessage.local_search.direct", traceID, map[string]interface{}{
-				"text":  resp.Text,
-				"error": resp.Error,
-			})
-			return resp, nil
+		if !directCodeAnswer {
+			if resp, handled := a.maybeHandleResourceGate(userText, sessionID, traceID); handled {
+				debugtrace.Record("go.SendAPIMessage.resource_gate.direct", traceID, map[string]interface{}{
+					"text":   resp.Text,
+					"action": resp.Action,
+					"target": resp.Target,
+					"next":   resp.Next,
+				})
+				return resp, nil
+			}
+			if resp, handled := a.consumeDagIntentAffirmation(sessionID, userText, traceID); handled {
+				debugtrace.Record("go.SendAPIMessage.dag_intent.affirmed", traceID, map[string]interface{}{
+					"target": resp.Target,
+				})
+				return resp, nil
+			}
+			if rejudgeText, handled := a.consumePendingToolAnswer(sessionID, userText, traceID); handled {
+				// Step 2：補答後重跑完整 routing（第二次 judge），不沿用舊 decision。
+				userText = rejudgeText
+				debugtrace.Record("go.SendAPIMessage.rejudge_after_clarification", traceID, map[string]interface{}{
+					"rejudge_text": rejudgeText,
+				})
+			}
+			if resp, handled := a.maybeHandleWebSearch(userText, sessionID, traceID); handled {
+				debugtrace.Record("go.SendAPIMessage.web_search.direct", traceID, map[string]interface{}{
+					"text":          resp.Text,
+					"error":         resp.Error,
+					"auth_required": false,
+					"auth_url":      "",
+				})
+				return resp, nil
+			}
+			// 與 CLI 路徑對齊：API 路徑同樣在進判斷前處理本機搜尋／列出 skill，
+			// 否則「列出你有的 skill」會被判為閒聊、交給模型自答。
+			if resp, handled := a.maybeHandleLocalSearch(userText, sessionID, traceID); handled {
+				debugtrace.Record("go.SendAPIMessage.local_search.direct", traceID, map[string]interface{}{
+					"text":  resp.Text,
+					"error": resp.Error,
+				})
+				return resp, nil
+			}
 		}
 	}
 	cfg, err := a.loadLLMAPIAdapterConfig(adapterID)
@@ -2350,6 +2410,9 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 	}
 
 	model := strings.TrimSpace(cfg.Model)
+	if override := strings.TrimSpace(modelOverride); override != "" {
+		model = override
+	}
 	if model == "" {
 		return nil, fmt.Errorf("API model is missing for adapter %s", adapterID)
 	}
@@ -2449,7 +2512,7 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 			if isLocalAdapter && res.StatusCode >= 500 {
 				return "", errors.New(localAdapterReconnectHint(localAdapterInfo, fmt.Sprintf("API HTTP %d: %s", res.StatusCode, msg)))
 			}
-			return "", fmt.Errorf("API HTTP %d: %s", res.StatusCode, msg)
+			return "", errors.New(llmAPIHTTPErrorHint(res.StatusCode, cfg, msg))
 		}
 		if parsed.Error != nil && strings.TrimSpace(parsed.Error.Message) != "" {
 			a.setAdapterRuntimeStatus(adapterID, adapter_registry.StatusDegraded)
@@ -2462,7 +2525,40 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 		return parsed.Choices[0].Message.Content, nil
 	}
 
-	personaPrompt := a.buildMainComposerPrompt(a.getActivePersona())
+	if directCodeAnswer {
+		if question, need := a.maybeConfirmCodeArtifactLanguage(userText, sessionID, traceID); need {
+			return &skill_step.CLIResponse{Text: question}, nil
+		}
+		prompt := buildDirectCodeAnswerPrompt(userText)
+		debugtrace.Record("go.SendAPIMessage.direct_code_answer", traceID, map[string]interface{}{
+			"adapter_id": adapterID,
+			"model":      model,
+			"prompt_len": len([]rune(prompt)),
+			"prompt":     prompt,
+			"note":       "direct code answer bypasses action-chain routing",
+		})
+		text, err := callAPI(prompt)
+		if err != nil {
+			debugtrace.Record("go.SendAPIMessage.direct_code_answer.response", traceID, map[string]interface{}{
+				"adapter_id": adapterID,
+				"model":      model,
+				"error":      err.Error(),
+			})
+			return &skill_step.CLIResponse{Error: err.Error()}, nil
+		}
+		debugtrace.Record("go.SendAPIMessage.direct_code_answer.response", traceID, map[string]interface{}{
+			"adapter_id":    adapterID,
+			"model":         model,
+			"response_len":  len([]rune(text)),
+			"response_text": text,
+		})
+		if replaced, saved := a.captureCodeArtifactFromDirectAnswer(userText, text, sessionID, traceID); saved {
+			text = replaced
+		}
+		return &skill_step.CLIResponse{Text: text}, nil
+	}
+
+	personaPrompt := a.buildMainComposerPrompt(a.personaByID(personaID))
 	if bg := a.formatToolBackgroundContext(sessionID); bg != "" {
 		personaPrompt += "\n\n" + bg + "\n回答或組織工具結果時，只能使用已補充背景與工具結果，不可新增未確認的地點、時間、數字或來源。"
 	}
@@ -2814,6 +2910,9 @@ func inferGoProgramAuthoringRequest(userText string) (string, bool) {
 	if text == "" {
 		return "", false
 	}
+	if isDirectCodeAnswerRequest(text) {
+		return "", false
+	}
 	lower := strings.ToLower(text)
 	if !containsAny(lower, []string{"skill", "小程式", "程式", "program"}) {
 		return "", false
@@ -2830,6 +2929,62 @@ func inferGoProgramAuthoringRequest(userText string) (string, bool) {
 		name = "資料處理程式"
 	}
 	return name, true
+}
+
+func isDirectCodeAnswerRequest(userText string) bool {
+	text := strings.TrimSpace(userText)
+	if text == "" {
+		return false
+	}
+	lower := strings.ToLower(text)
+	hasCodeArtifact := containsAny(lower, []string{
+		"html", "css", "javascript", "js", "python", "source code", "code snippet", "complete code", "single file", "program",
+		"calculator", "small app", "small tool", "interactive tool", "ui", "button",
+	}) || containsAny(text, []string{
+		"程式碼", "原始碼", "單一檔", "單一 HTML", "完整 HTML", "完整程式", "可直接執行", "純程式碼",
+		"小計算機", "計算機", "小工具", "互動工具", "按鈕", "介面", "畫面",
+	})
+	if !hasCodeArtifact {
+		return false
+	}
+	asksForCodeInReply := containsAny(lower, []string{
+		"give", "return", "print", "provide", "show", "write", "create", "build", "generate", "include complete code",
+	}) || containsAny(text, []string{
+		"請給", "給我", "貼出", "列出", "輸出", "回覆", "提供", "寫出", "純程式碼", "產生",
+	})
+	if !asksForCodeInReply {
+		return false
+	}
+	wantsInstalledTool := containsAny(lower, []string{"skill"}) || containsAny(text, []string{
+		"保存", "安裝", "加入工具", "建立工具", "做成工具", "做成 skill", "做成skill", "pending skill",
+	})
+	return !wantsInstalledTool
+}
+
+func buildDirectCodeAnswerPrompt(userText string) string {
+	text := strings.TrimSpace(userText)
+	lang, explicitLang := requestedCodeLanguage(text)
+	languageRule := fmt.Sprintf("本次目標語言：%s。fenced code block 的語言標籤必須寫 ```%s。", lang.Label, lang.ID)
+	if explicitLang {
+		languageRule += "使用者已明確指定語言，請依指定語言輸出，不要自行改成其他語言。"
+	} else {
+		languageRule += "使用者未指定語言，產品預設一律用 Go；即使需求提到 UI、畫面、單一檔案、外部套件或計算機，也請用 Go 標準函式庫做可直接執行的終端互動程式，不要改成 HTML/JavaScript。"
+	}
+	return strings.Join([]string{
+		"你正在一般聊天回覆使用者，不是在路由工具、搜尋、讀取本機路徑、建立 skill 或建立 app 內小程式。",
+		"使用者明確要求你直接提供程式碼或單一檔案範例；請直接回答內容。",
+		"不要輸出 action-chain、不要只輸出 skill 名稱、不要要求使用既有 skill。",
+		"若使用者要求完整 HTML/CSS/JS 或其他原始碼，請給可直接複製執行的完整程式碼，並保留使用者指定的自我檢查項目。",
+		"若使用者未指定程式語言，一律用 Go 撰寫；若使用者指定了語言（如 C++、Python、HTML），依指定語言輸出。",
+		"Go 程式必須可用 go build 編譯；標準函式庫識別字大小寫要完全正確，例如標準輸入是 os.Stdin。",
+		languageRule,
+		"程式碼放在單一 fenced code block（```語言 換行 程式碼```）內，第一行加註解說明這支程式的用途。",
+		"",
+		codeMarkProtocolPrompt(),
+		"",
+		"使用者需求：",
+		text,
+	}, "\n")
 }
 
 func extractGoProgramName(text string) string {
@@ -3153,6 +3308,14 @@ func fillLLMAPIConfigDefaults(adapterID string, cfg llmAPIAdapterConfig) llmAPIA
 		if cfg.Model == "" {
 			cfg.Model = "openai/gpt-oss-120b:cerebras"
 		}
+	case "nvidia-nim":
+		if cfg.Name == "" {
+			cfg.Name = "NVIDIA NIM"
+		}
+		cfg.BaseURL = normalizeNVIDIANIMBaseURL(cfg.BaseURL)
+		if cfg.Model == "" {
+			cfg.Model = "meta/llama-3.1-8b-instruct"
+		}
 	case "ollama":
 		if cfg.Name == "" {
 			cfg.Name = "Ollama"
@@ -3181,6 +3344,37 @@ func inferLLMProviderID(adapterID string) string {
 	return rest
 }
 
+func normalizeLLMAPIBaseURL(providerID, baseURL string) string {
+	switch strings.ToLower(strings.TrimSpace(providerID)) {
+	case "nvidia-nim":
+		return normalizeNVIDIANIMBaseURL(baseURL)
+	default:
+		return strings.TrimSpace(baseURL)
+	}
+}
+
+func normalizeNVIDIANIMBaseURL(baseURL string) string {
+	raw := strings.TrimSpace(baseURL)
+	if raw == "" {
+		return "https://integrate.api.nvidia.com/v1"
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Hostname() == "" {
+		return raw
+	}
+	host := strings.TrimPrefix(strings.ToLower(parsed.Hostname()), "www.")
+	if host == "integrate.api.nvidia.com" {
+		if strings.Trim(parsed.Path, "/") == "" {
+			parsed.Path = "/v1"
+		}
+		return strings.TrimRight(parsed.String(), "/")
+	}
+	if host == "nvidia.com" || strings.HasSuffix(host, ".nvidia.com") || host == "build.nvidia.com" {
+		return "https://integrate.api.nvidia.com/v1"
+	}
+	return raw
+}
+
 func isOpenAICompatibleProvider(providerID string) bool {
 	switch providerID {
 	case "deepseek", "openai", "xai", "openrouter", "mistral", "groq", "together", "perplexity", "fireworks", "huggingface", "cerebras", "nvidia-nim", "qwen", "kimi", "zhipu", "ollama", "lmstudio":
@@ -3203,6 +3397,111 @@ func parsedErrorMessage(resp openAIChatResponse) string {
 		return ""
 	}
 	return resp.Error.Message
+}
+
+// llmAPIHTTPErrorHint 把 HTTP 狀態碼翻成使用者看得懂的提示，
+// 把「金鑰問題」和「模型名稱問題」分開講，避免兩種毛病同一句話。
+func llmAPIHTTPErrorHint(status int, cfg llmAPIAdapterConfig, rawMsg string) string {
+	detail := strings.TrimSpace(rawMsg)
+	base := fmt.Sprintf("API HTTP %d", status)
+	if detail != "" {
+		base = fmt.Sprintf("%s：%s", base, detail)
+	}
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return fmt.Sprintf("%s\n→ 金鑰被拒。請確認 API Key 正確、未過期，且該金鑰有此服務的存取權限（NVIDIA 金鑰需為 nvapi- 開頭）。", base)
+	case http.StatusNotFound:
+		model := strings.TrimSpace(cfg.Model)
+		if model == "" {
+			model = "(空白)"
+		}
+		return fmt.Sprintf("%s\n→ 找不到模型「%s」。金鑰沒問題，是模型名稱錯了或帳號無此模型權限；請到 provider 文件複製正確的完整 model id（NVIDIA 需「廠牌/型號」格式，例如 meta/llama-3.1-8b-instruct）。", base, model)
+	case http.StatusTooManyRequests:
+		return fmt.Sprintf("%s\n→ 請求過於頻繁，已達速率上限（免費層常見每分鐘 40 次）。稍候再試或到後台申請提高額度。", base)
+	case http.StatusPaymentRequired:
+		return fmt.Sprintf("%s\n→ 額度或付款問題。請確認帳號免費額度未用盡或已開通付費。", base)
+	default:
+		return base
+	}
+}
+
+// TestLLMAPIConnection 用使用者當下填的 baseURL/model/apiKey 送出一個最小請求，
+// 真正打一發確認連得上、金鑰對、模型存在——而不是只檢查欄位有沒有填。
+// 回傳 {ok, message}，訊息沿用 llmAPIHTTPErrorHint 的分類提示。
+func (a *App) TestLLMAPIConnection(providerID, baseURL, model, apiKey string) (interface{}, error) {
+	apiKey = strings.TrimSpace(apiKey)
+	cfg := fillLLMAPIConfigDefaults(
+		fmt.Sprintf("llm-api-%s-0", strings.TrimSpace(providerID)),
+		llmAPIAdapterConfig{
+			ProviderID: strings.TrimSpace(providerID),
+			BaseURL:    baseURL,
+			Model:      model,
+		},
+	)
+	model = strings.TrimSpace(cfg.Model)
+	baseURL = strings.TrimSpace(cfg.BaseURL)
+
+	var missing []string
+	if apiKey == "" {
+		missing = append(missing, "API Key")
+	}
+	if baseURL == "" {
+		missing = append(missing, "Base URL")
+	}
+	if model == "" {
+		missing = append(missing, "Model")
+	}
+	if len(missing) > 0 {
+		return frontendDTO(map[string]interface{}{
+			"ok":      false,
+			"message": "還缺欄位：" + strings.Join(missing, "、"),
+		}), nil
+	}
+	if !isOpenAICompatibleProvider(cfg.ProviderID) {
+		return frontendDTO(map[string]interface{}{
+			"ok":      false,
+			"message": cfg.Name + " 目前尚未接上直接 API 協議；請先用 OpenAI 相容 provider 測試。",
+		}), nil
+	}
+
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	client := urlsafe.NewSafeClient(urlsafe.PolicyForLLMEndpoint(cfg.ProviderID, cfg.BaseURL), "llm_test", 20*time.Second)
+	body, err := buildOpenAIRequestBody(model, "ping", nil)
+	if err != nil {
+		return frontendDTO(map[string]interface{}{"ok": false, "message": "組裝測試請求失敗：" + err.Error()}), nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, openAIChatCompletionsURL(cfg.BaseURL), bytes.NewReader(body))
+	if err != nil {
+		return frontendDTO(map[string]interface{}{"ok": false, "message": err.Error()}), nil
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	res, err := client.Do(req)
+	if err != nil {
+		return frontendDTO(map[string]interface{}{"ok": false, "message": "連線失敗：" + err.Error()}), nil
+	}
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(res.Body, 512*1024))
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		var parsed openAIChatResponse
+		_ = json.Unmarshal(raw, &parsed)
+		msg := strings.TrimSpace(parsedErrorMessage(parsed))
+		if msg == "" {
+			msg = strings.TrimSpace(string(raw))
+		}
+		return frontendDTO(map[string]interface{}{
+			"ok":      false,
+			"message": llmAPIHTTPErrorHint(res.StatusCode, cfg, msg),
+		}), nil
+	}
+	return frontendDTO(map[string]interface{}{
+		"ok":      true,
+		"message": fmt.Sprintf("連線成功 ✓ 模型「%s」可正常回應。", model),
+	}), nil
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -3407,7 +3706,7 @@ func (a *App) SendInspectorAPIMessage(adapterID, sessionID, userText, traceID st
 		if isLocalAdapter && res.StatusCode >= 500 {
 			msg = localAdapterReconnectHint(localAdapterInfo, fmt.Sprintf("API HTTP %d: %s", res.StatusCode, msg))
 		} else {
-			msg = fmt.Sprintf("API HTTP %d: %s", res.StatusCode, msg)
+			msg = llmAPIHTTPErrorHint(res.StatusCode, cfg, msg)
 		}
 		return &skill_step.CLIResponse{Error: msg}, nil
 	}
@@ -3884,6 +4183,9 @@ func (a *App) ListReferenceFiles() ([]ReferenceFile, error) {
 		if strings.HasPrefix(name, ".") {
 			continue
 		}
+		if strings.HasSuffix(strings.ToLower(name), ".wa3.json") {
+			continue // 來源證明 sidecar，跟著本尊走就好，不單獨列卡片
+		}
 		files = append(files, ReferenceFile{
 			Name:   name,
 			Path:   filepath.Join(referenceDir, name),
@@ -3938,7 +4240,8 @@ func (a *App) ImportReferenceFile(sourcePath string) (ReferenceFile, error) {
 		})
 	}
 	a.maybeEmitConfigMissing(ref.Name)
-	localsearch.InvalidateAll() // 新匯入立即可搜，不必等 root index 快取（60s）過期
+	a.maybeReattachCodeArtifactMeta(ref.Name) // 拖出再拉回的程式檔 → 補回 tag／摘要／標示
+	localsearch.InvalidateAll()               // 新匯入立即可搜，不必等 root index 快取（60s）過期
 	return ref, nil
 }
 

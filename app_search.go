@@ -25,6 +25,12 @@ import (
 type searchRerouteJudge func(prompt string) (string, error)
 
 func (a *App) maybeHandleLocalSearch(userText, sessionID, traceID string) (*skill_step.CLIResponse, bool) {
+	if isDirectCodeAnswerRequest(userText) {
+		debugtrace.Record("go.localSearch.skip_direct_code_answer", traceID, map[string]interface{}{
+			"text_len": len([]rune(userText)),
+		})
+		return nil, false
+	}
 	if isLearningOperationCatalogText(userText) {
 		return nil, false
 	}

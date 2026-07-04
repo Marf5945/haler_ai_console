@@ -219,6 +219,7 @@ func (a *App) RegisterLLMAPIAdapter(providerID, providerName, baseURL, model, ap
 	if providerName == "" {
 		providerName = "LLM API"
 	}
+	baseURL = normalizeLLMAPIBaseURL(providerID, baseURL)
 	// SEC-03: 驗證 baseURL 防止 SSRF
 	needConfirm, host, urlErr := urlsafe.ValidateLLMBaseURL(providerID, baseURL)
 	if urlErr != nil {
@@ -250,6 +251,7 @@ func (a *App) ConfirmRegisterLLMAPIAdapter(providerID, providerName, baseURL, mo
 	if providerName == "" {
 		providerName = "LLM API"
 	}
+	baseURL = normalizeLLMAPIBaseURL(providerID, baseURL)
 	if err := urlsafe.ValidateConfirmedLLMBaseURL(providerID, baseURL); err != nil {
 		return nil, fmt.Errorf("baseURL 確認驗證失敗 (%s): %w", baseURL, err)
 	}
@@ -260,6 +262,12 @@ func (a *App) ConfirmRegisterLLMAPIAdapter(providerID, providerName, baseURL, mo
 // registerLLMAPIAdapterInternal 實際建立 adapter 的內部函式。
 func (a *App) registerLLMAPIAdapterInternal(providerID, providerName, baseURL, model, apiKey string) (interface{}, error) {
 	adapterID := fmt.Sprintf("llm-api-%s-%d", providerID, time.Now().UnixMilli())
+	defaulted := fillLLMAPIConfigDefaults(adapterID, llmAPIAdapterConfig{
+		ProviderID: providerID,
+		Name:       providerName,
+		BaseURL:    baseURL,
+		Model:      model,
+	})
 	secretRef := "llm_provider:" + adapterID + ":api_key"
 	if strings.TrimSpace(apiKey) != "" {
 		if err := a.secretStore.Store(secretRef, strings.TrimSpace(apiKey)); err != nil {
@@ -268,10 +276,10 @@ func (a *App) registerLLMAPIAdapterInternal(providerID, providerName, baseURL, m
 	}
 	configRef := "llm_provider:" + adapterID + ":config"
 	config := llmAPIAdapterConfig{
-		ProviderID: providerID,
-		Name:       providerName,
-		BaseURL:    strings.TrimSpace(baseURL),
-		Model:      strings.TrimSpace(model),
+		ProviderID: defaulted.ProviderID,
+		Name:       defaulted.Name,
+		BaseURL:    defaulted.BaseURL,
+		Model:      defaulted.Model,
 	}
 	if configRaw, err := json.Marshal(config); err == nil {
 		if err := a.secretStore.Store(configRef, string(configRaw)); err != nil {
@@ -279,10 +287,10 @@ func (a *App) registerLLMAPIAdapterInternal(providerID, providerName, baseURL, m
 		}
 	}
 	icon := "A"
-	if runes := []rune(providerName); len(runes) > 0 {
+	if runes := []rune(config.Name); len(runes) > 0 {
 		icon = strings.ToUpper(string(runes[0]))
 	}
-	if err := a.adapterRegistry.RegisterAPI(adapterID, providerName, icon); err != nil {
+	if err := a.adapterRegistry.RegisterAPI(adapterID, config.Name, icon); err != nil {
 		return nil, err
 	}
 	if a.eventBus != nil {
@@ -293,10 +301,10 @@ func (a *App) registerLLMAPIAdapterInternal(providerID, providerName, baseURL, m
 	}
 	return frontendDTO(map[string]string{
 		"adapter_id":  adapterID,
-		"name":        providerName,
+		"name":        config.Name,
 		"kind":        "api",
-		"base_url":    strings.TrimSpace(baseURL),
-		"model":       strings.TrimSpace(model),
+		"base_url":    config.BaseURL,
+		"model":       config.Model,
 		"api_key_ref": secretRef,
 		"config_ref":  configRef,
 	}), nil

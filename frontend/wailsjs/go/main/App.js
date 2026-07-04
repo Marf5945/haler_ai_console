@@ -170,6 +170,10 @@ export function CommitPreview() {
   return window['go']['main']['App']['CommitPreview']();
 }
 
+export function CompileCodeArtifact(arg1) {
+  return window['go']['main']['App']['CompileCodeArtifact'](arg1);
+}
+
 export function CompleteOnboardingStep(arg1) {
   return window['go']['main']['App']['CompleteOnboardingStep'](arg1);
 }
@@ -220,6 +224,10 @@ export function ConfirmSkillExecution(arg1, arg2, arg3) {
 
 export function ConfirmTelegramChatID(arg1, arg2) {
   return window['go']['main']['App']['ConfirmTelegramChatID'](arg1, arg2);
+}
+
+export function CopyCodeArtifactToClipboard(arg1) {
+  return window['go']['main']['App']['CopyCodeArtifactToClipboard'](arg1);
 }
 
 export function CreateDAGRun(arg1, arg2) {
@@ -386,6 +394,10 @@ export function ExitFloatingAvatarOverlay() {
   return window['go']['main']['App']['ExitFloatingAvatarOverlay']();
 }
 
+export function ExportCodeArtifactToFolder(arg1) {
+  return window['go']['main']['App']['ExportCodeArtifactToFolder'](arg1);
+}
+
 export function ExportDocumentToPath(arg1) {
   return window['go']['main']['App']['ExportDocumentToPath'](arg1);
 }
@@ -482,6 +494,10 @@ export function GetCanonicalLabelSchema() {
   return window['go']['main']['App']['GetCanonicalLabelSchema']();
 }
 
+export function GetCodeArtifactDetail(arg1) {
+  return window['go']['main']['App']['GetCodeArtifactDetail'](arg1);
+}
+
 export function GetConfigPublic() {
   return window['go']['main']['App']['GetConfigPublic']();
 }
@@ -572,10 +588,6 @@ export function GetMemoryHealth() {
 
 export function GetMemoryPipelineState() {
   return window['go']['main']['App']['GetMemoryPipelineState']();
-}
-
-export function GetMonitorLinks() {
-  return window['go']['main']['App']['GetMonitorLinks']();
 }
 
 export function GetNativeOCRStatus() {
@@ -822,6 +834,10 @@ export function ListAvatarPresets() {
   return window['go']['main']['App']['ListAvatarPresets']();
 }
 
+export function ListCodeArtifacts() {
+  return window['go']['main']['App']['ListCodeArtifacts']();
+}
+
 export function ListDAGRuns() {
   return window['go']['main']['App']['ListDAGRuns']();
 }
@@ -968,6 +984,10 @@ export function MarkToolAvailable(arg1) {
 
 export function MarkToolUnavailable(arg1, arg2) {
   return window['go']['main']['App']['MarkToolUnavailable'](arg1, arg2);
+}
+
+export function NativeDragExportCodeArtifactBundle(arg1) {
+  return window['go']['main']['App']['NativeDragExportCodeArtifactBundle'](arg1);
 }
 
 export function NativeDragExportGoProgramAuthoring(arg1) {
@@ -1568,6 +1588,10 @@ export function SuggestGGUFFiles(arg1) {
 
 export function SwitchRemoteBridgeMode(arg1, arg2) {
   return window['go']['main']['App']['SwitchRemoteBridgeMode'](arg1, arg2);
+}
+
+export function TestLLMAPIConnection(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['TestLLMAPIConnection'](arg1, arg2, arg3, arg4);
 }
 
 export function TestRemoteBridgeConnection(arg1) {

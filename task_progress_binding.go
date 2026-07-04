@@ -626,7 +626,7 @@ func (a *App) callPlannerAdapter(adapterID, modelID, sessionID, prompt, traceID 
 	if a.isAPIOrLocalAdapter(adapterID) {
 		return a.SendAPIMessage(adapterID, sessionID, prompt, traceID)
 	}
-	return a.sendCLIMessage(adapterID, sessionID, prompt, traceID, modelID)
+	return a.sendCLIMessage(adapterID, sessionID, prompt, traceID, modelID, "")
 }
 
 func isTaskProgressTraceID(traceID string) bool {

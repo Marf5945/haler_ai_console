@@ -428,6 +428,9 @@ func (a *App) maybeHandleLocalPathResource(text, sessionID, traceID string) (*sk
 	if _, ok := inferGoProgramAuthoringRequest(text); ok {
 		return nil, false
 	}
+	if isDirectCodeAnswerRequest(text) {
+		return nil, false
+	}
 	path, ok := extractExistingLocalPath(text)
 	if !ok {
 		return nil, false
@@ -569,7 +572,7 @@ func (a *App) runConfirmedURLFetch(p pendingURLFetch, sessionID, traceID string)
 	}
 }
 
-var windowsPathInTextRe = regexp.MustCompile(`(?i)(file://[^\s'"<>）)】\]]+|[a-z]:\\[^\r\n"<>|]+|\\\\[^\r\n"<>|]+|/[^\r\n"<>|]+)`)
+var windowsPathInTextRe = regexp.MustCompile(`(?i)(file://[^\s'"<>）)】\]]+|[a-z]:\\[^\r\n"<>|]+|\\\\[^\r\n"<>|]+|/[a-z._~][^\r\n"<>|]+)`)
 
 func extractExistingLocalPath(text string) (string, bool) {
 	raw := strings.TrimSpace(windowsPathInTextRe.FindString(text))

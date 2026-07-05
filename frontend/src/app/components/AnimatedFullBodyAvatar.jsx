@@ -113,18 +113,6 @@ export const fullBodyMotionConfigs = {
   },
 };
 
-function layerStyle(layer = {}) {
-  const motionScale = 1.7;
-  return {
-    clipPath: layer.clip,
-    transformOrigin: layer.origin,
-    '--part-x': `${(layer.x ?? 1) * motionScale}px`,
-    '--part-y': `${(layer.y ?? 1) * motionScale}px`,
-    '--part-rotate': `${(layer.rotate ?? 1) * motionScale}deg`,
-    animationDelay: layer.delay || '0s',
-  };
-}
-
 function targetFromPoint(root, clientX, clientY) {
   const rect = root?.getBoundingClientRect?.();
   if (!rect || rect.width <= 0 || rect.height <= 0) return {x: 0, y: 0};
@@ -142,12 +130,20 @@ export default function AnimatedFullBodyAvatar({
   pack = 'wolf',
   mode = 'full',
   alt = '',
+  animated = true,
 }) {
   const rootRef = useRef(null);
   const [look, setLook] = useState({x: 0, y: 0});
   const packKey = fullBodyMotionConfigs[pack] ? pack : 'wolf';
   const config = fullBodyMotionConfigs[packKey];
-  const imageSrc = src || fallbackSrc;
+  const [srcErrored, setSrcErrored] = useState(false);
+  const primarySrc = src || fallbackSrc;
+  // 立繪載入失敗（例如檔案缺失 404）時自動退回頭像，避免整個人物開天窗消失。
+  const imageSrc = srcErrored && fallbackSrc ? fallbackSrc : primarySrc;
+  useEffect(() => { setSrcErrored(false); }, [primarySrc, fallbackSrc]);
+  const handleImgError = () => {
+    if (!srcErrored && fallbackSrc && primarySrc !== fallbackSrc) setSrcErrored(true);
+  };
 
   const style = useMemo(() => ({
     '--look-x': look.x.toFixed(3),
@@ -160,11 +156,24 @@ export default function AnimatedFullBodyAvatar({
   }), [config, look.x, look.y]);
 
   useEffect(() => {
+    if (!animated) return undefined;
+    let frameID = 0;
+    let settleID = 0;
+    let nextLook = {x: 0, y: 0};
+    const commitLook = () => {
+      frameID = 0;
+      setLook(nextLook);
+    };
+    const scheduleLook = (value) => {
+      nextLook = value;
+      if (!frameID) frameID = window.requestAnimationFrame(commitLook);
+    };
     const updateLook = (event) => {
-      setLook(targetFromPoint(rootRef.current, event.clientX, event.clientY));
+      scheduleLook(targetFromPoint(rootRef.current, event.clientX, event.clientY));
     };
     const settle = () => {
-      window.setTimeout(() => setLook((current) => ({
+      if (settleID) window.clearTimeout(settleID);
+      settleID = window.setTimeout(() => setLook((current) => ({
         x: current.x * .45,
         y: current.y * .45,
       })), 180);
@@ -176,35 +185,31 @@ export default function AnimatedFullBodyAvatar({
       window.removeEventListener('pointermove', updateLook);
       window.removeEventListener('pointerdown', updateLook);
       window.removeEventListener('pointerup', settle);
+      if (frameID) window.cancelAnimationFrame(frameID);
+      if (settleID) window.clearTimeout(settleID);
     };
-  }, []);
+  }, [animated]);
 
   if (!imageSrc) return null;
 
   return (
     <span
       ref={rootRef}
-      className={`animated-fullbody-avatar animated-fullbody-avatar-${packKey} animated-fullbody-avatar-${mode}`}
+      className={`animated-fullbody-avatar ${animated ? '' : 'animated-fullbody-avatar-static'} animated-fullbody-avatar-${packKey} animated-fullbody-avatar-${mode}`}
       style={style}
       aria-hidden={alt ? undefined : true}
       aria-label={alt || undefined}
       data-testid="animated-fullbody-avatar"
       data-pack={packKey}
     >
-      <span className="animated-fullbody-avatar-layer animated-fullbody-avatar-body">
-        <img src={imageSrc} alt={alt} draggable={false} />
-      </span>
-      {Object.entries(config.layers).map(([name, layer]) => (
-        <span
-          key={name}
-          className={`animated-fullbody-avatar-layer animated-fullbody-avatar-rig animated-fullbody-avatar-${name}`}
-          style={layerStyle(layer)}
-          data-layer={name}
-        >
-          <img src={imageSrc} alt="" draggable={false} />
-        </span>
-      ))}
-      <span className="animated-fullbody-avatar-eyes" aria-hidden="true">
+      <img
+        className="animated-fullbody-avatar-img"
+        src={imageSrc}
+        alt={alt}
+        draggable={false}
+        onError={handleImgError}
+      />
+      {animated && <span className="animated-fullbody-avatar-eyes" aria-hidden="true">
         {(config.eyes || []).map((eye) => (
           <span
             key={eye.key}
@@ -219,7 +224,7 @@ export default function AnimatedFullBodyAvatar({
             data-testid={`avatar-eye-${eye.key}`}
           />
         ))}
-      </span>
+      </span>}
     </span>
   );
 }

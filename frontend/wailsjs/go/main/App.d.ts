@@ -21,6 +21,7 @@ import {health} from '../models';
 import {persona_avatar} from '../models';
 import {settings} from '../models';
 import {memory} from '../models';
+import {debugtrace} from '../models';
 import {browser_pref} from '../models';
 import {taborder} from '../models';
 

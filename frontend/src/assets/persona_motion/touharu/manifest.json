@@ -1,0 +1,677 @@
+{
+  "id": "touharu",
+  "name": "東春",
+  "aliases": [
+    "dongchun",
+    "tou-haru",
+    "persona-touharu"
+  ],
+  "renderer": "pixi",
+  "renderRig": true,
+  "size": {
+    "width": 200,
+    "height": 360
+  },
+  "motion": {
+    "breathe": {
+      "speed": 1.08,
+      "y": 4.2,
+      "scaleX": 0.006,
+      "scaleY": 0.005
+    },
+    "sway": {
+      "speed": 0.64,
+      "x": 1.5,
+      "rotate": 0.01
+    },
+    "look": {
+      "x": 5,
+      "y": 3,
+      "rotate": 0.012
+    },
+    "blink": {
+      "enabled": false
+    }
+  },
+  "partCatalog": {
+    "front": {
+      "idle": {
+        "hair": [
+          "parts/front/idle/hair_back.png",
+          "parts/front/idle/ahoge.png",
+          "parts/front/idle/viewer_left_hair_ribbon.png",
+          "parts/front/idle/viewer_right_hair_ribbon.png"
+        ],
+        "core": [
+          "parts/front/idle/head.png",
+          "parts/front/idle/neck.png",
+          "parts/front/idle/chest.png",
+          "parts/front/idle/upper_abdomen.png",
+          "parts/front/idle/waist_sash.png",
+          "parts/front/idle/front_bow.png"
+        ],
+        "skirt": [
+          "parts/front/idle/skirt_left_panel.png",
+          "parts/front/idle/skirt_center_panel.png",
+          "parts/front/idle/skirt_right_panel.png"
+        ],
+        "arms": [
+          "parts/front/idle/viewer_left_sleeve.png",
+          "parts/front/idle/viewer_left_hand.png",
+          "parts/front/idle/viewer_right_sleeve.png",
+          "parts/front/idle/viewer_right_hand.png"
+        ],
+        "legs": [
+          "parts/front/idle/viewer_left_ankle.png",
+          "parts/front/idle/viewer_left_foot.png",
+          "parts/front/idle/viewer_right_ankle.png",
+          "parts/front/idle/viewer_right_foot.png"
+        ],
+        "face": [
+          "parts/front/idle/left_eye_open.png",
+          "parts/front/idle/right_eye_open.png",
+          "parts/front/idle/nose.png",
+          "parts/front/idle/mouth_smile.png"
+        ]
+      }
+    }
+  },
+  "states": {
+    "idle": {
+      "base": "fullbody/idle.png",
+      "layers": [
+        {
+          "id": "hair_back",
+          "src": "parts/front/idle/hair_back.png",
+          "positionPx": {
+            "x": 100.0,
+            "y": 99.5
+          },
+          "size": {
+            "width": 148,
+            "height": 195
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 0.0,
+          "motion": {
+            "look": {
+              "x": 1.2,
+              "y": 0.7,
+              "rotate": 0.006
+            }
+          }
+        },
+        {
+          "id": "ahoge",
+          "src": "parts/front/idle/ahoge.png",
+          "positionPx": {
+            "x": 4.0,
+            "y": -31.0
+          },
+          "size": {
+            "width": 29,
+            "height": 26
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 0.13,
+          "parentId": "head",
+          "motion": {
+            "look": {
+              "x": 1.2,
+              "y": 0.7,
+              "rotate": 0.006
+            }
+          }
+        },
+        {
+          "id": "viewer_left_hair_ribbon",
+          "src": "parts/front/idle/viewer_left_hair_ribbon.png",
+          "positionPx": {
+            "x": -43.5,
+            "y": -36.5
+          },
+          "size": {
+            "width": 45,
+            "height": 104
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 0.26,
+          "parentId": "hair_back",
+          "motion": {
+            "look": {
+              "x": 1.2,
+              "y": 0.7,
+              "rotate": 0.006
+            }
+          }
+        },
+        {
+          "id": "viewer_right_hair_ribbon",
+          "src": "parts/front/idle/viewer_right_hair_ribbon.png",
+          "positionPx": {
+            "x": 45.5,
+            "y": -29.5
+          },
+          "size": {
+            "width": 41,
+            "height": 118
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 0.39,
+          "parentId": "hair_back",
+          "motion": {
+            "look": {
+              "x": 1.2,
+              "y": 0.7,
+              "rotate": 0.006
+            }
+          }
+        },
+        {
+          "id": "head",
+          "src": "parts/front/idle/head.png",
+          "positionPx": {
+            "x": 100.5,
+            "y": 46.0
+          },
+          "size": {
+            "width": 89,
+            "height": 88
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 0.52
+        },
+        {
+          "id": "neck",
+          "src": "parts/front/idle/neck.png",
+          "positionPx": {
+            "x": 0.0,
+            "y": 37.5
+          },
+          "size": {
+            "width": 49,
+            "height": 31
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 0.65,
+          "parentId": "head"
+        },
+        {
+          "id": "chest",
+          "src": "parts/front/idle/chest.png",
+          "positionPx": {
+            "x": 99.5,
+            "y": 111.5
+          },
+          "size": {
+            "width": 109,
+            "height": 75
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 0.78
+        },
+        {
+          "id": "upper_abdomen",
+          "src": "parts/front/idle/upper_abdomen.png",
+          "positionPx": {
+            "x": 1.5,
+            "y": 33.0
+          },
+          "size": {
+            "width": 98,
+            "height": 61
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 0.91,
+          "parentId": "chest"
+        },
+        {
+          "id": "waist_sash",
+          "src": "parts/front/idle/waist_sash.png",
+          "positionPx": {
+            "x": -1.0,
+            "y": 16.0
+          },
+          "size": {
+            "width": 108,
+            "height": 61
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 1.04,
+          "parentId": "upper_abdomen"
+        },
+        {
+          "id": "front_bow",
+          "src": "parts/front/idle/front_bow.png",
+          "positionPx": {
+            "x": -0.5,
+            "y": 4.5
+          },
+          "size": {
+            "width": 81,
+            "height": 64
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 1.17,
+          "parentId": "waist_sash"
+        },
+        {
+          "id": "skirt_left_panel",
+          "src": "parts/front/idle/skirt_left_panel.png",
+          "positionPx": {
+            "x": -31.0,
+            "y": 74.0
+          },
+          "size": {
+            "width": 64,
+            "height": 173
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 1.3,
+          "parentId": "waist_sash",
+          "motion": {
+            "sway": {
+              "x": 0.6,
+              "rotate": 0.004
+            }
+          }
+        },
+        {
+          "id": "skirt_center_panel",
+          "src": "parts/front/idle/skirt_center_panel.png",
+          "positionPx": {
+            "x": 0.0,
+            "y": 75.0
+          },
+          "size": {
+            "width": 58,
+            "height": 177
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 1.43,
+          "parentId": "waist_sash",
+          "motion": {
+            "sway": {
+              "x": 0.6,
+              "rotate": 0.004
+            }
+          }
+        },
+        {
+          "id": "skirt_right_panel",
+          "src": "parts/front/idle/skirt_right_panel.png",
+          "positionPx": {
+            "x": 33.5,
+            "y": 74.5
+          },
+          "size": {
+            "width": 49,
+            "height": 172
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 1.56,
+          "parentId": "waist_sash",
+          "motion": {
+            "sway": {
+              "x": 0.6,
+              "rotate": 0.004
+            }
+          }
+        },
+        {
+          "id": "viewer_left_sleeve",
+          "src": "parts/front/idle/viewer_left_sleeve.png",
+          "positionPx": {
+            "x": -33.5,
+            "y": 41.5
+          },
+          "size": {
+            "width": 76,
+            "height": 142
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 1.69,
+          "parentId": "chest",
+          "motion": {
+            "sway": {
+              "x": 0.6,
+              "rotate": 0.004
+            }
+          }
+        },
+        {
+          "id": "viewer_left_hand",
+          "src": "parts/front/idle/viewer_left_hand.png",
+          "positionPx": {
+            "x": 18.5,
+            "y": -47.0
+          },
+          "size": {
+            "width": 43,
+            "height": 40
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 1.82,
+          "parentId": "viewer_left_sleeve",
+          "motion": {
+            "sway": {
+              "x": 0.6,
+              "rotate": 0.004
+            }
+          }
+        },
+        {
+          "id": "viewer_right_sleeve",
+          "src": "parts/front/idle/viewer_right_sleeve.png",
+          "positionPx": {
+            "x": 33.0,
+            "y": 40.5
+          },
+          "size": {
+            "width": 83,
+            "height": 142
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 1.95,
+          "parentId": "chest",
+          "motion": {
+            "sway": {
+              "x": 0.6,
+              "rotate": 0.004
+            }
+          }
+        },
+        {
+          "id": "viewer_right_hand",
+          "src": "parts/front/idle/viewer_right_hand.png",
+          "positionPx": {
+            "x": -21.0,
+            "y": -51.0
+          },
+          "size": {
+            "width": 43,
+            "height": 42
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 2.08,
+          "parentId": "viewer_right_sleeve",
+          "motion": {
+            "sway": {
+              "x": 0.6,
+              "rotate": 0.004
+            }
+          }
+        },
+        {
+          "id": "viewer_left_ankle",
+          "src": "parts/front/idle/viewer_left_ankle.png",
+          "positionPx": {
+            "x": 20.5,
+            "y": 89.5
+          },
+          "size": {
+            "width": 33,
+            "height": 46
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 2.21,
+          "parentId": "skirt_left_panel"
+        },
+        {
+          "id": "viewer_left_foot",
+          "src": "parts/front/idle/viewer_left_foot.png",
+          "positionPx": {
+            "x": 1.5,
+            "y": 19.5
+          },
+          "size": {
+            "width": 42,
+            "height": 29
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 2.34,
+          "parentId": "viewer_left_ankle"
+        },
+        {
+          "id": "viewer_right_ankle",
+          "src": "parts/front/idle/viewer_right_ankle.png",
+          "positionPx": {
+            "x": -7.5,
+            "y": 87.0
+          },
+          "size": {
+            "width": 34,
+            "height": 48
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 2.47,
+          "parentId": "skirt_right_panel"
+        },
+        {
+          "id": "viewer_right_foot",
+          "src": "parts/front/idle/viewer_right_foot.png",
+          "positionPx": {
+            "x": -9.0,
+            "y": 12.0
+          },
+          "size": {
+            "width": 30,
+            "height": 24
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 2.6,
+          "parentId": "viewer_right_ankle"
+        },
+        {
+          "id": "left_eye_open",
+          "src": "parts/front/idle/left_eye_open.png",
+          "positionPx": {
+            "x": -18.0,
+            "y": 8.5
+          },
+          "size": {
+            "width": 27,
+            "height": 23
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 2.73,
+          "parentId": "head",
+          "motion": {
+            "look": {
+              "x": 1.2,
+              "y": 0.7,
+              "rotate": 0.006
+            }
+          }
+        },
+        {
+          "id": "right_eye_open",
+          "src": "parts/front/idle/right_eye_open.png",
+          "positionPx": {
+            "x": 18.5,
+            "y": 8.0
+          },
+          "size": {
+            "width": 28,
+            "height": 24
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 2.86,
+          "parentId": "head",
+          "motion": {
+            "look": {
+              "x": 1.2,
+              "y": 0.7,
+              "rotate": 0.006
+            }
+          }
+        },
+        {
+          "id": "nose",
+          "src": "parts/front/idle/nose.png",
+          "positionPx": {
+            "x": 1.0,
+            "y": 17.5
+          },
+          "size": {
+            "width": 19,
+            "height": 19
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 2.99,
+          "parentId": "head",
+          "motion": {
+            "look": {
+              "x": 1.2,
+              "y": 0.7,
+              "rotate": 0.006
+            }
+          }
+        },
+        {
+          "id": "mouth_smile",
+          "src": "parts/front/idle/mouth_smile.png",
+          "positionPx": {
+            "x": 1.0,
+            "y": 28.0
+          },
+          "size": {
+            "width": 35,
+            "height": 22
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "rotation": 0,
+          "phase": 3.12,
+          "parentId": "head",
+          "motion": {
+            "look": {
+              "x": 1.2,
+              "y": 0.7,
+              "rotate": 0.006
+            }
+          }
+        }
+      ]
+    },
+    "working": {
+      "base": "fullbody/reach.png",
+      "layers": []
+    },
+    "warning": {
+      "base": "fullbody/reach.png",
+      "layers": []
+    },
+    "happy": {
+      "base": "fullbody/idle.png",
+      "layers": []
+    },
+    "blocked": {
+      "base": "fullbody/reach.png",
+      "layers": []
+    }
+  },
+  "notes": [
+    "renderRig is false until layer pivots are manually tuned in Pixi.",
+    "The long miko skirt hides thigh and shin joints, so visible skirt panels are exported instead of fake leg bones.",
+    "Folded sleeves are exported as large replacement pieces because the source pose does not expose elbow and wrist joints cleanly."
+  ]
+}

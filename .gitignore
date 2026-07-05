@@ -150,6 +150,7 @@ __pycache__/
 .venv/
 **/.venv/
 image_caption_tagger/.wd14-cache/
+frontend/src/assets/persona_motion/**/_source/
 
 # === Device-local secrets and runtime history ===
 /data/secrets/

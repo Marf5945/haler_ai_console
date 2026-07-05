@@ -150,7 +150,16 @@ export default function FloatingAvatarMode({
   const [pixiReady, setPixiReady] = useState(false);
   const setBodyMode = onBodyModeChange || (() => {});
   const showBody = bodyMode !== 'head';
+  const bodyAvatarSrc = fullBodyAvatarSrc || fullBodyMotionManifest?.baseSrc || '';
+  const bodyFallbackSrc = fullBodyMotionManifest?.baseSrc || fullBodyAvatarSrc || '';
   const usePixiAvatar = showBody && dynamicImageEnabled && fullBodyMotionManifest?.renderer === 'pixi';
+  const avatarRenderMode = !showBody
+    ? 'head'
+    : usePixiAvatar
+      ? 'pixi'
+      : dynamicImageEnabled
+        ? 'css-motion'
+        : 'static';
   const tickleActive = tickleMode && usePixiAvatar;
   const avatarFrameWidth = showBody ? fullBodyAvatarWidth : avatarSize;
   const avatarFrameHeight = showBody ? fullBodyAvatarHeight : avatarSize;
@@ -519,6 +528,7 @@ export default function FloatingAvatarMode({
       <div
         ref={rootRef}
         className={`floating-avatar-root ${compactWindowMode ? 'floating-avatar-compact-root' : ''} ${flyingBack ? 'floating-avatar-flyback' : ''} ${showBody ? `floating-avatar-body-active floating-avatar-body-${bodyMode}` : ''}`}
+        data-avatar-render-mode={avatarRenderMode}
         style={{
           left: clampedPosition.x,
           top: clampedPosition.y,
@@ -569,16 +579,22 @@ export default function FloatingAvatarMode({
               <span className="floating-avatar-pixi-shell">
                 <img
                   className={`floating-avatar-img floating-avatar-pixi-backstop ${pixiReady ? 'floating-avatar-pixi-backstop-ready' : ''}`}
-                  src={fullBodyAvatarSrc || avatarSrc}
+                  src={bodyAvatarSrc || bodyFallbackSrc || avatarSrc}
                   alt=""
                   draggable={false}
+                  onError={(event) => {
+                    const fallback = bodyFallbackSrc || avatarSrc;
+                    if (fallback && event.currentTarget.src !== fallback) {
+                      event.currentTarget.src = fallback;
+                    }
+                  }}
                 />
                 <PixiStageErrorBoundary
                   resetKey={`${fullBodyMotionManifest?.id || ''}|${fullBodyAvatarKey}|${bodyMode}|${avatarExpression}`}
                   fallback={(
                     <AnimatedFullBodyAvatar
-                      src={fullBodyAvatarSrc || avatarSrc}
-                      fallbackSrc={avatarSrc}
+                      src={bodyAvatarSrc}
+                      fallbackSrc={bodyFallbackSrc}
                       pack={fullBodyAvatarKey}
                       mode={bodyMode}
                     />
@@ -586,7 +602,7 @@ export default function FloatingAvatarMode({
                 >
                   <PixiAvatarStage
                     manifest={fullBodyMotionManifest}
-                    fallbackSrc={fullBodyAvatarSrc || avatarSrc}
+                    fallbackSrc={bodyAvatarSrc}
                     expression={avatarExpression}
                     width={avatarFrameWidth}
                     height={avatarFrameHeight}
@@ -597,10 +613,11 @@ export default function FloatingAvatarMode({
               </span>
             ) : (
               <AnimatedFullBodyAvatar
-                src={fullBodyAvatarSrc || avatarSrc}
-                fallbackSrc={avatarSrc}
+                src={bodyAvatarSrc}
+                fallbackSrc={bodyFallbackSrc}
                 pack={fullBodyAvatarKey}
                 mode={bodyMode}
+                animated={avatarRenderMode === 'css-motion'}
               />
             )
           ) : (

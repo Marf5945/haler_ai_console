@@ -630,12 +630,6 @@ func (a *App) startup(ctx context.Context) {
 	}()
 }
 
-// GetMonitorLinks is kept for older generated frontends; the local HTTP trace
-// viewer is disabled for the public build surface.
-func (a *App) GetMonitorLinks() debugtrace.LinkSnapshot {
-	return debugtrace.LinkSnapshot{}
-}
-
 type ConsoleState struct {
 	Greeting   string          `json:"greeting"`
 	StatusRail statusrail.View `json:"statusRail"`

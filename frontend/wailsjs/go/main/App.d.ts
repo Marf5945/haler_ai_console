@@ -311,8 +311,6 @@ export function GetMemoryHealth():Promise<health.MemoryHealth>;
 
 export function GetMemoryPipelineState():Promise<memory.PipelineState>;
 
-export function GetMonitorLinks():Promise<debugtrace.LinkSnapshot>;
-
 export function GetNativeOCRStatus():Promise<visual_learning.OCRStatus>;
 
 export function GetNewSubagentCandidates():Promise<any>;

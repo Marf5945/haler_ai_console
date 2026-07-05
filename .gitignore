@@ -147,6 +147,9 @@ scripts/*smoke*.sh
 # === Python cache artifacts ===
 __pycache__/
 *.py[cod]
+.venv/
+**/.venv/
+image_caption_tagger/.wd14-cache/
 
 # === Device-local secrets and runtime history ===
 /data/secrets/

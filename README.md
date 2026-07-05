@@ -66,13 +66,18 @@ with SHA256 before installation.
 HaLer for AI Console 是一個本機優先的 AI 工作台，將多種 LLM 介面、文件資料、任務流程與安全治理集中在同一個桌面應用中。
 
 - **多模型 / 多介面整合**：支援 CLI adapter、API adapter、本機模型與 Ollama 相關流程，並可為不同 adapter 保存模型選擇與健康狀態。
-- **任務 DAG 與自動流程**：可將任務拆成 DAG run、追蹤節點狀態、保留 debug trace，並在高風險步驟前以 review card 暫停等待確認。
+- **任務 DAG 與自動流程**：可將任務拆成 DAG run、追蹤節點狀態與審核紀錄，並在高風險步驟前以 review card 暫停等待確認。
 - **Bounded Replan**：執行失敗時可在低風險、同目標、read-only 條件下嘗試重新規劃尚未開始的後續步驟；Go 端負責裁決，並保留 audit log。
 - **Skill 與 Go Program Authoring**：可掃描、建立、保存與執行 skill；也能引導產生受限權限的 Go program，經驗證與 review 後再納入工作流。
 - **文件、引用與搜尋**：支援拖放匯入文件、建立本機文件庫、TF-IDF / Ollama embedding 檢索、Reference prompt context、URL provenance、local search 與可設定的 web search provider。
+- **程式碼產物工作流**：可從模型回覆擷取程式碼到資料區，保留摘要、標籤與修改標示，支援檢視、複製、拖出匯出、編譯檢查與失敗後的自動修復回合。
+- **GGUF 本機模型匯入**：可偵測本機或 HTTPS `.gguf` 模型來源，背景下載/驗證後匯入 Ollama；若 Ollama 不可用，會建立 llama.cpp 相容 adapter 候選。
 - **內建資料工具**：提供 CSV / JSON / Office 文件讀寫能力，並包含零第三方依賴的 xlsx 產生路徑與電料 BOM 產出技能範例。
 - **Visual Learning**：包含螢幕/影像元素偵測、OCR、按鈕候選、元素字典、動作候選與 dry-run 信心計算；YOLOX 模型為選配，缺少時會回退到 OpenCV shape/text 偵測。
 - **紀念照與相冊**：可由對話或手動按鈕觸發「拍照」確認卡，使用本機 ComfyUI 或相容雲端產圖服務生成角色紀念照，並保存到本機相冊供檢視、改標題與刪除。
+- **彈出式子對話視窗**：可將子對話釘選成獨立 OS 視窗，保留 persona、adapter、model 設定，適合一邊主控台工作一邊追蹤特定代理對話。
+- **Casebook 與短期檢查記憶**：可將任務節點的成功/失敗案例沉澱為本機案例庫，輔助後續路由、復盤與工作流判斷。
+- **影像標籤輔助工具**：附帶 WD14/ONNXRuntime 相容的離線影像 caption/tagger 工具流程，可用於整理本機圖像素材與角色資料。
 - **Remote Bridge**：可設定 Telegram、Discord、LINE、Teams、QQ 或 custom webhook channel，支援遠端送出、審核回覆、分段 dispatch 與 audit。
 - **安全治理**：包含 OS-backed credential store、source trust allowlist、LLM context 過濾、Controlled Trust、draft sandbox、package import review、WA3 media provenance 與模型污染風險檢查。
 - **個人化工作區**：支援 persona / avatar、主對話與 subagent 匯出、排程任務、Status Rail、語音設定與多語系 UI。
@@ -98,13 +103,18 @@ for example with `chcp 65001`.
 HaLer for AI Console is a local-first AI workbench that brings LLM adapters, documents, task automation, and safety controls into one desktop app.
 
 - **Multi-model and multi-adapter console**: supports CLI adapters, API adapters, local models, and Ollama-oriented flows, with per-adapter model choices and runtime health state.
-- **Task DAG automation**: breaks work into DAG runs, tracks node status, keeps debug traces, and pauses for review cards before high-risk steps continue.
+- **Task DAG automation**: breaks work into DAG runs, tracks node status and review records, and pauses for review cards before high-risk steps continue.
 - **Bounded Replan**: when execution fails, the app can try to rewrite only the not-yet-started tail of a task under low-risk, same-goal, read-only constraints; Go owns the final decision and writes audit logs.
 - **Skills and Go Program Authoring**: scans, builds, saves, and executes skills; guided Go program generation is validated, permission-scoped, and review-gated before entering workflows.
 - **Documents, references, and search**: imports dropped documents, maintains a local document store, supports TF-IDF / Ollama embedding retrieval, builds reference prompt context, records URL provenance, and offers local search plus configurable web search providers.
+- **Code artifact workflow**: captures code from model replies into the data area with summaries, tags, and change marks; supports viewing, copying, drag export, compile checks, and automatic repair attempts after build failures.
+- **GGUF local model import**: detects local or HTTPS `.gguf` model sources, downloads and verifies them in the background, imports them into Ollama, and can fall back to a llama.cpp-compatible adapter candidate.
 - **Built-in data tools**: includes CSV / JSON / Office document readers and writers, a zero-third-party xlsx generation path, and an electrical-material BOM skill example.
 - **Visual Learning**: provides screen/image element detection, OCR, button candidates, an element dictionary, action candidates, and dry-run confidence scoring; the optional YOLOX model falls back to OpenCV shape/text detection when unavailable.
 - **Keepsake photos and album**: offers a confirmation-gated photo flow from chat or manual controls, generates persona keepsake images through local ComfyUI or a compatible cloud image service, and stores them in a local album for viewing, captioning, and deletion.
+- **Pop-out sub chats**: pins a sub conversation into a separate OS window while keeping its persona, adapter, and model settings available.
+- **Casebook and short-term inspection memory**: stores task-node success and failure cases locally to support later routing, review, and workflow decisions.
+- **Image tagging helper**: includes an offline WD14/ONNXRuntime-compatible caption/tagger helper flow for organizing local image assets and persona material.
 - **Remote Bridge**: configures Telegram, Discord, LINE, Teams, QQ, or custom webhook channels for remote submission, review replies, segmented dispatch, and audit trails.
 - **Safety and governance**: includes OS-backed credential storage, source-trust allowlists, LLM context filtering, Controlled Trust, draft sandboxing, package import review, WA3 media provenance, and model-pollution risk checks.
 - **Personal workspace**: supports personas and avatars, main-chat and subagent export, scheduled jobs, Status Rail, voice settings, and multilingual UI.

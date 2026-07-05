@@ -574,10 +574,6 @@ export function GetMemoryPipelineState() {
   return window['go']['main']['App']['GetMemoryPipelineState']();
 }
 
-export function GetMonitorLinks() {
-  return window['go']['main']['App']['GetMonitorLinks']();
-}
-
 export function GetNativeOCRStatus() {
   return window['go']['main']['App']['GetNativeOCRStatus']();
 }

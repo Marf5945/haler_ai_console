@@ -109,17 +109,38 @@ func (a *App) resolveFloatingAvatarOverlayImage(personaID string, mode string, s
 }
 
 func normalizeOverlayMode(mode string) string {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
+	raw := strings.ToLower(strings.TrimSpace(mode))
+	if before, _, ok := strings.Cut(raw, ":"); ok {
+		raw = strings.TrimSpace(before)
+	}
+	switch raw {
 	case "full":
 		return "full"
 	}
 	return "head"
 }
 
+func overlayPackFromMode(mode string) string {
+	_, pack, ok := strings.Cut(strings.ToLower(strings.TrimSpace(mode)), ":")
+	if !ok {
+		return ""
+	}
+	switch strings.TrimSpace(pack) {
+	case "wolf", "wolfdog":
+		return "wolf"
+	case "uncle", "uncle_bust":
+		return "uncle"
+	case "secretary", "police", "touharu":
+		return strings.TrimSpace(pack)
+	default:
+		return ""
+	}
+}
+
 func overlayModeSize(mode string) (int, int) {
 	switch normalizeOverlayMode(mode) {
 	case "full":
-		return 200, 360
+		return 300, 540
 	}
 	return 96, 96
 }

@@ -26,6 +26,7 @@ html, body, #root {
 }
 
 .popout-title {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -40,12 +41,83 @@ html, body, #root {
   text-overflow: ellipsis;
 }
 
-.popout-title span {
+.popout-context-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  width: fit-content;
+  max-width: 100%;
+  margin: 1px 0 0;
+  padding: 2px 6px;
+  border: 1px solid rgba(26, 18, 0, 0.22);
+  border-radius: 6px;
+  background: rgba(26, 18, 0, 0.08);
+  color: #1a1200;
+  cursor: pointer;
   font-size: 11px;
-  opacity: 0.75;
+  opacity: 0.82;
+  text-align: left;
+}
+
+.popout-context-trigger:hover,
+.popout-context-trigger[aria-expanded="true"] {
+  background: rgba(26, 18, 0, 0.16);
+  border-color: rgba(26, 18, 0, 0.36);
+  opacity: 1;
+}
+
+.popout-context-trigger span {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.popout-config-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(360px, calc(100vw - 84px));
+  padding: 10px;
+  border: 1px solid rgba(255, 186, 85, 0.35);
+  border-radius: 8px;
+  background: #16120c;
+  color: #f5f0e6;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.45);
+}
+
+.popout-config-menu label {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: #d8c6a2;
+}
+
+.popout-config-menu label:last-child {
+  margin-bottom: 0;
+}
+
+.popout-config-menu select {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid #4b3720;
+  background: #0a0a0a;
+  color: #f5f0e6;
+  padding: 0 8px;
+  outline: none;
+}
+
+.popout-config-menu select:focus {
+  border-color: #f2a33c;
+}
+
+.popout-config-menu select:disabled {
+  opacity: 0.55;
 }
 
 .popout-pin {

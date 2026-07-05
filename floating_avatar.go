@@ -4,7 +4,9 @@
 // 「無框、透明、永遠置頂、可跨所有桌面/Space」的桌面浮窗；
 // 還原主系統時再切回一般視窗。實際視窗操作依平台分檔：
 //   - floating_avatar_darwin.go：macOS 真實作（cgo / AppKit）
-//   - floating_avatar_other.go ：Windows/Linux stub（暫為 no-op）
+//   - floating_avatar_linux.go ：Linux 真實作（cgo / GTK3 + WebKitGTK）
+//   - floating_avatar_windows.go：Windows no-op（WebView2 不走原生透明路徑）
+//   - floating_avatar_other.go ：其餘平台 stub（暫為 no-op）
 //
 // 前端在 enterFloatingAvatarMode / restoreFloatingAvatarWindow 透過
 // 這兩個 bound method 呼叫。

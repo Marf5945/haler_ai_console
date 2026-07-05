@@ -1427,6 +1427,8 @@
     "bodyHead": "Head",
     "bodyFull": "Full body",
     "bodySwitchLabel": "Show",
+    "bodyDynamic": "Dynamic image",
+    "tickleInteraction": "Interaction",
     "installTitle": "Install this?",
     "installStep1": "Check the source and permissions, then press Confirm below",
     "installStep2": "Confirmed — press Send above to finish installing",

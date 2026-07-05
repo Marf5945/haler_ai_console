@@ -26,11 +26,38 @@ var codeRepairModelCall = func(a *App, adapterID, sessionID, prompt, traceID str
 	return a.callRawModelCapped(adapterID, "code-repair:"+sessionID, prompt, traceID, codeArtifactRepairMaxTokens)
 }
 
+func codeArtifactCompileToolDetail(fileName string) string {
+	return "後端正在執行 " + codeArtifactCompileToolName(fileName) + "。"
+}
+
+func codeArtifactRecompileToolDetail(fileName string) string {
+	return "後端正在再次執行 " + codeArtifactCompileToolName(fileName) + "。"
+}
+
+func codeArtifactCompileToolName(fileName string) string {
+	meta, ok := codeArtifactMetaByFileName(fileName)
+	if !ok {
+		return "編譯工具"
+	}
+	switch meta.Language {
+	case "go":
+		return "go build"
+	case "rust":
+		return "rustc"
+	case "cpp":
+		return "c++"
+	case "c":
+		return "cc"
+	default:
+		return "編譯工具"
+	}
+}
+
 // compileCodeArtifactWithAutoRepair — 編譯；失敗自動叫模型修再編。
 // 回傳給聊天室的完整回報文字。
 func (a *App) compileCodeArtifactWithAutoRepair(adapterID, sessionID, fileName, traceID string) string {
 	fileName = filepath.Base(strings.TrimSpace(fileName))
-	a.emitCodeArtifactActivity(traceID, sessionID, fileName, "compile_start", "開始編譯資料區程式", "後端正在執行 go build。", "running", 0)
+	a.emitCodeArtifactActivity(traceID, sessionID, fileName, "compile_start", "開始編譯資料區程式", codeArtifactCompileToolDetail(fileName), "running", 0)
 	result, err := a.CompileCodeArtifact(fileName)
 	if err != nil {
 		a.emitCodeArtifactActivity(traceID, sessionID, fileName, "compile_error", "編譯程序沒有啟動", err.Error(), "failed", 0)
@@ -91,7 +118,7 @@ func (a *App) compileCodeArtifactWithAutoRepair(adapterID, sessionID, fileName, 
 		a.emitCodeArtifactActivity(traceID, sessionID, fileName, "repair_written", "修正版已寫回資料區", fmt.Sprintf("已同步 SHA 與 %d 個修改標示，準備重編。", len(marks)), "running", attempt)
 
 		var compErr error
-		a.emitCodeArtifactActivity(traceID, sessionID, fileName, "recompile_start", "開始重編修正版", "後端正在再次執行 go build。", "running", attempt)
+		a.emitCodeArtifactActivity(traceID, sessionID, fileName, "recompile_start", "開始重編修正版", codeArtifactRecompileToolDetail(fileName), "running", attempt)
 		result, compErr = a.CompileCodeArtifact(fileName)
 		if compErr != nil {
 			a.emitCodeArtifactActivity(traceID, sessionID, fileName, "recompile_error", "重編譯程序沒有啟動", compErr.Error(), "failed", attempt)

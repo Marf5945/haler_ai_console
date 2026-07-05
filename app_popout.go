@@ -41,8 +41,17 @@ type PopoutInfo struct {
 	Name        string `json:"name"`
 	AdapterID   string `json:"adapter_id"`
 	IsAPI       bool   `json:"is_api"`
+	PersonaID   string `json:"persona_id"`
 	PersonaName string `json:"persona_name"`
+	Model       string `json:"model"`
 	Locale      string `json:"locale"`
+}
+
+type popoutConfigRequest struct {
+	Agent     string `json:"agent"`
+	PersonaID string `json:"persona_id"`
+	AdapterID string `json:"adapter_id"`
+	Model     string `json:"model"`
 }
 
 type popoutChild struct {
@@ -190,6 +199,7 @@ func (h *popoutHub) ensureServerLocked() error {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	mux.HandleFunc("/api/state", h.withAuth(h.handleState))
+	mux.HandleFunc("/api/config", h.withAuth(h.handleConfig))
 	mux.HandleFunc("/api/send", h.withAuth(h.handleSend))
 	mux.HandleFunc("/api/unpin", h.withAuth(h.handleUnpin))
 
@@ -218,15 +228,101 @@ func (h *popoutHub) lookup(agentID string) (*popoutChild, *App) {
 	return h.children[agentID], h.app
 }
 
+func (h *popoutHub) snapshot(agentID string) (*popoutChild, *App, PopoutInfo) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	child := h.children[agentID]
+	if child == nil {
+		return nil, h.app, PopoutInfo{}
+	}
+	return child, h.app, child.info
+}
+
 func writePopoutJSON(w http.ResponseWriter, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
+func popoutContainsString(values []string, value string) bool {
+	for _, item := range values {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+func popoutStatePayload(app *App, info PopoutInfo, messages []string) map[string]interface{} {
+	if app == nil {
+		return map[string]interface{}{"messages": messages}
+	}
+
+	personas := []map[string]string{}
+	if app.settingsService != nil {
+		for _, persona := range app.settingsService.State().Personas {
+			personas = append(personas, map[string]string{
+				"id":       persona.ID,
+				"name":     persona.Name,
+				"identity": persona.Identity,
+			})
+			if info.PersonaID == "" && persona.Name == info.PersonaName {
+				info.PersonaID = persona.ID
+			}
+		}
+	}
+
+	adapters := []map[string]interface{}{}
+	choices := map[string]string{}
+	if app.settingsService != nil {
+		choices = app.settingsService.AdapterModelChoices()
+	}
+	if app.adapterRegistry != nil {
+		for _, adapter := range app.adapterRegistry.ListAvailable() {
+			if !shouldExposeAdapter(adapter) {
+				continue
+			}
+			kind := strings.TrimSpace(adapter.Kind)
+			if kind == "" {
+				kind = "cli"
+			}
+			models := app.ListAdapterModelOptions(adapter.ID)
+			model := strings.TrimSpace(choices[adapter.ID])
+			if model == "" {
+				model = strings.TrimSpace(adapter.Model)
+			}
+			if model != "" && !popoutContainsString(models, model) {
+				models = append([]string{model}, models...)
+			}
+			adapters = append(adapters, map[string]interface{}{
+				"id":     adapter.ID,
+				"name":   adapter.Name,
+				"kind":   kind,
+				"status": string(adapter.Status),
+				"model":  model,
+				"models": models,
+			})
+		}
+	}
+
+	return map[string]interface{}{
+		"agent_id":     info.AgentID,
+		"name":         info.Name,
+		"adapter_id":   info.AdapterID,
+		"is_api":       info.IsAPI,
+		"persona_id":   info.PersonaID,
+		"persona_name": info.PersonaName,
+		"model":        info.Model,
+		"locale":       info.Locale,
+		"personas":     personas,
+		"adapters":     adapters,
+		"messages":     messages,
+	}
+}
+
 // GET /api/state?agent=… → 視窗初始資料（含該 agent 自己的對話歷史）。
 func (h *popoutHub) handleState(w http.ResponseWriter, r *http.Request) {
 	agentID := strings.TrimSpace(r.URL.Query().Get("agent"))
-	child, app := h.lookup(agentID)
+	child, app, info := h.snapshot(agentID)
 	if child == nil || app == nil {
 		http.Error(w, "not pinned", http.StatusNotFound)
 		return
@@ -235,15 +331,59 @@ func (h *popoutHub) handleState(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		messages = []string{}
 	}
-	writePopoutJSON(w, map[string]interface{}{
-		"agent_id":     child.info.AgentID,
-		"name":         child.info.Name,
-		"adapter_id":   child.info.AdapterID,
-		"is_api":       child.info.IsAPI,
-		"persona_name": child.info.PersonaName,
-		"locale":       child.info.Locale,
-		"messages":     messages,
-	})
+	writePopoutJSON(w, popoutStatePayload(app, info, messages))
+}
+
+// POST /api/config {agent, persona_id, adapter_id, model} → 更新此 popout 的人格／模型選擇。
+func (h *popoutHub) handleConfig(w http.ResponseWriter, r *http.Request) {
+	var req popoutConfigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	agentID := strings.TrimSpace(req.Agent)
+	h.mu.Lock()
+	child := h.children[agentID]
+	app := h.app
+	if child == nil || app == nil {
+		h.mu.Unlock()
+		http.Error(w, "not pinned", http.StatusNotFound)
+		return
+	}
+	next := child.info
+	if personaID := strings.TrimSpace(req.PersonaID); personaID != "" && app.settingsService != nil {
+		for _, persona := range app.settingsService.State().Personas {
+			if persona.ID == personaID {
+				next.PersonaID = persona.ID
+				next.PersonaName = persona.Name
+				break
+			}
+		}
+	}
+	if adapterID := strings.TrimSpace(req.AdapterID); adapterID != "" && app.adapterRegistry != nil {
+		for _, adapter := range app.adapterRegistry.ListAvailable() {
+			if adapter.ID == adapterID && shouldExposeAdapter(adapter) {
+				next.AdapterID = adapter.ID
+				next.IsAPI = app.isAPIOrLocalAdapter(adapter.ID)
+				if strings.TrimSpace(req.Model) == "" {
+					next.Model = strings.TrimSpace(adapter.Model)
+				}
+				break
+			}
+		}
+	}
+	if model := strings.TrimSpace(req.Model); model != "" {
+		next.Model = model
+	}
+	child.info = next
+	h.emitChangedLocked()
+	h.mu.Unlock()
+
+	messages, err := app.GetTalkMessagesForAgent(agentID)
+	if err != nil {
+		messages = []string{}
+	}
+	writePopoutJSON(w, popoutStatePayload(app, next, messages))
 }
 
 // POST /api/send {agent, text} → 寫入該 agent 專屬記憶 → 走完整對話路由 → 寫回覆 → 回傳。
@@ -302,6 +442,17 @@ func (h *popoutHub) handleSend(w http.ResponseWriter, r *http.Request) {
 
 	child.sendMu.Lock()
 	defer child.sendMu.Unlock()
+	h.mu.Lock()
+	info := child.info
+	h.mu.Unlock()
+	if info.PersonaID == "" && app.settingsService != nil {
+		for _, persona := range app.settingsService.State().Personas {
+			if persona.Name == info.PersonaName {
+				info.PersonaID = persona.ID
+				break
+			}
+		}
+	}
 
 	if err := app.AppendTalkEntryForAgent(agentID, "user", text); err != nil {
 		writePopoutJSON(w, map[string]string{"error": err.Error()})
@@ -315,7 +466,7 @@ func (h *popoutHub) handleSend(w http.ResponseWriter, r *http.Request) {
 
 	// 走與主視窗一般對話相同的入口：skill 判斷 → tool 路由 → 搜尋 → 確認閘 →
 	// 依 adapter 種類自動走 CLI 或 API。
-	dec, err := app.ExecuteSkillMessage(child.info.AdapterID, sessionID, text, traceID)
+	dec, err := app.executeSkillMessageWithOverrides(info.AdapterID, sessionID, text, traceID, info.PersonaID, info.Model)
 	replyText, replyErr := renderPopoutDecision(dec, err)
 
 	if replyText != "" {

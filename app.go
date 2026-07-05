@@ -1859,12 +1859,14 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 		if question, need := a.maybeConfirmCodeArtifactLanguage(userText, sessionID, traceID); need {
 			return &skill_step.CLIResponse{Text: question}, nil
 		}
-		prompt := buildDirectCodeAnswerPrompt(userText)
+		historyContext := a.buildDirectCodeAnswerContext(sessionID, userText)
+		prompt := buildDirectCodeAnswerPrompt(userText, historyContext)
 		debugtrace.Record("go.SendCLIMessage.direct_code_answer", traceID, map[string]interface{}{
-			"adapter_id": adapterID,
-			"prompt_len": len([]rune(prompt)),
-			"prompt":     prompt,
-			"note":       "direct code answer bypasses action-chain routing",
+			"adapter_id":  adapterID,
+			"prompt_len":  len([]rune(prompt)),
+			"prompt":      prompt,
+			"history_len": len([]rune(historyContext)),
+			"note":        "direct code answer bypasses action-chain routing",
 		})
 		resp, err := a.cliAdapter.SendMessage(skill_step.CLIMessageOptions{
 			AdapterID:      adapterID,
@@ -1873,9 +1875,10 @@ func (a *App) sendCLIMessage(adapterID string, sessionID string, userText string
 			UserText:       prompt,
 			Model:          strings.TrimSpace(modelOverride),
 			SystemPrompt:   "",
-			ContinuityKey:  conversationContinuityKey("composer-direct-code", sessionID),
+			ContinuityKey:  conversationContinuityKey("composer", sessionID),
 			TraceID:        traceID,
 			SkipContinuity: true,
+			RecordText:     userText,
 		})
 		if err != nil {
 			a.setAdapterRuntimeStatus(adapterID, adapter_registry.StatusDegraded)
@@ -2420,7 +2423,7 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	chatTimeout := 45 * time.Second
+	chatTimeout := 90 * time.Second
 	if isLocalAdapter {
 		chatTimeout = 180 * time.Second
 	}
@@ -2529,13 +2532,15 @@ func (a *App) sendAPIMessageImpl(adapterID string, sessionID string, userText st
 		if question, need := a.maybeConfirmCodeArtifactLanguage(userText, sessionID, traceID); need {
 			return &skill_step.CLIResponse{Text: question}, nil
 		}
-		prompt := buildDirectCodeAnswerPrompt(userText)
+		historyContext := a.buildDirectCodeAnswerContext(sessionID, userText)
+		prompt := buildDirectCodeAnswerPrompt(userText, historyContext)
 		debugtrace.Record("go.SendAPIMessage.direct_code_answer", traceID, map[string]interface{}{
-			"adapter_id": adapterID,
-			"model":      model,
-			"prompt_len": len([]rune(prompt)),
-			"prompt":     prompt,
-			"note":       "direct code answer bypasses action-chain routing",
+			"adapter_id":  adapterID,
+			"model":       model,
+			"prompt_len":  len([]rune(prompt)),
+			"prompt":      prompt,
+			"history_len": len([]rune(historyContext)),
+			"note":        "direct code answer bypasses action-chain routing",
 		})
 		text, err := callAPI(prompt)
 		if err != nil {
@@ -2961,7 +2966,7 @@ func isDirectCodeAnswerRequest(userText string) bool {
 	return !wantsInstalledTool
 }
 
-func buildDirectCodeAnswerPrompt(userText string) string {
+func buildDirectCodeAnswerPrompt(userText, historyContext string) string {
 	text := strings.TrimSpace(userText)
 	lang, explicitLang := requestedCodeLanguage(text)
 	languageRule := fmt.Sprintf("本次目標語言：%s。fenced code block 的語言標籤必須寫 ```%s。", lang.Label, lang.ID)
@@ -2970,7 +2975,7 @@ func buildDirectCodeAnswerPrompt(userText string) string {
 	} else {
 		languageRule += "使用者未指定語言，產品預設一律用 Go；即使需求提到 UI、畫面、單一檔案、外部套件或計算機，也請用 Go 標準函式庫做可直接執行的終端互動程式，不要改成 HTML/JavaScript。"
 	}
-	return strings.Join([]string{
+	lines := []string{
 		"你正在一般聊天回覆使用者，不是在路由工具、搜尋、讀取本機路徑、建立 skill 或建立 app 內小程式。",
 		"使用者明確要求你直接提供程式碼或單一檔案範例；請直接回答內容。",
 		"不要輸出 action-chain、不要只輸出 skill 名稱、不要要求使用既有 skill。",
@@ -2981,10 +2986,73 @@ func buildDirectCodeAnswerPrompt(userText string) string {
 		"程式碼放在單一 fenced code block（```語言 換行 程式碼```）內，第一行加註解說明這支程式的用途。",
 		"",
 		codeMarkProtocolPrompt(),
+	}
+	if hc := strings.TrimSpace(historyContext); hc != "" {
+		lines = append(lines,
+			"",
+			"── 同一條對話的先前脈絡（供你延續需求、修改或延伸上一版程式；若使用者這輪是追加或修改，請以先前程式為基礎，勿當成全新需求重寫）──",
+			hc,
+		)
+	}
+	lines = append(lines,
 		"",
 		"使用者需求：",
 		text,
-	}, "\n")
+	)
+	return strings.Join(lines, "\n")
+}
+
+// buildDirectCodeAnswerContext 組出 direct code 要注入的「同一條對話脈絡」：最近幾輪
+// 對話（來自 talk_full.md，跨 adapter 完整），加上該 session 最後產生的資料區程式碼
+// 全文（讓「追加需求／修改上一版」時看得到完整舊碼）。回傳空字串代表沒脈絡可帶。
+func (a *App) buildDirectCodeAnswerContext(sessionID, userText string) string {
+	currentKey := comparablePromptText(userText)
+	var turns []conversation.Sentence
+	for _, sent := range a.recentConversationSentences(8) {
+		key := comparablePromptText(sent.Content)
+		if key == "" || key == currentKey {
+			continue
+		}
+		turns = append(turns, sent)
+	}
+	if len(turns) > 6 {
+		turns = turns[len(turns)-6:]
+	}
+	var b strings.Builder
+	if len(turns) > 0 {
+		b.WriteString("先前對話：\n")
+		for _, sent := range turns {
+			role := "助手"
+			if strings.TrimSpace(sent.Role) == "user" {
+				role = "使用者"
+			}
+			b.WriteString(role)
+			b.WriteString("：")
+			b.WriteString(strings.TrimSpace(sent.Content))
+			b.WriteString("\n")
+		}
+	}
+	if meta, code, ok := lastCodeArtifactForSession(sessionID); ok && strings.TrimSpace(code) != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		label := strings.TrimSpace(meta.LanguageLabel)
+		if label == "" {
+			label = strings.TrimSpace(meta.Language)
+		}
+		fence := strings.TrimSpace(meta.Language)
+		if fence == "" {
+			fence = "text"
+		}
+		b.WriteString("上一版程式（")
+		b.WriteString(label)
+		b.WriteString("，若這輪是追加或修改，請在此基礎上改）：\n```")
+		b.WriteString(fence)
+		b.WriteString("\n")
+		b.WriteString(strings.TrimRight(code, "\n"))
+		b.WriteString("\n```")
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func extractGoProgramName(text string) string {
@@ -3848,6 +3916,7 @@ func (a *App) buildSharedPersonaPrompt(persona settings.Persona) string {
 	}
 
 	fields := []string{"角色=" + name, a.replyLanguageField()}
+	fields = append(fields, a.identityDisclosureField(name))
 	if value := strings.TrimSpace(persona.Identity); value != "" {
 		fields = append(fields, "身份="+value)
 	}
@@ -3861,6 +3930,45 @@ func (a *App) buildSharedPersonaPrompt(persona settings.Persona) string {
 		fields = append(fields, "回答策略="+expandReplyStrategyPrompt(value))
 	}
 	return "P: " + strings.Join(fields, "；") + "\n"
+}
+
+// identityDisclosureField 產生「身分 vs 底層模型」的回答分流規則：
+// 問「你是誰／你叫什麼／自我介紹」→ 只以人格（角色）身分回答，不談底層模型；
+// 問「底層模型／後端引擎／用哪個模型／現在系統的模型」→ 才據實說明底層模型
+// （若已明確得知型號則一併報出）。避免兩種問法被混為一談。
+func (a *App) identityDisclosureField(name string) string {
+	rule := "身分規則=被問「你是誰／你叫什麼／自我介紹」時，只以角色「" + name + "」的身分回答，不主動透露底層模型或引擎；被問「底層模型／後端引擎／用哪個模型／現在系統的模型」時，才據實說明實際的底層模型"
+	if model := a.activeModelLabel(); model != "" {
+		rule += "（目前為「" + model + "」）"
+	}
+	rule += "，不要用角色人設含糊帶過"
+	return rule
+}
+
+// activeModelLabel 盡力回報目前底層模型名稱，供「被問底層模型」時據實回答。
+// 僅在能明確判定單一模型時回傳；多個或零個 adapter 皆回空字串，
+// 由呼叫端改用一般性說明，避免硬報出錯誤型號。
+func (a *App) activeModelLabel() string {
+	if a == nil || a.settingsService == nil {
+		return ""
+	}
+	seen := map[string]struct{}{}
+	var models []string
+	for _, m := range a.settingsService.AdapterModelChoices() {
+		m = strings.TrimSpace(m)
+		if m == "" {
+			continue
+		}
+		if _, ok := seen[m]; ok {
+			continue
+		}
+		seen[m] = struct{}{}
+		models = append(models, m)
+	}
+	if len(models) == 1 {
+		return models[0]
+	}
+	return ""
 }
 
 func expandReplyStrategyPrompt(value string) string {

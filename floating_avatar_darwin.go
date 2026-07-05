@@ -23,6 +23,45 @@ static NSWindow *AIConsoleResolveWindow(void) {
     return nil;
 }
 
+// 遞迴找出 WKWebView（Wails 把 webview 掛在 contentView 底下）。
+static NSView *AIConsoleFindWebView(NSView *root) {
+    if (root == nil) return nil;
+    if ([NSStringFromClass([root class]) containsString:@"WKWebView"]) return root;
+    for (NSView *sub in [root subviews]) {
+        NSView *hit = AIConsoleFindWebView(sub);
+        if (hit != nil) return hit;
+    }
+    return nil;
+}
+
+// 後台浮窗透明加固：WKWebView 一旦出現 WebGL 等加速內容（全身像＋動態圖像），
+// 若 drawsBackground / underPageBackgroundColor / layer 底色沒清乾淨，
+// 合成器會把整片 webview 畫成不透明黑塊。這裡一次清到底；還原時恢復系統底色。
+static void AIConsoleHardenWebViewTransparency(NSWindow *w, int transparent) {
+    NSView *content = [w contentView];
+    NSView *web = AIConsoleFindWebView(content);
+    if (web != nil) {
+        if (transparent) {
+            @try {
+                [web setValue:[NSNumber numberWithBool:NO] forKey:@"drawsBackground"];
+            } @catch (NSException *e) {}  // WebKit 版本差異，忽略
+        }
+        @try {
+            if ([web respondsToSelector:@selector(setUnderPageBackgroundColor:)]) {
+                [web setValue:(transparent ? [NSColor clearColor] : [NSColor windowBackgroundColor])
+                       forKey:@"underPageBackgroundColor"];
+            }
+        } @catch (NSException *e) {}  // 忽略
+        if ([web layer] != nil) {
+            [[web layer] setOpaque:NO];
+            [[web layer] setBackgroundColor:(transparent ? [[NSColor clearColor] CGColor] : NULL)];
+        }
+    }
+    if (content != nil && [content layer] != nil) {
+        [[content layer] setBackgroundColor:(transparent ? [[NSColor clearColor] CGColor] : NULL)];
+    }
+}
+
 // 切換浮動頭像視窗型態。所有 AppKit 操作都丟回 main thread，
 // 因為這支函式由 Go bound method（非主執行緒）觸發。
 static void AIConsoleSetFloatingAvatar(int on) {
@@ -53,6 +92,9 @@ static void AIConsoleSetFloatingAvatar(int on) {
                 NSWindowCollectionBehaviorStationary |
                 NSWindowCollectionBehaviorFullScreenAuxiliary |
                 NSWindowCollectionBehaviorIgnoresCycle];
+
+            // WebGL（動態全身像）掛載後仍要維持真透明。
+            AIConsoleHardenWebViewTransparency(w, 1);
         } else {
             // 還原一般主控台視窗。
             w.titlebarAppearsTransparent = NO;
@@ -69,6 +111,8 @@ static void AIConsoleSetFloatingAvatar(int on) {
 
             [w setLevel:NSNormalWindowLevel];
             [w setCollectionBehavior:NSWindowCollectionBehaviorDefault];
+
+            AIConsoleHardenWebViewTransparency(w, 0);
         }
     });
 }

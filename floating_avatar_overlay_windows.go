@@ -299,6 +299,11 @@ func showFloatingAvatarOverlay(imagePath string, mode string, x int, y int, maxW
 	if err != nil {
 		return err
 	}
+	// 浮窗已存在時就地換圖重繪：切換 頭像↔全身像 不再整窗砍掉重建，
+	// 避免重建瞬間的閃爍／殘影，切換更順暢。
+	if updateFloatingAvatarOverlayAvatar(img, mode, x, y, onAction) {
+		return nil
+	}
 	closeFloatingAvatarOverlay()
 
 	ready := make(chan error, 1)
@@ -308,6 +313,37 @@ func showFloatingAvatarOverlay(imagePath string, mode string, x int, y int, maxW
 		runFloatingAvatarOverlay(img, mode, x, y, onAction, ready)
 	}()
 	return <-ready
+}
+
+// updateFloatingAvatarOverlayAvatar 就地更新現有浮窗的頭像圖與模式。
+// 回傳 false 表示目前沒有浮窗（呼叫端改走建窗流程）。
+// UpdateLayeredWindow 允許跨執行緒呼叫，與 redrawFloatingAvatarOverlay 同一套路。
+func updateFloatingAvatarOverlayAvatar(img image.Image, mode string, x int, y int, onAction func(string, string)) bool {
+	overlayMu.Lock()
+	hwnd := overlayHWND
+	if hwnd == 0 {
+		overlayMu.Unlock()
+		return false
+	}
+	overlayMode = normalizeOverlayMode(mode)
+	overlayState.Avatar = img
+	overlayState.Mode = overlayMode
+	overlayState.AvatarScreenX = x
+	overlayState.AvatarScreenY = y
+	if onAction != nil {
+		overlayAction = onAction
+	}
+	overlayMu.Unlock()
+
+	render := composeFloatingAvatarOverlayRender()
+	if render.Image == nil {
+		return false
+	}
+	if err := updateOverlayBitmap(hwnd, render.Image, render.WindowX, render.WindowY, render.TextRuns); err != nil {
+		return false
+	}
+	storeOverlayRender(render)
+	return true
 }
 
 func closeFloatingAvatarOverlay() {
@@ -603,7 +639,7 @@ func trackOverlayMenuWithState(hwnd uintptr) string {
 	interactiveActive := overlayInteract
 	overlayMu.Unlock()
 	appendOverlayMenuItem(menu, menuHead, checkedOverlayLabel(currentMode == "head", "\u982d\u50cf"))
-	appendOverlayMenuItem(menu, menuFull, checkedOverlayLabel(currentMode == "full", "\u5168\u8eab"))
+	appendOverlayMenuItem(menu, menuFull, checkedOverlayLabel(currentMode == "full", "\u5168\u8eab\u50cf"))
 	if currentMode == "full" {
 		appendOverlayMenuItem(menu, menuDynamic, checkedOverlayLabel(dynamicActive, "\u52d5\u614b\u6a21\u5f0f"))
 	}
@@ -617,9 +653,10 @@ func trackOverlayMenuWithState(hwnd uintptr) string {
 	procSetForegroundWindow.Call(hwnd)
 	cmd, _, _ := procTrackPopupMenu.Call(menu, tpmRight|tpmReturnCmd, uintptr(pt.X), uintptr(pt.Y), 0, hwnd, 0)
 	switch cmd {
-	case menuHead:
-		return "head"
 	case menuFull:
+		if currentMode == "full" {
+			return "head"
+		}
 		return "full"
 	case menuChat:
 		return "chat"
@@ -666,9 +703,8 @@ func trackOverlayMenu(hwnd uintptr) string {
 		return ""
 	}
 	defer procDestroyMenu.Call(menu)
-	appendOverlayMenuItem(menu, menuHead, "頭像")
-	appendOverlayMenuItem(menu, menuFull, "全身像")
 	appendOverlayMenuItem(menu, menuChat, "閒聊模式")
+	appendOverlayMenuItem(menu, menuFull, "動態圖像")
 	appendOverlayMenuItem(menu, menuRestore, "回到介面")
 	appendOverlayMenuItem(menu, menuQuit, "關閉程式")
 
@@ -677,8 +713,6 @@ func trackOverlayMenu(hwnd uintptr) string {
 	procSetForegroundWindow.Call(hwnd)
 	cmd, _, _ := procTrackPopupMenu.Call(menu, tpmRight|tpmReturnCmd, uintptr(pt.X), uintptr(pt.Y), 0, hwnd, 0)
 	switch cmd {
-	case menuHead:
-		return "head"
 	case menuFull:
 		return "full"
 	case menuChat:

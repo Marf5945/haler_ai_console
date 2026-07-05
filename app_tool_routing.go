@@ -222,6 +222,7 @@ func buildToolRoutingDecisionPrompt(systemPrompt string, userText string, lookup
 		"若流程 target 是 builtin.scheduler，target 可寫成 builtin.scheduler;title=<短標題>;summary=<一句話摘要>；title/summary 用自然語言抽取使用者真正要定期做的事，不要把「做成簡報/整理成文件」截成標題。",
 		"需要工具：需要其他工具，或候選不足但不像閒聊。",
 		"網路路由：凡需網路搜尋才能判斷的變動資料，如網路、即時、今天、今日、最新、現在等關鍵字→網路。",
+		"自我提問：使用者問本系統/助理/模型/底層是誰、用哪個引擎、是不是 gemini/claude/ollama 在運作等自我身分問題→閒聊，直接回答，嚴禁走網路或搜尋。",
 		"提問時機：查詢結果明顯取決於缺失的關鍵資訊（如地點/日期/個人身分/星座）時，先輸出 提問ㄌ<具體問題>ㄌ待命，不要硬搜；但只問會改變結果的關鍵資訊，能直接答就別問。",
 		"操作：明確重現/回放/照做/執行已保存操作且 saved_operations 明確→操作；只有 recent_operations 不算明確。",
 		"判斷=使用者明確要建立/保存/新增本 app 可執行的小程式或 skill（產出 .go 等程式檔）→程式；若只是要求在回覆中貼出 HTML/CSS/JS/Python/程式碼/單一檔範例，不要走程式，交一般模型回答。使用既有/已安裝 skill，或要既有 skill 處理資料/表格/CSV/XLSX/JSON並輸出→流程（流程的 target 必須是 available_skills 區塊裡的 SkillID，不可自創名稱）; 找操作候選→查詢; 找本機資料/文件/skill/記憶/對話/trace/專案→搜尋; 無法判斷本機或網路且缺必要資訊→提問; 明顯聊天→閒聊",
@@ -445,6 +446,12 @@ func (a *App) responseFromToolRoutingDecision(decision toolRoutingDecision, sess
 	userText := strings.TrimSpace(decision.Raw)
 	if len(userTextOpt) > 0 && strings.TrimSpace(userTextOpt[0]) != "" {
 		userText = strings.TrimSpace(userTextOpt[0])
+	}
+	// 自我提問守門（單一保底 chokepoint）：問本系統/助理/模型/底層是誰、用哪個引擎，
+	// 一律不在此處理，回 handled=false 讓流程落到一般 persona composer，
+	// 由真正的模型直接回答並自報身分，避免被誤路由到網路/搜尋而空回覆。
+	if decision.Kind != toolRoutingDecisionChat && isSelfReferentialSystemQuestion(userText) {
+		return false, skill_step.CLIResponse{}
 	}
 	if isReferenceListingQuestion(userText) {
 		if refs := a.recentReferenceFilesForRouting(6); len(refs) > 0 {

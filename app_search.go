@@ -546,9 +546,44 @@ func shouldPromoteDecisionToWebSearch(decision toolRoutingDecision) bool {
 	}
 }
 
+// isSelfReferentialSystemQuestion 判斷使用者是否在問「本系統/助理自己」的身分或底層引擎，
+// 例如「你是誰」「你是什麼模型」「現在系統底層是不是 gemini 在控制」。
+// 這類自我提問應由一般模型直接回答（可自報身分），不可路由到網路或本機搜尋。
+func isSelfReferentialSystemQuestion(text string) bool {
+	t := strings.ToLower(strings.TrimSpace(text))
+	if t == "" {
+		return false
+	}
+	// 模型／引擎詞
+	engine := containsAny(t, []string{
+		"模型", "引擎", "大模型", "語言模型", "llm",
+		"gemini", "claude", "ollama", "gpt", "openai", "anthropic", "llama", "qwen", "deepseek",
+	})
+	// 自我／系統指代詞
+	selfish := containsAny(t, []string{
+		"你", "妳", "您", "自己", "系統", "助理", "本app", "這個app", "這app",
+		"這個程式", "本程式", "底層", "背後", "後端", "核心", "現在", "目前",
+	})
+	// 運作／控制動詞或疑問語氣
+	verb := containsAny(t, []string{
+		"控制", "在跑", "跑的", "運作", "運行", "驅動", "是誰", "是不是", "是什麼",
+		"用的是", "底層是", "背後是", "誰在", "哪個", "什麼",
+	})
+	// 明確自我提問：你是誰 / 你是什麼模型
+	if containsAny(t, []string{"你是", "妳是", "您是", "自己是"}) && (engine || verb) {
+		return true
+	}
+	return engine && selfish && verb
+}
+
 func shouldRouteUserTextToWebSearch(text string) bool {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" || isExplicitLocalSearchRequest(trimmed) {
+		return false
+	}
+	// 自我提問（問本系統/助理/模型/底層是誰、用哪個引擎）屬於閒聊，
+	// 絕不因「現在/目前/最近」等關鍵字被硬推去查網路。
+	if isSelfReferentialSystemQuestion(trimmed) {
 		return false
 	}
 	lower := strings.ToLower(trimmed)

@@ -1497,15 +1497,15 @@ const fullBodyAvatarUrls = {
   },
   secretary: {
     idle: new URL('../assets/persona_fullbody/secretary/fullbody_idle.png', import.meta.url).href,
-    blocked: new URL('../assets/persona_fullbody/secretary/fullbody.png', import.meta.url).href,
+    blocked: new URL('../assets/persona_fullbody/secretary/fullbody_idle.png', import.meta.url).href,
   },
   police: {
     idle: new URL('../assets/persona_fullbody/police/fullbody_idle.png', import.meta.url).href,
-    blocked: new URL('../assets/persona_fullbody/police/fullbody.png', import.meta.url).href,
+    blocked: new URL('../assets/persona_fullbody/police/fullbody_idle.png', import.meta.url).href,
   },
   touharu: {
     idle: new URL('../assets/persona_fullbody/touharu/fullbody_idle.png', import.meta.url).href,
-    blocked: new URL('../assets/persona_fullbody/touharu/fullbody.png', import.meta.url).href,
+    blocked: new URL('../assets/persona_fullbody/touharu/fullbody_idle.png', import.meta.url).href,
   },
 };
 
@@ -2299,6 +2299,8 @@ function App() {
   const [floatingReminderPause, setFloatingReminderPause] = useState({mode: '', until: 0});
   const floatingAvatarWindowRef = useRef({restore: null, compactPosition: null});
   const floatingAvatarDragWindowRef = useRef(null);
+  const floatingAvatarDragFrameRef = useRef(0);
+  const floatingAvatarPendingWindowPositionRef = useRef(null);
   const floatingAvatarLastCompactPositionRef = useRef(null);
   const [floatingAvatarPosition, setFloatingAvatarPosition] = useState(() => {
     try {
@@ -8607,7 +8609,19 @@ function App() {
   }
 
   function beginCompactFloatingAvatarDrag() {
+    if (floatingAvatarDragFrameRef.current) {
+      window.cancelAnimationFrame(floatingAvatarDragFrameRef.current);
+      floatingAvatarDragFrameRef.current = 0;
+    }
+    floatingAvatarPendingWindowPositionRef.current = null;
     floatingAvatarDragWindowRef.current = floatingAvatarWindowRef.current?.compactPosition || null;
+  }
+
+  function flushCompactFloatingAvatarDragPosition() {
+    const pending = floatingAvatarPendingWindowPositionRef.current;
+    if (!pending) return;
+    floatingAvatarPendingWindowPositionRef.current = null;
+    WindowSetPosition(pending.x, pending.y);
   }
 
   function moveCompactFloatingAvatarWindow(dx, dy) {
@@ -8622,10 +8636,21 @@ function App() {
       compactPosition: next,
     };
     rememberFloatingAvatarCompactPosition(next);
-    WindowSetPosition(next.x, next.y);
+    floatingAvatarPendingWindowPositionRef.current = next;
+    if (!floatingAvatarDragFrameRef.current) {
+      floatingAvatarDragFrameRef.current = window.requestAnimationFrame(() => {
+        floatingAvatarDragFrameRef.current = 0;
+        flushCompactFloatingAvatarDragPosition();
+      });
+    }
   }
 
   async function syncCompactFloatingAvatarWindowPosition() {
+    if (floatingAvatarDragFrameRef.current) {
+      window.cancelAnimationFrame(floatingAvatarDragFrameRef.current);
+      floatingAvatarDragFrameRef.current = 0;
+    }
+    flushCompactFloatingAvatarDragPosition();
     const livePosition = await WindowGetPosition().catch(() => null);
     if (!Number.isFinite(livePosition?.x) || !Number.isFinite(livePosition?.y)) return;
     const next = clampFloatingAvatarScreenPosition(livePosition);
@@ -8821,8 +8846,9 @@ function App() {
   async function showFloatingAvatarOverlayAt(mode, x, y) {
     const overlayMode = mode === 'full' ? 'full' : 'head';
     const src = overlayMode === 'full'
-      ? (floatingFullBodyAvatarSrc || floatingAvatarSrc)
+      ? floatingFullBodyAvatarSrc
       : floatingAvatarSrc;
+    if (!src) return;
     const imageData = await imageSrcToBytes(src);
     const overlayModePayload = overlayMode === 'full'
       ? `${overlayMode}:${floatingFullBodyAvatarKey || 'wolf'}`
@@ -8841,6 +8867,17 @@ function App() {
   async function changeFloatingAvatarBodyMode(mode) {
     const nextMode = mode === 'full' ? 'full' : 'head';
     setFloatingAvatarBodyMode(nextMode);
+    if (nextMode === 'full') {
+      // 全身像預設維持靜態（不自動勾動態）；使用者要動態自行勾選。
+      // 仍需把 macOS 原生浮窗展開到足夠容納 200×360 立繪，否則高瘦身體會被 128px 方窗裁掉看似消失。
+      if (ENABLE_NATIVE_FLOATING_AVATAR_WINDOW && floatingAvatarModeRef.current) {
+        await setCompactAvatarExpanded(true).catch((error) => {
+          console.warn('expand floating avatar for full body failed', error);
+        });
+        // 視窗尺寸變更後重套一次透明置頂參數（幂等），避免 WKWebView 合成殘留。
+        await callWails(() => EnterFloatingAvatarNative()).catch(() => {});
+      }
+    }
     if (!ENABLE_NATIVE_FLOATING_AVATAR_WINDOW && floatingAvatarModeRef.current) {
       await repaintFloatingAvatarOverlay(nextMode).catch((error) => {
         console.warn('repaint floating avatar overlay failed', error);
@@ -8921,7 +8958,7 @@ function App() {
   const floatingFullBodyMotionManifest = resolveAvatarMotionManifest(
     floatingFullBodyAvatarKey,
     floatingExpression,
-    floatingFullBodyAvatarSrc || floatingAvatarSrc,
+    floatingFullBodyAvatarSrc,
   );
   // 紀念照「拍照」共用流程：Windows 原生浮窗選單與 mac 迷你面板的拍照鈕都走這裡，
   // 讓兩個平台的後台頭像介面行為一致。
@@ -9025,7 +9062,7 @@ function App() {
         active={floatingAvatarMode}
         t={t}
         avatarSrc={floatingAvatarSrc}
-        fullBodyAvatarSrc={floatingFullBodyAvatarSrc || floatingAvatarSrc}
+        fullBodyAvatarSrc={floatingFullBodyAvatarSrc}
         fullBodyAvatarKey={floatingFullBodyAvatarKey}
         fullBodyMotionManifest={floatingFullBodyMotionManifest}
         avatarExpression={floatingExpression}

@@ -653,10 +653,9 @@ func trackOverlayMenuWithState(hwnd uintptr) string {
 	procSetForegroundWindow.Call(hwnd)
 	cmd, _, _ := procTrackPopupMenu.Call(menu, tpmRight|tpmReturnCmd, uintptr(pt.X), uintptr(pt.Y), 0, hwnd, 0)
 	switch cmd {
+	case menuHead:
+		return "head"
 	case menuFull:
-		if currentMode == "full" {
-			return "head"
-		}
 		return "full"
 	case menuChat:
 		return "chat"

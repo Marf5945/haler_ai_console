@@ -931,7 +931,6 @@ func codeArtifactActivityDetail(detail string) string {
 	return detail
 }
 
-// codeArtifactMetaByFileName — 提供其他模組（如 D: 區塊）查 meta。
 // lastCodeArtifactForSession 取回該 session 最後產生的資料區程式碼（meta＋全文），
 // 供 direct code 在「追加需求／修改上一版」時把完整舊碼帶進 prompt。
 func lastCodeArtifactForSession(sessionID string) (CodeArtifactMeta, string, bool) {
@@ -952,6 +951,7 @@ func lastCodeArtifactForSession(sessionID string) (CodeArtifactMeta, string, boo
 	return meta, string(raw), true
 }
 
+// codeArtifactMetaByFileName — 提供其他模組（如 D: 區塊）查 meta。
 func codeArtifactMetaByFileName(fileName string) (CodeArtifactMeta, bool) {
 	codeArtifactMu.Lock()
 	defer codeArtifactMu.Unlock()

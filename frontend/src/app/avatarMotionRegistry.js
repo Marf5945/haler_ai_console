@@ -65,6 +65,46 @@ function proceduralManifest(pack, state, fallbackSrc) {
   };
 }
 
+// 游標轉向階梯：value 絕對值越大轉越多，負=面向畫面左，正=面向畫面右。
+const TURN_LADDER = [
+  {id: 'side_left', value: -3},
+  {id: 'front_left45', value: -2},
+  {id: 'front_left30', value: -1},
+  {id: 'front_right30', value: 1},
+  {id: 'front_right45', value: 2},
+  {id: 'side_right', value: 3},
+];
+
+// 無聊行為姿勢庫：待機久了輪播；arms_up 也做「撫摸抬手」的目標姿勢。
+const POSE_STATES = ['front_left30_arms_up', 'front_right30_arms_up', 'back_waist'];
+
+function resolveSubState(entry, stateName) {
+  const stateManifest = entry.manifest?.states?.[stateName];
+  if (!stateManifest) return null;
+  const baseSrc = assetURL(entry.folder, stateManifest.base);
+  const layers = (stateManifest.layers || [])
+    .map((layer) => hydrateLayer(entry.folder, layer))
+    .filter((layer) => layer.src);
+  if (!layers.length && !baseSrc) return null;
+  return {
+    id: stateName,
+    baseSrc,
+    layers,
+    motion: {
+      ...(entry.manifest.motion || {}),
+      ...(stateManifest.motion || {}),
+    },
+  };
+}
+
+function walkFrameURLs(folder) {
+  const prefix = `../assets/persona_motion/${folder}/sequences/walk_forward/`;
+  return Object.keys(motionAssetUrls)
+    .filter((key) => key.startsWith(prefix))
+    .sort()
+    .map((key) => motionAssetUrls[key]);
+}
+
 export function resolveAvatarMotionManifest(pack, state, fallbackSrc = '') {
   const entry = manifestByAlias.get(normalizeID(pack));
   if (!entry?.manifest) return proceduralManifest(pack, state, fallbackSrc);
@@ -72,19 +112,38 @@ export function resolveAvatarMotionManifest(pack, state, fallbackSrc = '') {
   const manifest = entry.manifest;
   const activeState = state && manifest.states?.[state] ? state : 'idle';
   const stateManifest = manifest.states?.[activeState] || manifest.states?.idle || {};
+  const stateBaseSrc = assetURL(entry.folder, stateManifest.base);
   const sourceLayers = stateManifest.layers?.length
     ? stateManifest.layers
-    : (manifest.states?.idle?.layers || []);
+    : (stateBaseSrc ? [] : (manifest.states?.idle?.layers || []));
   const layers = sourceLayers
     .map((layer) => hydrateLayer(entry.folder, layer))
     .filter((layer) => layer.src);
+
+  // 只有 idle（站姿待機）掛上轉向／行為資源；其他表情維持單一姿勢。
+  const interactive = activeState === 'idle';
+  const turnStates = interactive
+    ? TURN_LADDER
+      .map((t) => {
+        const sub = resolveSubState(entry, t.id);
+        return sub ? {...sub, value: t.value} : null;
+      })
+      .filter(Boolean)
+    : [];
+  const poseStates = interactive
+    ? POSE_STATES.map((id) => resolveSubState(entry, id)).filter(Boolean)
+    : [];
+  const walkFrames = interactive ? walkFrameURLs(entry.folder) : [];
 
   return {
     ...manifest,
     state: activeState,
     folder: entry.folder,
-    baseSrc: assetURL(entry.folder, stateManifest.base) || fallbackSrc || '',
+    baseSrc: stateBaseSrc || fallbackSrc || '',
     layers,
+    turnStates,
+    poseStates,
+    walkFrames,
     motion: {
       ...(manifest.motion || {}),
       ...(stateManifest.motion || {}),

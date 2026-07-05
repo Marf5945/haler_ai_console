@@ -19,7 +19,6 @@
     --font-weight-bold: 700;
     --font-weight-black: 900;
     --tracking-wide: 0.025em;
-    --tracking-wider: 0.05em;
     --leading-tight: 1.25;
     --leading-snug: 1.375;
     --leading-normal: 1.5;
@@ -6538,6 +6537,7 @@
     padding: calc(var(--spacing) * 0);
     color: var(--color-white);
     aspect-ratio: 1 / 1;
+    container-type: inline-size;
     min-height: 0;
     height: auto;
     cursor: grab;
@@ -6617,6 +6617,41 @@
   .settings-persona-avatar-menu button:hover {
     filter: brightness(1.05);
   }
+  .settings-persona-patrol-badge {
+    position: absolute;
+    top: calc(var(--spacing) * 2);
+    right: calc(var(--spacing) * 2);
+    z-index: 10;
+    max-width: calc(100% - 16px);
+    border-radius: 5px;
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: color-mix(in srgb, #fff 20%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-white) 20%, transparent);
+    }
+    background-color: color-mix(in srgb, #000 55%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-black) 55%, transparent);
+    }
+    padding-inline: 6px;
+    padding-block: 3px;
+    font-size: 10px;
+    --tw-font-weight: var(--font-weight-black);
+    font-weight: var(--font-weight-black);
+    --tw-tracking: var(--tracking-wide);
+    letter-spacing: var(--tracking-wide);
+    color: color-mix(in srgb, #fff 90%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      color: color-mix(in oklab, var(--color-white) 90%, transparent);
+    }
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-shadow: 0 1px 4px rgba(0,0,0,.7);
+    backdrop-filter: blur(4px);
+    pointer-events: none;
+  }
   .settings-persona-card strong {
     position: absolute;
     inset-inline: calc(var(--spacing) * 2);
@@ -6631,51 +6666,19 @@
     padding-inline: calc(var(--spacing) * 2);
     padding-block: calc(var(--spacing) * 2);
     text-align: center;
-    font-size: 17px;
-    --tw-leading: 1;
-    line-height: 1;
     --tw-font-weight: var(--font-weight-black);
     font-weight: var(--font-weight-black);
     background: linear-gradient(180deg, rgba(20,12,6,.28), rgba(9,5,2,.82));
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: clamp(11px, 10cqw, 17px);
+    line-height: 1;
+    letter-spacing: 0;
     text-shadow: 0 2px 10px rgba(0,0,0,.76);
     backdrop-filter: blur(6px);
-  }
-  .settings-persona-lock {
-    position: absolute;
-    top: calc(var(--spacing) * 2);
-    right: calc(var(--spacing) * 2);
-    border-radius: 5px;
-    background-color: #f0b65f;
-    padding-inline: 6px;
-    padding-block: 3px;
-    font-size: 10px;
-    --tw-font-weight: var(--font-weight-black);
-    font-weight: var(--font-weight-black);
-    color: #15100a;
-    box-shadow: 0 8px 18px rgba(0,0,0,.28);
-  }
-  .settings-persona-code {
-    position: absolute;
-    top: calc(var(--spacing) * 2);
-    left: calc(var(--spacing) * 2);
-    border-radius: 5px;
-    background-color: color-mix(in srgb, #000 55%, transparent);
-    @supports (color: color-mix(in lab, red, red)) {
-      background-color: color-mix(in oklab, var(--color-black) 55%, transparent);
-    }
-    padding-inline: 6px;
-    padding-block: 3px;
-    font-family: var(--font-mono);
-    font-size: 10px;
-    --tw-font-weight: var(--font-weight-bold);
-    font-weight: var(--font-weight-bold);
-    --tw-tracking: var(--tracking-wider);
-    letter-spacing: var(--tracking-wider);
-    color: color-mix(in srgb, #fff 80%, transparent);
-    @supports (color: color-mix(in lab, red, red)) {
-      color: color-mix(in oklab, var(--color-white) 80%, transparent);
-    }
-    backdrop-filter: blur(4px);
   }
   .settings-persona-add-card {
     place-items: center;
@@ -12454,7 +12457,8 @@
   animation: fullbody-idle-body 5.4s ease-in-out infinite;
 }
 .animated-fullbody-avatar-rig {
-  display: none;
+  display: block;
+  animation: fullbody-idle-part 5.4s ease-in-out infinite;
 }
 .animated-fullbody-avatar-eyes {
   position: absolute;
@@ -12503,8 +12507,16 @@
     transform: translateX(calc(var(--idle-sway) * .12)) rotate(.18deg);
   }
 }
+@keyframes fullbody-idle-part {
+  0%, 100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  50% {
+    transform: translate(var(--part-x), var(--part-y)) rotate(var(--part-rotate));
+  }
+}
 @media (prefers-reduced-motion: reduce) {
-  .animated-fullbody-avatar, .animated-fullbody-avatar-body {
+  .animated-fullbody-avatar, .animated-fullbody-avatar-body, .animated-fullbody-avatar-rig {
     animation: none;
   }
   .animated-fullbody-avatar-eye::after {

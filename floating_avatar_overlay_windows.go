@@ -8,6 +8,7 @@ import (
 	"image/color"
 	"image/draw"
 	_ "image/png"
+	"math"
 	"os"
 	"runtime"
 	"strings"
@@ -35,8 +36,13 @@ const (
 	wmClose           = 0x0010
 	wmDestroy         = 0x0002
 	wmNCHitTest       = 0x0084
+	wmNCMouseMove     = 0x00A0
+	wmNCLButtonDown   = 0x00A1
 	wmKeyDown         = 0x0100
 	wmChar            = 0x0102
+	wmTimer           = 0x0113
+	wmMouseMove       = 0x0200
+	wmLButtonDown     = 0x0201
 	wmLButtonUp       = 0x0202
 	wmLButtonDblClk   = 0x0203
 	wmNCLButtonDblClk = 0x00A3
@@ -56,6 +62,8 @@ const (
 	menuRestore  = uintptr(1003)
 	menuQuit     = uintptr(1004)
 	menuChat     = uintptr(1005)
+	menuDynamic  = uintptr(1006)
+	menuInteract = uintptr(1007)
 
 	ulwAlpha   = uintptr(0x00000002)
 	acSrcOver  = 0x00
@@ -78,6 +86,8 @@ const (
 	overlayBubbleWidth = 224
 	overlayGap         = 14
 	overlayReplyLineH  = 24
+	overlayTickMS      = 80
+	overlayTimerID     = uintptr(101)
 
 	fontQualityAntialiased = uintptr(4)
 )
@@ -99,6 +109,8 @@ var (
 	procGetDC               = overlayUser32.NewProc("GetDC")
 	procReleaseDC           = overlayUser32.NewProc("ReleaseDC")
 	procPostMessageW        = overlayUser32.NewProc("PostMessageW")
+	procSetTimer            = overlayUser32.NewProc("SetTimer")
+	procKillTimer           = overlayUser32.NewProc("KillTimer")
 	procSetForegroundWindow = overlayUser32.NewProc("SetForegroundWindow")
 	procOverlayGetCursorPos = overlayUser32.NewProc("GetCursorPos")
 	procGetWindowRect       = overlayUser32.NewProc("GetWindowRect")
@@ -125,6 +137,8 @@ var (
 	overlayAction    func(string, string)
 	overlayMode      string
 	overlayChatMode  bool
+	overlayDynamic   = false
+	overlayInteract  = true
 	overlayClassOnce sync.Once
 	overlayClassErr  error
 	overlayState     = floatingAvatarOverlayState{
@@ -214,13 +228,16 @@ type overlayBitmapInfo struct {
 type floatingAvatarOverlayState struct {
 	Avatar          image.Image
 	Mode            string
+	MotionPack      string
 	AvatarScreenX   int
 	AvatarScreenY   int
 	AvatarLocalX    int
 	AvatarLocalY    int
+	AvatarRect      overlayRect
 	PanelOpen       bool
 	Draft           string
 	ReplyText       string
+	PetUntil        time.Time
 	PersonaName     string
 	Placeholder     string
 	CloseRect       overlayRect
@@ -253,12 +270,28 @@ type overlayRender struct {
 	WindowY        int
 	AvatarLocalX   int
 	AvatarLocalY   int
+	AvatarRect     overlayRect
 	CloseRect      overlayRect
 	PhotoRect      overlayRect
 	ReplyRect      overlayRect
 	SubmitRect     overlayRect
 	TextRect       overlayRect
 	ReplyMaxScroll int
+}
+
+type overlayMotionLayer struct {
+	Top    float64
+	Right  float64
+	Bottom float64
+	Left   float64
+	X      float64
+	Y      float64
+	Delay  float64
+}
+
+type overlayMotionConfig struct {
+	Sway   float64
+	Layers []overlayMotionLayer
 }
 
 func showFloatingAvatarOverlay(imagePath string, mode string, x int, y int, maxW int, maxH int, onAction func(string, string)) error {
@@ -377,6 +410,7 @@ func runFloatingAvatarOverlay(img image.Image, mode string, x int, y int, onActi
 	overlayMode = normalizeOverlayMode(mode)
 	overlayState.Avatar = img
 	overlayState.Mode = normalizeOverlayMode(mode)
+	overlayState.MotionPack = overlayPackFromMode(mode)
 	overlayState.AvatarScreenX = x
 	overlayState.AvatarScreenY = y
 	overlayMu.Unlock()
@@ -388,6 +422,7 @@ func runFloatingAvatarOverlay(img image.Image, mode string, x int, y int, onActi
 		return
 	}
 	storeOverlayRender(render)
+	procSetTimer.Call(hwnd, overlayTimerID, overlayTickMS, 0)
 	ready <- nil
 
 	var msg overlayMsg
@@ -399,6 +434,7 @@ func runFloatingAvatarOverlay(img image.Image, mode string, x int, y int, onActi
 		procTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
 		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
 	}
+	procKillTimer.Call(hwnd, overlayTimerID)
 	overlayMu.Lock()
 	if overlayHWND == hwnd {
 		overlayHWND = 0
@@ -430,6 +466,37 @@ func avatarOverlayWindowProc(hwnd uintptr, msg uint32, wParam uintptr, lParam ui
 	switch msg {
 	case wmNCHitTest:
 		return overlayHitTest(hwnd, lParam)
+	case wmTimer:
+		if wParam == overlayTimerID {
+			overlayMu.Lock()
+			shouldRedraw := (overlayDynamic && overlayState.Mode == "full") || overlayState.PetUntil.After(time.Now())
+			overlayMu.Unlock()
+			if shouldRedraw {
+				redrawFloatingAvatarOverlay()
+			}
+			return 0
+		}
+		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(msg), wParam, lParam)
+		return ret
+	case wmMouseMove:
+		x := int(int16(lParam & 0xffff))
+		y := int(int16((lParam >> 16) & 0xffff))
+		handleOverlayPet(x, y)
+		return 0
+	case wmNCMouseMove:
+		x, y := overlayLocalPointFromLParam(hwnd, lParam)
+		handleOverlayPet(x, y)
+		return 0
+	case wmLButtonDown:
+		x := int(int16(lParam & 0xffff))
+		y := int(int16((lParam >> 16) & 0xffff))
+		handleOverlayPet(x, y)
+		return 0
+	case wmNCLButtonDown:
+		x, y := overlayLocalPointFromLParam(hwnd, lParam)
+		handleOverlayPet(x, y)
+		ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(msg), wParam, lParam)
+		return ret
 	case wmLButtonDblClk, wmNCLButtonDblClk:
 		openNativeOverlayChatPanel()
 		emitOverlayAction("chat_on", "")
@@ -458,7 +525,11 @@ func avatarOverlayWindowProc(hwnd uintptr, msg uint32, wParam uintptr, lParam ui
 		return 0
 	case wmRButtonUp, wmNCRButtonUp:
 		action := trackOverlayMenuWithState(hwnd)
-		if action == "restore" {
+		if action == "toggle_dynamic" {
+			toggleOverlayDynamicMode()
+		} else if action == "toggle_interactive" {
+			toggleOverlayInteractiveMode()
+		} else if action == "restore" {
 			emitOverlayAction(action, "")
 			procDestroyWindow.Call(hwnd)
 		} else if action != "" {
@@ -528,9 +599,15 @@ func trackOverlayMenuWithState(hwnd uintptr) string {
 	overlayMu.Lock()
 	currentMode := overlayMode
 	chatActive := overlayChatMode
+	dynamicActive := overlayDynamic
+	interactiveActive := overlayInteract
 	overlayMu.Unlock()
 	appendOverlayMenuItem(menu, menuHead, checkedOverlayLabel(currentMode == "head", "\u982d\u50cf"))
 	appendOverlayMenuItem(menu, menuFull, checkedOverlayLabel(currentMode == "full", "\u5168\u8eab"))
+	if currentMode == "full" {
+		appendOverlayMenuItem(menu, menuDynamic, checkedOverlayLabel(dynamicActive, "\u52d5\u614b\u6a21\u5f0f"))
+	}
+	appendOverlayMenuItem(menu, menuInteract, checkedOverlayLabel(interactiveActive, "\u4e92\u52d5\u6a21\u5f0f"))
 	appendOverlayMenuItem(menu, menuChat, checkedOverlayLabel(chatActive, "\u9592\u804a\u6a21\u5f0f"))
 	appendOverlayMenuItem(menu, menuRestore, "\u6574\u500b UI")
 	appendOverlayMenuItem(menu, menuQuit, "\u95dc\u9589")
@@ -546,6 +623,10 @@ func trackOverlayMenuWithState(hwnd uintptr) string {
 		return "full"
 	case menuChat:
 		return "chat"
+	case menuDynamic:
+		return "toggle_dynamic"
+	case menuInteract:
+		return "toggle_interactive"
 	case menuRestore:
 		return "restore"
 	case menuQuit:
@@ -553,6 +634,23 @@ func trackOverlayMenuWithState(hwnd uintptr) string {
 	default:
 		return ""
 	}
+}
+
+func toggleOverlayDynamicMode() {
+	overlayMu.Lock()
+	overlayDynamic = !overlayDynamic
+	overlayMu.Unlock()
+	redrawFloatingAvatarOverlay()
+}
+
+func toggleOverlayInteractiveMode() {
+	overlayMu.Lock()
+	overlayInteract = !overlayInteract
+	if !overlayInteract {
+		overlayState.PetUntil = time.Time{}
+	}
+	overlayMu.Unlock()
+	redrawFloatingAvatarOverlay()
 }
 
 func checkedOverlayLabel(active bool, label string) string {
@@ -746,6 +844,7 @@ func storeOverlayRender(render overlayRender) {
 	overlayMu.Lock()
 	overlayState.AvatarLocalX = render.AvatarLocalX
 	overlayState.AvatarLocalY = render.AvatarLocalY
+	overlayState.AvatarRect = render.AvatarRect
 	overlayState.CloseRect = render.CloseRect
 	overlayState.PhotoRect = render.PhotoRect
 	overlayState.ReplyRect = render.ReplyRect
@@ -757,6 +856,29 @@ func storeOverlayRender(render overlayRender) {
 	overlayState.LastWindowWidth = bounds.Dx()
 	overlayState.LastWindowH = bounds.Dy()
 	overlayMu.Unlock()
+}
+
+func handleOverlayPet(x int, y int) {
+	overlayMu.Lock()
+	if !overlayInteract {
+		overlayMu.Unlock()
+		return
+	}
+	avatarRect := overlayState.AvatarRect
+	panelOpen := overlayState.PanelOpen
+	if avatarRect.isEmpty() || !avatarRect.contains(x, y) {
+		overlayMu.Unlock()
+		return
+	}
+	nextUntil := time.Now().Add(850 * time.Millisecond)
+	if panelOpen {
+		nextUntil = time.Now().Add(500 * time.Millisecond)
+	}
+	if overlayState.PetUntil.Before(nextUntil) {
+		overlayState.PetUntil = nextUntil
+	}
+	overlayMu.Unlock()
+	redrawFloatingAvatarOverlay()
 }
 
 func refreshOverlayAvatarScreenPosition(hwnd uintptr) {
@@ -774,6 +896,8 @@ func composeFloatingAvatarOverlayRender() overlayRender {
 	overlayMu.Lock()
 	state := overlayState
 	chatActive := overlayChatMode
+	dynamicActive := overlayDynamic && state.Mode == "full"
+	interactiveActive := overlayInteract
 	overlayMu.Unlock()
 	avatar := state.Avatar
 	if avatar == nil {
@@ -784,13 +908,28 @@ func composeFloatingAvatarOverlayRender() overlayRender {
 	avatarH := avatarBounds.Dy()
 	replyText := strings.TrimSpace(state.ReplyText)
 	panelOpen := state.PanelOpen
+	now := time.Now()
+	motionSeconds := 0.0
+	phase := 0.0
+	if dynamicActive {
+		motionSeconds = float64(now.UnixNano()) / float64(time.Second)
+		phase = math.Sin(motionSeconds * (2 * math.Pi / 4.8))
+	}
+	petActive := interactiveActive && state.PetUntil.After(now)
 	if !panelOpen && replyText == "" {
+		canvasW := avatarW + 42
+		canvasH := avatarH + 50
+		canvas := image.NewRGBA(image.Rect(0, 0, canvasW, canvasH))
+		avatarX := (canvasW - avatarW) / 2
+		avatarY := (canvasH - avatarH) / 2
+		drawAnimatedOverlayAvatar(canvas, avatar, image.Rect(avatarX, avatarY, avatarX+avatarW, avatarY+avatarH), state.Mode, state.MotionPack, motionSeconds, phase, dynamicActive, petActive)
 		return overlayRender{
-			Image:        avatar,
-			WindowX:      state.AvatarScreenX,
-			WindowY:      state.AvatarScreenY,
-			AvatarLocalX: 0,
-			AvatarLocalY: 0,
+			Image:        canvas,
+			WindowX:      state.AvatarScreenX - avatarX,
+			WindowY:      state.AvatarScreenY - avatarY,
+			AvatarLocalX: avatarX,
+			AvatarLocalY: avatarY,
+			AvatarRect:   rect(avatarX, avatarY, avatarX+avatarW, avatarY+avatarH),
 		}
 	}
 
@@ -825,7 +964,8 @@ func composeFloatingAvatarOverlayRender() overlayRender {
 	if state.Mode == "full" {
 		avatarY = max(8, (canvasH-avatarH)/2)
 	}
-	draw.Draw(canvas, image.Rect(avatarX, avatarY, avatarX+avatarW, avatarY+avatarH), avatar, avatarBounds.Min, draw.Over)
+	avatarBaseRect := image.Rect(avatarX, avatarY, avatarX+avatarW, avatarY+avatarH)
+	drawAnimatedOverlayAvatar(canvas, avatar, avatarBaseRect, state.Mode, state.MotionPack, motionSeconds, phase, dynamicActive, petActive)
 
 	textRuns := []overlayTextRun{}
 	var replyRect overlayRect
@@ -922,12 +1062,202 @@ func composeFloatingAvatarOverlayRender() overlayRender {
 		WindowY:        windowY,
 		AvatarLocalX:   avatarX,
 		AvatarLocalY:   avatarY,
+		AvatarRect:     rect(avatarBaseRect.Min.X, avatarBaseRect.Min.Y, avatarBaseRect.Max.X, avatarBaseRect.Max.Y),
 		CloseRect:      closeRect,
 		PhotoRect:      photoRect,
 		ReplyRect:      replyRect,
 		SubmitRect:     submitRect,
 		TextRect:       textRect,
 		ReplyMaxScroll: replyMaxScroll,
+	}
+}
+
+func drawAnimatedOverlayAvatar(canvas *image.RGBA, avatar image.Image, base image.Rectangle, mode string, pack string, motionSeconds float64, phase float64, dynamicActive bool, petActive bool) {
+	offsetY := 0
+	if dynamicActive {
+		offsetY = int(math.Round(-1.5 * (phase + 1) / 2))
+	}
+	if petActive {
+		offsetY += 2
+	}
+	dest := base.Add(image.Pt(0, offsetY))
+	if petActive {
+		glow := dest.Inset(-4)
+		drawRoundedRectOutline(canvas, glow, 12, color.RGBA{R: 119, G: 215, B: 208, A: 130})
+		drawRoundedRectOutline(canvas, glow.Inset(2), 10, color.RGBA{R: 255, G: 210, B: 129, A: 95})
+	}
+	if normalizeOverlayMode(mode) == "full" && (dynamicActive || petActive) {
+		if drawRiggedOverlayAvatar(canvas, avatar, dest, pack, motionSeconds, petActive) {
+			return
+		}
+	}
+	drawOverlayImageAt(canvas, dest.Min.X, dest.Min.Y, avatar, avatar.Bounds())
+}
+
+func drawRiggedOverlayAvatar(canvas *image.RGBA, avatar image.Image, dest image.Rectangle, pack string, motionSeconds float64, petActive bool) bool {
+	config, ok := overlayMotionForPack(pack)
+	if !ok || len(config.Layers) == 0 {
+		return false
+	}
+	srcBounds := avatar.Bounds()
+	if srcBounds.Dx() <= 0 || srcBounds.Dy() <= 0 || dest.Dx() <= 0 || dest.Dy() <= 0 {
+		return false
+	}
+	drawOverlayImageAt(canvas, dest.Min.X, dest.Min.Y, avatar, srcBounds)
+	phaseBase := motionSeconds * (2 * math.Pi / 5.4)
+	type partDraw struct {
+		src    image.Rectangle
+		offset image.Point
+	}
+	parts := make([]partDraw, 0, len(config.Layers))
+	for _, layer := range config.Layers {
+		src := clipPercentRect(srcBounds, layer.Top, layer.Right, layer.Bottom, layer.Left)
+		if src.Empty() {
+			continue
+		}
+		partPhase := math.Sin(phaseBase + layer.Delay)
+		motionScale := 1.7
+		if petActive {
+			partPhase = 1
+			motionScale = 2.05
+		}
+		offset := image.Pt(
+			int(math.Round(layer.X*motionScale*partPhase)),
+			int(math.Round(layer.Y*motionScale*partPhase)),
+		)
+		if offset.X == 0 && offset.Y == 0 {
+			continue
+		}
+		clearOverlayRect(canvas, srcToDestRect(src, srcBounds, dest))
+		parts = append(parts, partDraw{src: src, offset: offset})
+	}
+	for _, part := range parts {
+		target := srcToDestRect(part.src, srcBounds, dest).Add(part.offset)
+		drawOverlayImageAt(canvas, target.Min.X, target.Min.Y, avatar, part.src)
+	}
+	return true
+}
+
+func overlayMotionForPack(pack string) (overlayMotionConfig, bool) {
+	switch pack {
+	case "wolf", "wolfdog", "":
+		return overlayMotionConfig{Sway: 6, Layers: []overlayMotionLayer{
+			{Top: 0, Right: 28, Bottom: 75, Left: 24, X: 2, Y: 1.4, Delay: -0.1},
+			{Top: 18, Right: 70, Bottom: 48, Left: 0, X: 3.4, Y: 2.5, Delay: -0.8},
+			{Top: 36, Right: 3, Bottom: 36, Left: 58, X: 2.4, Y: 1.8, Delay: -1.3},
+			{Top: 78, Right: 0, Bottom: 0, Left: 6, X: 1.1, Y: 0.8, Delay: -1.8},
+		}}, true
+	case "uncle", "uncle_bust":
+		return overlayMotionConfig{Sway: 3.6, Layers: []overlayMotionLayer{
+			{Top: 0, Right: 28, Bottom: 78, Left: 28, X: 1.2, Y: 0.9, Delay: -0.4},
+			{Top: 33, Right: 70, Bottom: 40, Left: 0, X: 1.8, Y: 1.3, Delay: -1.2},
+			{Top: 33, Right: 0, Bottom: 40, Left: 70, X: 1.8, Y: 1.3, Delay: -0.8},
+			{Top: 82, Right: 0, Bottom: 0, Left: 0, X: 0.7, Y: 0.5, Delay: -1.5},
+		}}, true
+	case "secretary":
+		return overlayMotionConfig{Sway: 4.5, Layers: []overlayMotionLayer{
+			{Top: 0, Right: 8, Bottom: 74, Left: 8, X: 1.4, Y: 1.1, Delay: -0.2},
+			{Top: 20, Right: 60, Bottom: 52, Left: 0, X: 2.4, Y: 1.9, Delay: -0.7},
+			{Top: 30, Right: 0, Bottom: 48, Left: 48, X: 1.8, Y: 1.4, Delay: -1.2},
+			{Top: 83, Right: 0, Bottom: 0, Left: 0, X: 0.7, Y: 0.6, Delay: -1.7},
+		}}, true
+	case "police":
+		return overlayMotionConfig{Sway: 3.8, Layers: []overlayMotionLayer{
+			{Top: 0, Right: 26, Bottom: 77, Left: 25, X: 1.2, Y: 0.9, Delay: -0.3},
+			{Top: 34, Right: 69, Bottom: 38, Left: 0, X: 1.7, Y: 1.2, Delay: -1},
+			{Top: 31, Right: 0, Bottom: 45, Left: 59, X: 1.9, Y: 1.4, Delay: -0.6},
+			{Top: 82, Right: 0, Bottom: 0, Left: 0, X: 0.6, Y: 0.5, Delay: -1.7},
+		}}, true
+	case "touharu":
+		return overlayMotionConfig{Sway: 6.2, Layers: []overlayMotionLayer{
+			{Top: 0, Right: 13, Bottom: 70, Left: 12, X: 2.2, Y: 1.5, Delay: -0.1},
+			{Top: 27, Right: 50, Bottom: 48, Left: 4, X: 2.4, Y: 1.8, Delay: -0.9},
+			{Top: 26, Right: 6, Bottom: 48, Left: 47, X: 2.3, Y: 1.8, Delay: -1.3},
+			{Top: 85, Right: 0, Bottom: 0, Left: 0, X: 0.8, Y: 0.55, Delay: -1.6},
+		}}, true
+	default:
+		return overlayMotionConfig{}, false
+	}
+}
+
+func clipPercentRect(bounds image.Rectangle, top float64, right float64, bottom float64, left float64) image.Rectangle {
+	w := float64(bounds.Dx())
+	h := float64(bounds.Dy())
+	return image.Rect(
+		bounds.Min.X+clampInt(int(math.Round(w*left/100)), 0, bounds.Dx()),
+		bounds.Min.Y+clampInt(int(math.Round(h*top/100)), 0, bounds.Dy()),
+		bounds.Max.X-clampInt(int(math.Round(w*right/100)), 0, bounds.Dx()),
+		bounds.Max.Y-clampInt(int(math.Round(h*bottom/100)), 0, bounds.Dy()),
+	)
+}
+
+func srcToDestRect(src image.Rectangle, srcBounds image.Rectangle, dest image.Rectangle) image.Rectangle {
+	return image.Rect(
+		dest.Min.X+src.Min.X-srcBounds.Min.X,
+		dest.Min.Y+src.Min.Y-srcBounds.Min.Y,
+		dest.Min.X+src.Max.X-srcBounds.Min.X,
+		dest.Min.Y+src.Max.Y-srcBounds.Min.Y,
+	)
+}
+
+func drawOverlayImageAt(canvas *image.RGBA, x int, y int, src image.Image, srcRect image.Rectangle) {
+	target := image.Rect(x, y, x+srcRect.Dx(), y+srcRect.Dy()).Intersect(canvas.Bounds())
+	if target.Empty() {
+		return
+	}
+	srcPoint := image.Pt(srcRect.Min.X+target.Min.X-x, srcRect.Min.Y+target.Min.Y-y)
+	draw.Draw(canvas, target, src, srcPoint, draw.Over)
+}
+
+func clearOverlayRect(canvas *image.RGBA, r image.Rectangle) {
+	r = r.Intersect(canvas.Bounds())
+	if r.Empty() {
+		return
+	}
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		for x := r.Min.X; x < r.Max.X; x++ {
+			canvas.SetRGBA(x, y, color.RGBA{})
+		}
+	}
+}
+
+func drawScaledOverlayImage(canvas *image.RGBA, dest image.Rectangle, src image.Image) {
+	dest = dest.Intersect(canvas.Bounds())
+	if dest.Empty() {
+		return
+	}
+	srcBounds := src.Bounds()
+	srcW := srcBounds.Dx()
+	srcH := srcBounds.Dy()
+	if srcW <= 0 || srcH <= 0 || dest.Dx() <= 0 || dest.Dy() <= 0 {
+		return
+	}
+	if dest.Dx() == srcW && dest.Dy() == srcH {
+		draw.Draw(canvas, dest, src, srcBounds.Min, draw.Over)
+		return
+	}
+	for y := dest.Min.Y; y < dest.Max.Y; y++ {
+		srcY := (float64(y-dest.Min.Y)+0.5)*float64(srcH)/float64(dest.Dy()) - 0.5
+		y0 := clampInt(int(srcY), 0, srcH-1)
+		y1 := clampInt(y0+1, 0, srcH-1)
+		fy := srcY - float64(y0)
+		if fy < 0 {
+			fy = 0
+		}
+		for x := dest.Min.X; x < dest.Max.X; x++ {
+			srcX := (float64(x-dest.Min.X)+0.5)*float64(srcW)/float64(dest.Dx()) - 0.5
+			x0 := clampInt(int(srcX), 0, srcW-1)
+			x1 := clampInt(x0+1, 0, srcW-1)
+			fx := srcX - float64(x0)
+			if fx < 0 {
+				fx = 0
+			}
+			c00 := rgba8(src.At(srcBounds.Min.X+x0, srcBounds.Min.Y+y0))
+			c10 := rgba8(src.At(srcBounds.Min.X+x1, srcBounds.Min.Y+y0))
+			c01 := rgba8(src.At(srcBounds.Min.X+x0, srcBounds.Min.Y+y1))
+			c11 := rgba8(src.At(srcBounds.Min.X+x1, srcBounds.Min.Y+y1))
+			blendPixel(canvas, x, y, bilinearRGBA(c00, c10, c01, c11, fx, fy))
+		}
 	}
 }
 

@@ -5,7 +5,9 @@ set "ROOT=%~dp0"
 cd /d "%ROOT%" || exit /b 1
 
 set "PINNED_GO_VERSION=1.26.4"
+set "MIN_GO_VERSION=1.26.3"
 set "PINNED_NODE_VERSION=24.16.0"
+set "MIN_NODE_VERSION=22.19.0"
 set "PINNED_WAILS_VERSION=v2.12.0"
 set "GO_AMD64_SHA256=55902c036634c7ab3159cf259af692abc86989aaefcc7f75bef888f3263031c4"
 set "GO_ARM64_SHA256=b87863733cd87624387ee61307a5ebaf405351bf4035a3aa7744c26a785a3d3e"
@@ -13,12 +15,13 @@ set "NODE_X64_SHA256=43749d78a28ff11a36cb279407bc13e79bcfb8670e7926e469018d31c2e
 set "NODE_ARM64_SHA256=beac2056574ebc523d5feaad7cdc434cb1d752eba076db7ebb4b62bc13ec70b9"
 set "DOWNLOAD_DIR=%TEMP%\ai-console-build-tools"
 set "APP_DISPLAY_NAME=HaLer AI Console"
+set "LEGACY_APP_DISPLAY_NAMES=ai-console"
 set "BUILD_INSTALLER=0"
 set "CLEAN_BUILD=0"
 set "WAILS_EXE=wails"
 set "BUILD_CACHE_ROOT=%TEMP%\haler-ai-console-build-cache"
 set "GOCACHE=%BUILD_CACHE_ROOT%\go-build"
-set "GOMODCACHE=%BUILD_CACHE_ROOT%\go-mod"
+set "GOMODCACHE="
 
 :parse_args
 if "%~1"=="" goto args_done
@@ -98,8 +101,12 @@ if not exist "frontend\package.json" (
   exit /b 1
 )
 
+if exist "frontend\dist" (
+  echo Removing stale frontend dist...
+  rmdir /s /q "frontend\dist"
+)
+
 if not exist "%GOCACHE%" mkdir "%GOCACHE%"
-if not exist "%GOMODCACHE%" mkdir "%GOMODCACHE%"
 
 if exist "build\cache" (
   echo Removing legacy in-repo Go cache...
@@ -112,6 +119,30 @@ call "%WAILS_EXE%" doctor
 if errorlevel 1 (
   echo [ERROR] wails doctor reported a problem. Fix the issue above, then rerun build.cmd.
   exit /b 1
+)
+
+echo.
+tasklist /FI "IMAGENAME eq %APP_DISPLAY_NAME%.exe" 2>nul | find /I "%APP_DISPLAY_NAME%.exe" >nul
+if not errorlevel 1 (
+  echo [ERROR] %APP_DISPLAY_NAME%.exe is currently running.
+  echo         Close the app before building so Windows can replace build\bin\%APP_DISPLAY_NAME%.exe.
+  exit /b 1
+)
+for %%N in (%LEGACY_APP_DISPLAY_NAMES%) do (
+  tasklist /FI "IMAGENAME eq %%N.exe" 2>nul | find /I "%%N.exe" >nul
+  if not errorlevel 1 (
+    echo [ERROR] %%N.exe is currently running.
+    echo         Close the legacy app before building so Windows can remove build\bin\%%N.exe.
+    exit /b 1
+  )
+  if exist "build\bin\%%N.exe" (
+    echo Removing legacy app binary: build\bin\%%N.exe
+    del /f /q "build\bin\%%N.exe"
+    if errorlevel 1 (
+      echo [ERROR] Failed to remove legacy app binary build\bin\%%N.exe.
+      exit /b 1
+    )
+  )
 )
 
 echo.
@@ -135,6 +166,15 @@ if "%BUILD_INSTALLER%"=="1" (
   )
 )
 
+if exist "build\bin\assets\models\yolox_button_s.onnx" (
+  echo Removing stale YOLOX-S button model from build output...
+  del /f /q "build\bin\assets\models\yolox_button_s.onnx"
+  if errorlevel 1 (
+    echo [ERROR] Failed to remove stale build\bin\assets\models\yolox_button_s.onnx
+    exit /b 1
+  )
+)
+
 if exist "assets\models\yolox_button_s.onnx" (
   echo.
   echo Copying YOLOX-S button model...
@@ -146,6 +186,15 @@ if exist "assets\models\yolox_button_s.onnx" (
   )
 ) else (
   echo [WARN] assets\models\yolox_button_s.onnx not found; Visual Learning YOLO will run degraded.
+)
+
+if exist "build\bin\assets\runtimes\onnxruntime-directml\1.24.4\win-x64" (
+  echo Removing stale ONNX Runtime DirectML output...
+  rmdir /s /q "build\bin\assets\runtimes\onnxruntime-directml\1.24.4\win-x64"
+  if errorlevel 1 (
+    echo [ERROR] Failed to remove stale ONNX Runtime DirectML output.
+    exit /b 1
+  )
 )
 
 if exist "assets\runtimes\onnxruntime-directml\1.24.4\win-x64\onnxruntime.dll" (
@@ -198,6 +247,10 @@ call :refresh_path
 set "FOUND_GO="
 for /f "tokens=3" %%V in ('go version 2^>nul') do set "FOUND_GO=%%V"
 if "!FOUND_GO!"=="go%PINNED_GO_VERSION%" exit /b 0
+if "!FOUND_GO!"=="go%MIN_GO_VERSION%" (
+  echo [INFO] Found compatible Go !FOUND_GO!; pinned installer remains go%PINNED_GO_VERSION%.
+  exit /b 0
+)
 if defined FOUND_GO (
   echo [WARN] Found Go !FOUND_GO!, but this build helper is pinned to go%PINNED_GO_VERSION%.
 ) else (
@@ -229,6 +282,13 @@ for /f "delims=" %%V in ('node --version 2^>nul') do set "FOUND_NODE=%%V"
 if "!FOUND_NODE!"=="v%PINNED_NODE_VERSION%" (
   where npm >nul 2>nul
   if not errorlevel 1 exit /b 0
+)
+if "!FOUND_NODE!"=="v%MIN_NODE_VERSION%" (
+  where npm >nul 2>nul
+  if not errorlevel 1 (
+    echo [INFO] Found compatible Node.js !FOUND_NODE!; pinned installer remains v%PINNED_NODE_VERSION%.
+    exit /b 0
+  )
 )
 if defined FOUND_NODE (
   echo [WARN] Found Node.js !FOUND_NODE!, but this build helper is pinned to v%PINNED_NODE_VERSION%.

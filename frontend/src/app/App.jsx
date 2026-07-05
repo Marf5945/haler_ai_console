@@ -976,7 +976,43 @@ const fallbackSettings = {
 };
 
 const lockedPersonaId = 'persona-a';
-/* i18n: persona locked */ const lockedPersonaName = _t('persona.lockedName');
+
+function panelLanguageLabelToLocale(displayLabel, {allowAuto = true} = {}) {
+  const map = {
+    [_t('settings.langZhTW')]: 'zh-TW',
+    [_t('settings.langEn')]: 'en',
+    [_t('settings.langJa')]: 'ja',
+    [_t('settings.langPt')]: 'pt-PT',
+    [_t('settings.langEs')]: 'es',
+    [_t('settings.langTh')]: 'th',
+    [_t('settings.langKo')]: 'ko',
+    '繁中': 'zh-TW', '中文': 'zh-TW', '英文': 'en', '日文': 'ja',
+    'Traditional Chinese': 'zh-TW', 'Chinese': 'zh-TW', 'English': 'en', 'Japanese': 'ja',
+    '中': 'zh-TW', 'en': 'en', 'ja': 'ja',
+    'pt': 'pt-PT', 'pt-PT': 'pt-PT', 'es': 'es', 'th': 'th', 'ko': 'ko',
+    'Português': 'pt-PT', '葡萄牙文': 'pt-PT', 'Español': 'es', '西班牙文': 'es',
+    'ไทย': 'th', '泰文': 'th', '한국어': 'ko', '韓文': 'ko', '韓語': 'ko', 'Korean': 'ko',
+    'settings.langPt': 'pt-PT', 'settings.langEs': 'es', 'settings.langTh': 'th', 'settings.langKo': 'ko',
+  };
+  if (!allowAuto) {
+    const autoLabels = new Set([_t('settings.roleLangAuto'), _t('settings.roleLanguageAuto'), '自動', 'Auto', 'auto']);
+    if (autoLabels.has(displayLabel)) return null;
+  }
+  return map[displayLabel] || null;
+}
+
+function personaLocaleFromPanel(panel = {}) {
+  // Persona card names/identities shown in the settings panel follow the
+  // Panel Language (UI chrome). Character Language governs the character's
+  // spoken language during chat, handled separately via chatLocale.
+  return panelLanguageLabelToLocale(panel.panelLanguage)
+    || useI18n.getState().language
+    || 'zh-TW';
+}
+
+function personaI18n(locale, key, params) {
+  return locale ? tForLanguage(locale, key, params) : _t(key, params);
+}
 /* i18n: reply strategy presets */
 const getReplyStrategyPresets = () => [
   {id: 'concise', label: _t('strategy.save.label'), prompt: _t('strategy.save.prompt')},
@@ -5543,31 +5579,18 @@ function App() {
 
   /* i18n: map panel language display label → locale code */
   function panelLangToLocale(displayLabel) {
-    const map = {
-      [_t('settings.langZhTW')]: 'zh-TW',
-      [_t('settings.langEn')]: 'en',
-      [_t('settings.langJa')]: 'ja',
-      [_t('settings.langPt')]: 'pt-PT',
-      [_t('settings.langEs')]: 'es',
-      [_t('settings.langTh')]: 'th',
-      [_t('settings.langKo')]: 'ko',
-      // fallback hardcoded labels
-      '繁中': 'zh-TW', '中文': 'zh-TW', '英文': 'en', '日文': 'ja',
-      'Traditional Chinese': 'zh-TW', 'Chinese': 'zh-TW', 'English': 'en', 'Japanese': 'ja',
-      '中': 'zh-TW', 'en': 'en', 'ja': 'ja',
-      'pt': 'pt-PT', 'pt-PT': 'pt-PT', 'es': 'es', 'th': 'th', 'ko': 'ko',
-      'Português': 'pt-PT', '葡萄牙文': 'pt-PT', 'Español': 'es', '西班牙文': 'es', 'ไทย': 'th', '泰文': 'th', '한국어': 'ko', '韓文': 'ko', '韓語': 'ko', 'Korean': 'ko',
-      // self-heal: raw i18n keys leaked by an older build
-      'settings.langPt': 'pt-PT', 'settings.langEs': 'es', 'settings.langTh': 'th', 'settings.langKo': 'ko',
-    };
-    return map[displayLabel] || null;
+    return panelLanguageLabelToLocale(displayLabel);
   }
 
   async function savePanelPatch(patch) {
     try {
       const panel = normalizePanelSettings({...settingsState.panel, ...patch});
       const next = await callWails(() => SavePanelSettings(panel));
-      setSettingsState((prev) => normalizeSettingsState(next, {...prev, panel}));
+      const normalized = normalizeSettingsState(next, {...settingsState, panel});
+      setSettingsState(normalized);
+      const activePersona = findActivePersona(normalized);
+      if (activePersona?.name) setPersonaName(activePersona.name);
+      if (activePersona?.identity) setPersonaJob(activePersona.identity);
       callWails(GetVoiceSettings).then((settings) => setVoiceState(settings || null)).catch(() => {});
 
       /* i18n: if panel language changed, sync i18n store and reload */
@@ -5578,7 +5601,14 @@ function App() {
         }
       }
     } catch {
-      setSettingsState((prev) => ({...prev, panel: normalizePanelSettings({...prev.panel, ...patch})}));
+      const normalized = normalizeSettingsState({
+        ...settingsState,
+        panel: normalizePanelSettings({...settingsState.panel, ...patch}),
+      });
+      setSettingsState(normalized);
+      const activePersona = findActivePersona(normalized);
+      if (activePersona?.name) setPersonaName(activePersona.name);
+      if (activePersona?.identity) setPersonaJob(activePersona.identity);
     }
   }
 
@@ -6267,18 +6297,23 @@ function App() {
     const persona = {...current, ...patch};
     if (!persona.id) persona.id = personaId;
     if (!persona.name) persona.name = t('persona.fallbackName', { index: settingsState.personas.length + 1 });
-    if (persona.id === lockedPersonaId) persona.name = lockedPersonaName;
+    if (persona.id === lockedPersonaId) persona.name = t('persona.lockedName');
     try {
       const next = await callWails(() => SavePersona(persona));
       const normalized = normalizeSettingsState(next, settingsState);
       setSettingsState(normalized);
-      if (persona.id === next.activePersonaId) {
-        if (persona.name) setPersonaName(persona.id === lockedPersonaId ? lockedPersonaName : persona.name);
-        if (persona.identity) setPersonaJob(persona.identity);
+      if (persona.id === normalized.activePersonaId) {
+        const activePersona = findActivePersona(normalized);
+        if (activePersona?.name) setPersonaName(activePersona.name);
+        if (activePersona?.identity) setPersonaJob(activePersona.identity);
       }
     } catch {
       setSettingsState((prev) => {
-        const normalizedPersonas = normalizeLockedPersonas(prev.personas.map((item) => (item.id === persona.id ? persona : item)));
+        const normalizedPersonas = normalizeLockedPersonas(
+          prev.personas.map((item) => (item.id === persona.id ? persona : item)),
+          prev.removedDefaultPersonaIds || [],
+          personaLocaleFromPanel(prev.panel),
+        );
         return {
           ...prev,
           activePersonaId: persona.id,
@@ -8070,6 +8105,11 @@ function App() {
     setSettingsState((prev) => normalizeSettingsState(prev));
   }, [_i18nLang]);
 
+  useEffect(() => {
+    if (activePersona?.name) setPersonaName(activePersona.name);
+    if (activePersona?.identity) setPersonaJob(activePersona.identity);
+  }, [activePersona?.id, activePersona?.name, activePersona?.identity]);
+
   function handleGlobalFileDragOver(event) {
     const types = Array.from(event.dataTransfer?.types || []);
     if (!types.includes('Files')) return;
@@ -8676,7 +8716,10 @@ function App() {
       ? (floatingFullBodyAvatarSrc || floatingAvatarSrc)
       : floatingAvatarSrc;
     const imageData = await imageSrcToBytes(src);
-    await callWails(() => EnterFloatingAvatarOverlayImage(imageData, overlayMode, Math.round(x), Math.round(y)));
+    const overlayModePayload = overlayMode === 'full'
+      ? `${overlayMode}:${floatingFullBodyAvatarKey || 'wolf'}`
+      : overlayMode;
+    await callWails(() => EnterFloatingAvatarOverlayImage(imageData, overlayModePayload, Math.round(x), Math.round(y)));
     syncFloatingAvatarOverlayMetadata();
   }
 
@@ -11103,6 +11146,7 @@ function normalizeSettingsState(settingsState = {}, fallback = fallbackSettings)
   const personas = normalizeLockedPersonas(
     merged.personas || fallbackSettings.personas,
     merged.removedDefaultPersonaIds || [],
+    personaLocaleFromPanel(merged.panel),
   );
   const activePersonaId = personas.some((persona) => persona.id === merged.activePersonaId)
     ? merged.activePersonaId
@@ -11110,8 +11154,8 @@ function normalizeSettingsState(settingsState = {}, fallback = fallbackSettings)
   return {...merged, activePersonaId, personas, panel: normalizePanelSettings(merged.panel)};
 }
 
-function normalizeLockedPersonas(personas = [], removedDefaultPersonaIds = []) {
-  // "憂樂傻酷" is a reserved persona identity, not a reserved slot. Keep its
+function normalizeLockedPersonas(personas = [], removedDefaultPersonaIds = [], personaLocale = '') {
+  // persona-a is a reserved persona identity, not a reserved slot. Keep its
   // name stable while preserving whatever ordering the user chose, because the
   // app treats the first card as the current main persona.
   const normalized = personas.map((persona) => {
@@ -11120,21 +11164,36 @@ function normalizeLockedPersonas(personas = [], removedDefaultPersonaIds = []) {
       patrolDialogue: persona?.patrolDialogue ?? persona?.patrol_dialogue ?? '',
     };
     if (persona.id === lockedPersonaId) {
-      return {...withPatrolDialogue, name: lockedPersonaName, identity: persona.identity || _t('persona.defaultIdentityA')};
+      // The first card is locked: always force its name to the localized
+      // locked name so it follows the language switch even when the stored
+      // value is a stale/legacy variant that no longer matches legacyNames.
+      const localizedCopy = normalizeBuiltInPersonaCopy(withPatrolDialogue, personaLocale);
+      return {...localizedCopy, name: personaI18n(personaLocale, 'persona.lockedName')};
     }
-    return normalizeBuiltInPersonaCopy(withPatrolDialogue);
+    return normalizeBuiltInPersonaCopy(withPatrolDialogue, personaLocale);
   });
   const lockedIndex = normalized.findIndex((persona) => persona.id === lockedPersonaId);
   if (lockedIndex < 0) {
-    return appendMissingDefaultPersonas([fallbackSettings.personas[0], ...normalized], removedDefaultPersonaIds);
+    return appendMissingDefaultPersonas([normalizeBuiltInPersonaCopy(fallbackSettings.personas[0], personaLocale), ...normalized], removedDefaultPersonaIds, personaLocale);
   }
-  return appendMissingDefaultPersonas(normalized, removedDefaultPersonaIds);
+  return appendMissingDefaultPersonas(normalized, removedDefaultPersonaIds, personaLocale);
 }
 
 const defaultPersonaCopy = {
+  'persona-a': {
+    name: (locale) => personaI18n(locale, 'persona.lockedName'),
+    identity: (locale) => personaI18n(locale, 'persona.defaultIdentityA'),
+    personality: () => '',
+    legacyNames: ['憂樂傻酷', 'YuRoSaKu', 'yurosaku'],
+    legacyIdentities: [
+      '酷酷的男性狼犬獸人助手',
+      'A cool male wolf-dog anthro assistant',
+    ],
+    legacyPersonalities: [''],
+  },
   'persona-b': {
-    name: () => _t('persona.defaultNameB'),
-    identity: () => _t('persona.defaultIdentityB'),
+    name: (locale) => personaI18n(locale, 'persona.defaultNameB'),
+    identity: (locale) => personaI18n(locale, 'persona.defaultIdentityB'),
     personality: () => '',
     legacyNames: ['人格 B', '厭世叔', '厭世大叔', 'Grumpy Uncle', 'Tío Gruñón', 'Tio Rabugento', '不機嫌おじさん', '심술쟁이 아저씨', 'ลุงขี้บ่น'],
     legacyIdentities: [
@@ -11143,10 +11202,21 @@ const defaultPersonaCopy = {
     ],
     legacyPersonalities: [''],
   },
+  'persona-c': {
+    name: (locale) => personaI18n(locale, 'persona.defaultNameC'),
+    identity: (locale) => personaI18n(locale, 'persona.defaultIdentityC'),
+    personality: () => '',
+    legacyNames: ['人格 C', '秘書小妹', '秘書小姐', 'Secretary Sis', 'Hermana Secretaria', 'Irmã Secretária', '秘書お姉さん', '비서 아가씨', 'พี่สาวเลขาฯ'],
+    legacyIdentities: [
+      '聰明俐落的秘書小妹助手',
+      'A sharp and efficient secretary assistant',
+    ],
+    legacyPersonalities: [''],
+  },
   'persona-d': {
-    name: () => _t('persona.defaultNameD'),
-    identity: () => _t('persona.defaultIdentityD'),
-    personality: () => _t('persona.defaultPersonalityD'),
+    name: (locale) => personaI18n(locale, 'persona.defaultNameD'),
+    identity: (locale) => personaI18n(locale, 'persona.defaultIdentityD'),
+    personality: (locale) => personaI18n(locale, 'persona.defaultPersonalityD'),
     legacyNames: ['人格 D', '規則警察', '警察桂澤', 'Rule Police', 'Officer Reggie Law', 'Agente Reglaz', 'Agente Regraldo', '木曽久巡査', '규식 순경', 'ผู้หมวดกฎเก่ง'],
     legacyIdentities: [
       '循規蹈矩、嚴格守序、看到違規就會說教的警察助手',
@@ -11161,9 +11231,9 @@ const defaultPersonaCopy = {
     ],
   },
   'persona-e': {
-    name: () => _t('persona.defaultNameE'),
-    identity: () => _t('persona.defaultIdentityE'),
-    personality: () => _t('persona.defaultPersonalityE'),
+    name: (locale) => personaI18n(locale, 'persona.defaultNameE'),
+    identity: (locale) => personaI18n(locale, 'persona.defaultIdentityE'),
+    personality: (locale) => personaI18n(locale, 'persona.defaultPersonalityE'),
     legacyNames: ['東春巫女', 'Touharu Miko', 'Miko Touharu', '東春の巫女', '동춘 무녀', 'มิโกะโทฮารุ'],
     legacyIdentities: [
       '白髮馬尾、棕眼曬黑、直覺敏銳的巫女助手',
@@ -11185,23 +11255,23 @@ function isLegacyDefaultCopy(value, legacyValues = []) {
   return text === '' || legacyValues.includes(text);
 }
 
-function normalizeBuiltInPersonaCopy(persona = {}) {
+function normalizeBuiltInPersonaCopy(persona = {}, personaLocale = '') {
   const copy = defaultPersonaCopy[persona.id];
   if (!copy) return persona;
   return {
     ...persona,
-    name: isLegacyDefaultCopy(persona.name, copy.legacyNames) ? copy.name() : persona.name,
-    identity: isLegacyDefaultCopy(persona.identity, copy.legacyIdentities) ? copy.identity() : persona.identity,
-    personality: isLegacyDefaultCopy(persona.personality, copy.legacyPersonalities) ? copy.personality() : persona.personality,
+    name: isLegacyDefaultCopy(persona.name, copy.legacyNames) ? copy.name(personaLocale) : persona.name,
+    identity: isLegacyDefaultCopy(persona.identity, copy.legacyIdentities) ? copy.identity(personaLocale) : persona.identity,
+    personality: isLegacyDefaultCopy(persona.personality, copy.legacyPersonalities) ? copy.personality(personaLocale) : persona.personality,
   };
 }
 
-function appendMissingDefaultPersonas(personas = [], removedDefaultPersonaIds = []) {
+function appendMissingDefaultPersonas(personas = [], removedDefaultPersonaIds = [], personaLocale = '') {
   const known = new Set(personas.map((persona) => persona.id));
   const removed = new Set(removedDefaultPersonaIds || []);
   const seeds = fallbackSettings.personas.filter((persona) => (
     persona.id !== lockedPersonaId && !known.has(persona.id) && !removed.has(persona.id)
-  ));
+  )).map((persona) => normalizeBuiltInPersonaCopy(persona, personaLocale));
   return seeds.length > 0 ? [...personas, ...seeds] : personas;
 }
 
@@ -12022,13 +12092,9 @@ export function PersonaSettingsDrawer({
                 alt={t('persona.avatarAlt', { name: persona.name })}
               />
               <strong>{persona.name}</strong>
-              {personaPatrolDialogueBadge(persona) && (
+              {persona.id === lockedPersonaId && personaPatrolDialogueBadge(persona) && (
                 <small className="settings-persona-patrol-badge">{personaPatrolDialogueBadge(persona)}</small>
               )}
-              {persona.code && (
-                <small className="settings-persona-code" title={t('persona.codeHint')}>{persona.code}</small>
-              )}
-              {persona.id === lockedPersonaId && <small className="settings-persona-lock">{t('persona.lockedName')}</small>}
             </button>
             {avatarMenuPersonaId === persona.id && persona.id !== lockedPersonaId && (
               <div className="settings-persona-avatar-menu" role="menu" aria-label={t('persona.changeAvatarTitle')}>
@@ -12095,9 +12161,9 @@ export function PersonaSettingsDrawer({
       >
         <input
           aria-label={t('persona.nameAriaLabel')}
-          defaultValue={activePersona.id === lockedPersonaId ? lockedPersonaName : activePersona.name}
+          defaultValue={activePersona.id === lockedPersonaId ? t('persona.lockedName') : activePersona.name}
           disabled={activePersona.id === lockedPersonaId}
-          key={`${activePersona.id}-name`}
+          key={`${activePersona.id}-name-${activePersona.name}-${t('persona.lockedName')}`}
           name="personaName"
           placeholder={t('persona.namePlaceholder')}
           maxLength={100}
@@ -12532,6 +12598,7 @@ function TopConsole({
   const [jobDraft, setJobDraft] = useState(personaJob);
   const personaNameLocked = activePersona?.id === lockedPersonaId;
   const personaAvatarLocked = activePersona?.id === lockedPersonaId;
+  const localizedLockedPersonaName = t('persona.lockedName');
 
   // ── Pixel Pack Switcher：打開彈窗時載入套件清單 + 預覽圖 ──
   useEffect(() => {
@@ -12575,7 +12642,7 @@ function TopConsole({
 
   function savePersonaName() {
     if (personaNameLocked) {
-      setNameDraft(lockedPersonaName);
+      setNameDraft(localizedLockedPersonaName);
       setEditingName(false);
       return;
     }
@@ -12630,7 +12697,7 @@ function TopConsole({
                 }}
                 title={personaNameLocked ? t('persona.lockedNameTitle') : t('persona.editNameTitle')}
               >
-                {personaNameLocked ? lockedPersonaName : personaName}
+                {personaNameLocked ? localizedLockedPersonaName : personaName}
               </button>
             )}
             {editingJob ? (

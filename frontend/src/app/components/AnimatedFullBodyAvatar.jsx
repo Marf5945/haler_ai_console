@@ -114,12 +114,13 @@ export const fullBodyMotionConfigs = {
 };
 
 function layerStyle(layer = {}) {
+  const motionScale = 1.7;
   return {
     clipPath: layer.clip,
     transformOrigin: layer.origin,
-    '--part-x': `${layer.x ?? 1}px`,
-    '--part-y': `${layer.y ?? 1}px`,
-    '--part-rotate': `${layer.rotate ?? 1}deg`,
+    '--part-x': `${(layer.x ?? 1) * motionScale}px`,
+    '--part-y': `${(layer.y ?? 1) * motionScale}px`,
+    '--part-rotate': `${(layer.rotate ?? 1) * motionScale}deg`,
     animationDelay: layer.delay || '0s',
   };
 }
@@ -199,7 +200,9 @@ export default function AnimatedFullBodyAvatar({
           className={`animated-fullbody-avatar-layer animated-fullbody-avatar-rig animated-fullbody-avatar-${name}`}
           style={layerStyle(layer)}
           data-layer={name}
-        />
+        >
+          <img src={imageSrc} alt="" draggable={false} />
+        </span>
       ))}
       <span className="animated-fullbody-avatar-eyes" aria-hidden="true">
         {(config.eyes || []).map((eye) => (

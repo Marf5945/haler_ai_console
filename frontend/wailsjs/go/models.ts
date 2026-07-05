@@ -16,7 +16,6 @@ export namespace browser_pref {
 	}
 
 }
-
 export namespace controlseal {
 
 	export class Settings {
@@ -358,33 +357,6 @@ export namespace dag {
 	}
 
 
-
-}
-
-export namespace debugtrace {
-
-	export class LinkSnapshot {
-	    url: string;
-	    addr: string;
-	    started: boolean;
-	    version: number;
-	    updated_at: string;
-	    last_error?: string;
-
-	    static createFrom(source: any = {}) {
-	        return new LinkSnapshot(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.url = source["url"];
-	        this.addr = source["addr"];
-	        this.started = source["started"];
-	        this.version = source["version"];
-	        this.updated_at = source["updated_at"];
-	        this.last_error = source["last_error"];
-	    }
-	}
 
 }
 
@@ -1667,9 +1639,7 @@ export namespace main {
 	    name: string;
 	    adapter_id: string;
 	    is_api: boolean;
-	    persona_id: string;
 	    persona_name: string;
-	    model: string;
 	    locale: string;
 
 	    static createFrom(source: any = {}) {
@@ -1682,9 +1652,7 @@ export namespace main {
 	        this.name = source["name"];
 	        this.adapter_id = source["adapter_id"];
 	        this.is_api = source["is_api"];
-	        this.persona_id = source["persona_id"];
 	        this.persona_name = source["persona_name"];
-	        this.model = source["model"];
 	        this.locale = source["locale"];
 	    }
 	}

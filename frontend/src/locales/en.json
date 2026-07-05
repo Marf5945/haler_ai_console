@@ -494,41 +494,17 @@
     "fillNamePath": "Please fill in a name and path",
     "registerFail": "Registration failed — please verify the path is correct",
     "steps": {
-      "welcome": {
-        "title": "Welcome",
-        "description": "Choose your interface language, then connect an AI endpoint. You can skip, but some features will be limited."
-      },
-      "adapter": {
-        "title": "Choose a Connection",
-        "description": "Paste an API setup, connect a local model endpoint, or point to a local CLI path."
-      },
-      "persona": {
-        "title": "Set Persona",
-        "description": "Set the assistant name and response style."
-      },
-      "tool": {
-        "title": "Try Tools",
-        "description": "Open the tools panel and try one tool."
-      },
-      "complete": {
-        "title": "Done",
-        "description": "You are ready to start."
-      }
+      "welcome": {"title": "Welcome", "description": "Choose your interface language, then connect an AI endpoint. You can skip, but some features will be limited."},
+      "adapter": {"title": "Choose a Connection", "description": "Paste an API setup, connect a local model endpoint, or point to a local CLI path."},
+      "persona": {"title": "Set Persona", "description": "Set the assistant name and response style."},
+      "tool": {"title": "Try Tools", "description": "Open the tools panel and try one tool."},
+      "complete": {"title": "Done", "description": "You are ready to start."}
     },
     "connectionChoice": "Choose AI connection",
     "connection": {
-      "api": {
-        "title": "API",
-        "hint": "Paste API key, Base URL, and model"
-      },
-      "cli": {
-        "title": "CLI Path",
-        "hint": "Scan or paste a local CLI executable"
-      },
-      "local": {
-        "title": "Local Model",
-        "hint": "Scan or enter an Ollama / LM Studio endpoint"
-      }
+      "api": {"title": "API", "hint": "Paste API key, Base URL, and model"},
+      "cli": {"title": "CLI Path", "hint": "Scan or paste a local CLI executable"},
+      "local": {"title": "Local Model", "hint": "Scan or enter an Ollama / LM Studio endpoint"}
     },
     "apiProvider": "API Provider",
     "connectAPI": "Connect API",
@@ -1418,12 +1394,7 @@
     "renameAdapterLabel": "Name API Adapter",
     "renameAdapterTitle": "How to name this adapter?",
     "confirmRename": "Confirm",
-    "renameLater": "Later",
-    "apiKeyHint": "The key is stored encrypted locally. It usually starts with {example}; paste the whole string with no extra spaces.",
-    "modelFormatHint": "Use the full model id from the provider catalog, e.g. {example}. Providers like NVIDIA and OpenRouter need a 'vendor/model' format — a missing slash returns 404.",
-    "testing": "Testing connection… sending a minimal request to the provider.",
-    "testOk": "Connection OK ✓",
-    "testFail": "Connection test failed"
+    "renameLater": "Later"
   },
   "reauth": {
     "disconnected": "This tool is currently disconnected and cannot be executed directly.",
@@ -1434,6 +1405,8 @@
     "bodyHead": "Head",
     "bodyFull": "Full body",
     "bodySwitchLabel": "Show",
+    "bodyDynamic": "Dynamic image",
+    "tickleInteraction": "Interaction",
     "installTitle": "Install this?",
     "installStep1": "Check the source and permissions, then press Confirm below",
     "installStep2": "Confirmed — press Send above to finish installing",
@@ -1465,6 +1438,7 @@
     "settings": "Settings",
     "chatModeOn": "Chat mode",
     "chatModeOff": "Close chat mode",
+    "chatMode": "Chat mode",
     "chatPanelKicker": "Casual chat",
     "chatInputPlaceholder": "Type a casual message. The last 30 turns stay only until chat mode closes or the agent changes...",
     "chatPrompt": "Chat mode message",

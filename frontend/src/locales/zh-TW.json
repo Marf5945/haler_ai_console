@@ -498,41 +498,17 @@
     "fillNamePath": "請填入名稱與路徑",
     "registerFail": "註冊失敗，請確認路徑正確",
     "steps": {
-      "welcome": {
-        "title": "歡迎",
-        "description": "先選擇介面語言，再把 AI 端點接上。你也可以先跳過，但部分功能會受限。"
-      },
-      "adapter": {
-        "title": "選擇連接方式",
-        "description": "可貼 API、接本機模型 endpoint，或指定 CLI 的本機路徑。"
-      },
-      "persona": {
-        "title": "設定人格",
-        "description": "設定助手的名稱與回應風格。"
-      },
-      "tool": {
-        "title": "試用工具",
-        "description": "開啟工具面板，嘗試使用一個工具。"
-      },
-      "complete": {
-        "title": "完成",
-        "description": "你已準備好開始使用。"
-      }
+      "welcome": {"title": "歡迎", "description": "先選擇介面語言，再把 AI 端點接上。你也可以先跳過，但部分功能會受限。"},
+      "adapter": {"title": "選擇連接方式", "description": "可貼 API、接本機模型 endpoint，或指定 CLI 的本機路徑。"},
+      "persona": {"title": "設定人格", "description": "設定助手的名稱與回應風格。"},
+      "tool": {"title": "試用工具", "description": "開啟工具面板，嘗試使用一個工具。"},
+      "complete": {"title": "完成", "description": "你已準備好開始使用。"}
     },
     "connectionChoice": "選擇 AI 連接方式",
     "connection": {
-      "api": {
-        "title": "API",
-        "hint": "貼 API Key、Base URL 與 model"
-      },
-      "cli": {
-        "title": "CLI 路徑",
-        "hint": "掃描或貼本機 CLI 執行檔"
-      },
-      "local": {
-        "title": "本地模型",
-        "hint": "掃描或填 Ollama / LM Studio endpoint"
-      }
+      "api": {"title": "API", "hint": "貼 API Key、Base URL 與 model"},
+      "cli": {"title": "CLI 路徑", "hint": "掃描或貼本機 CLI 執行檔"},
+      "local": {"title": "本地模型", "hint": "掃描或填 Ollama / LM Studio endpoint"}
     },
     "apiProvider": "API 提供者",
     "connectAPI": "連接 API",
@@ -1422,12 +1398,7 @@
     "renameAdapterLabel": "命名 API Adapter",
     "renameAdapterTitle": "要怎麼命名這個接口？",
     "confirmRename": "確認",
-    "renameLater": "稍後",
-    "apiKeyHint": "金鑰會加密存在本機。格式通常以 {example} 開頭；請整串貼上、勿含多餘空白。",
-    "modelFormatHint": "填 provider 型錄裡的完整 model id，例如 {example}。NVIDIA、OpenRouter 等需「廠牌/型號」格式，少一個斜線會回 404。",
-    "testing": "測試連線中…正在向 provider 送出一個最小請求。",
-    "testOk": "連線成功 ✓",
-    "testFail": "連線測試失敗"
+    "renameLater": "稍後"
   },
   "reauth": {
     "disconnected": "此工具目前連線中斷，無法直接執行。",
@@ -1438,6 +1409,8 @@
     "bodyHead": "頭像",
     "bodyFull": "全身像",
     "bodySwitchLabel": "顯示",
+    "bodyDynamic": "動態圖像",
+    "tickleInteraction": "互動",
     "installTitle": "要安裝這個嗎？",
     "installStep1": "確認來源與權限後，按下方「確認加入」",
     "installStep2": "已確認，請按上方「送出安裝」完成",
@@ -1469,6 +1442,7 @@
     "settings": "設定",
     "chatModeOn": "切換閒聊模式",
     "chatModeOff": "關閉閒聊模式",
+    "chatMode": "閒聊模式",
     "chatPanelKicker": "閒聊模式",
     "chatInputPlaceholder": "輸入想聊的內容；只暫存最近 30 條，關掉或切換人格就忘記。",
     "chatPrompt": "輸入閒聊內容",

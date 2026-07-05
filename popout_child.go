@@ -141,6 +141,25 @@ func (p *PopoutApp) Send(text string) (map[string]interface{}, error) {
 	return out, nil
 }
 
+// SetConfig updates this popout's persona / adapter / model selection.
+func (p *PopoutApp) SetConfig(config map[string]string) (map[string]interface{}, error) {
+	payload := map[string]string{
+		"agent":      p.args.agent,
+		"persona_id": config["persona_id"],
+		"adapter_id": config["adapter_id"],
+		"model":      config["model"],
+	}
+	raw, err := p.do(p.quick, http.MethodPost, "/api/config", payload)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]interface{}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Unpin 解除釘選：通知主行程回彈分頁，然後自我了斷。
 func (p *PopoutApp) Unpin() {
 	p.notifyUnpin()

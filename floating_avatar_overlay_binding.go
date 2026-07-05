@@ -74,9 +74,13 @@ func (a *App) resolveFloatingAvatarOverlayImage(personaID string, mode string, s
 
 	overlayMode := normalizeOverlayMode(mode)
 	if overlayMode == "full" {
-		if path := findOverlayAssetPath("persona_fullbody", overlayPackFolder(pack), overlayFullBodyName(state)); path != "" {
-			maxW, maxH := overlayModeSize(overlayMode)
-			return path, maxW, maxH, nil
+		// 全身圖檔名依角色包可能不同（如 wolfdog 用 fullbody_block.png），
+		// 依序嘗試候選檔名，最後退回 idle，避免因單一檔名缺圖而整個退回頭像。
+		for _, name := range overlayFullBodyNames(state) {
+			if path := findOverlayAssetPath("persona_fullbody", overlayPackFolder(pack), name); path != "" {
+				maxW, maxH := overlayModeSize(overlayMode)
+				return path, maxW, maxH, nil
+			}
 		}
 	}
 
@@ -165,11 +169,18 @@ func overlayPackFolder(pack string) string {
 	}
 }
 
-func overlayFullBodyName(state string) string {
-	if state == "blocked" || state == "warning" {
-		return "fullbody.png"
+func overlayFullBodyNames(state string) []string {
+	switch state {
+	case "thinking":
+		return []string{"fullbody_thinking.png", "fullbody_idle.png"}
+	case "working":
+		return []string{"fullbody_working.png", "fullbody_idle.png"}
+	case "blocked", "warning":
+		return []string{"fullbody.png", "fullbody_block.png", "fullbody_idle.png"}
+	case "sad", "speechless":
+		return []string{"fullbody_sad.png", "fullbody_idle.png"}
 	}
-	return "fullbody_idle.png"
+	return []string{"fullbody_idle.png"}
 }
 
 func resolveOverlayDataPath(path string) string {

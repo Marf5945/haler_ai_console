@@ -1,0 +1,385 @@
+{
+  "id": "yulesaku",
+  "name": "憂樂傻酷",
+  "aliases": ["wolf", "wolfdog", "persona-a"],
+  "renderer": "pixi",
+  "size": {"width": 200, "height": 360},
+  "motion": {
+    "breathe": {"speed": 1.12, "y": 5.8, "scaleX": 0.009, "scaleY": 0.008},
+    "sway": {"speed": 0.68, "x": 2.3, "rotate": 0.016},
+    "look": {"x": 7, "y": 4, "rotate": 0.018},
+    "blink": {"enabled": false}
+  },
+  "partCatalog": {
+    "front": {
+      "idle": {
+        "core": [
+          "parts/front/idle/head.png",
+          "parts/front/idle/neck.png",
+          "parts/front/idle/chest.png",
+          "parts/front/idle/upper_abdomen.png",
+          "parts/front/idle/lower_abdomen.png",
+          "parts/front/idle/pelvis_vcut.png"
+        ],
+        "legs": [
+          "parts/front/idle/left_thigh_hip.png",
+          "parts/front/idle/right_thigh_hip.png",
+          "parts/front/idle/left_shin.png",
+          "parts/front/idle/right_shin.png",
+          "parts/front/idle/left_ankle.png",
+          "parts/front/idle/right_ankle.png",
+          "parts/front/idle/left_foot.png",
+          "parts/front/idle/right_foot.png"
+        ],
+        "arms": [
+          "parts/front/idle/left_upper_arm.png",
+          "parts/front/idle/right_upper_arm.png",
+          "parts/front/idle/left_forearm.png",
+          "parts/front/idle/right_forearm.png",
+          "parts/front/idle/left_wrist.png",
+          "parts/front/idle/right_wrist.png",
+          "parts/front/idle/left_wrist_cuff_alt.png",
+          "parts/front/idle/right_wrist_cuff_alt.png",
+          "parts/front/idle/left_hand.png",
+          "parts/front/idle/right_hand.png",
+          "parts/front/idle/left_hand_open.png",
+          "parts/front/idle/right_hand_open.png",
+          "parts/front/idle/left_hand_fist.png",
+          "parts/front/idle/right_hand_fist.png"
+        ],
+        "face": [
+          "parts/front/idle/muzzle_nose.png",
+          "parts/front/idle/mouth_neutral.png",
+          "parts/front/idle/mouth_neutral_alt.png",
+          "parts/front/idle/mouth_smile.png",
+          "parts/front/idle/mouth_open_talk.png",
+          "parts/front/idle/left_eye_open.png",
+          "parts/front/idle/right_eye_open.png",
+          "parts/front/idle/left_eye_half_lid.png",
+          "parts/front/idle/right_eye_half_lid.png",
+          "parts/front/idle/left_brow_tuft.png",
+          "parts/front/idle/right_brow_tuft.png",
+          "parts/front/idle/left_ear.png",
+          "parts/front/idle/right_ear.png"
+        ],
+        "tail": [
+          "parts/front/idle/tail_base.png",
+          "parts/front/idle/tail_mid.png",
+          "parts/front/idle/tail_tip.png"
+        ]
+      }
+    }
+  },
+  "rigNotes": {
+    "hip": "Use pelvis_vcut as the parent visual socket. Thigh sprites stay separate and rotate under it with overlap margins to hide seams.",
+    "spine": "upper_abdomen and lower_abdomen should become separate parent containers before enabling waist bends.",
+    "face": "Use mouth and eye parts as replaceable overlays on top of head or muzzle containers.",
+    "hands": "Use open/fist hand sprites as pose swaps first; split fingers only if a future interaction needs finger-level control."
+  },
+  "states": {
+    "idle": {
+      "base": "fullbody/idle.png",
+      "layers": [
+        {
+          "id": "tail_base",
+          "src": "parts/front/idle/tail_base.png",
+          "positionPx": {"x": 136, "y": 205},
+          "size": {"width": 56, "height": 44},
+          "anchor": {"x": 0.2, "y": 0.5},
+          "rotation": 0.42,
+          "phase": 1.2,
+          "motion": {"rotate": {"speed": 1.15, "amount": 0.038}}
+        },
+        {
+          "id": "tail_mid",
+          "src": "parts/front/idle/tail_mid.png",
+          "parentId": "tail_base",
+          "positionPx": {"x": 38, "y": 0},
+          "size": {"width": 56, "height": 44},
+          "anchor": {"x": 0.18, "y": 0.5},
+          "rotation": 0.08,
+          "phase": 1.6,
+          "motion": {"rotate": {"speed": 1.3, "amount": 0.052}}
+        },
+        {
+          "id": "tail_tip",
+          "src": "parts/front/idle/tail_tip.png",
+          "parentId": "tail_mid",
+          "positionPx": {"x": 38, "y": 0},
+          "size": {"width": 52, "height": 40},
+          "anchor": {"x": 0.18, "y": 0.5},
+          "rotation": 0.06,
+          "phase": 2.0,
+          "motion": {"rotate": {"speed": 1.45, "amount": 0.068}}
+        },
+        {
+          "id": "left_thigh",
+          "src": "parts/front/idle/left_thigh_hip.png",
+          "positionPx": {"x": 78, "y": 208},
+          "size": {"width": 44, "height": 86},
+          "anchor": {"x": 0.5, "y": 0.08},
+          "rotation": -0.06,
+          "phase": 0.4,
+          "motion": {"rotate": {"speed": 0.72, "amount": 0.01}}
+        },
+        {
+          "id": "left_shin",
+          "src": "parts/front/idle/left_shin.png",
+          "parentId": "left_thigh",
+          "positionPx": {"x": -1, "y": 70},
+          "size": {"width": 36, "height": 74},
+          "anchor": {"x": 0.5, "y": 0.08},
+          "rotation": 0.04
+        },
+        {
+          "id": "left_ankle",
+          "src": "parts/front/idle/left_ankle.png",
+          "parentId": "left_shin",
+          "positionPx": {"x": 0, "y": 63},
+          "size": {"width": 29, "height": 14},
+          "anchor": {"x": 0.5, "y": 0.1}
+        },
+        {
+          "id": "left_foot",
+          "src": "parts/front/idle/left_foot.png",
+          "parentId": "left_ankle",
+          "positionPx": {"x": -2, "y": 11},
+          "size": {"width": 50, "height": 32},
+          "anchor": {"x": 0.52, "y": 0.16},
+          "rotation": -0.04
+        },
+        {
+          "id": "right_thigh",
+          "src": "parts/front/idle/right_thigh_hip.png",
+          "positionPx": {"x": 122, "y": 208},
+          "size": {"width": 44, "height": 86},
+          "anchor": {"x": 0.5, "y": 0.08},
+          "rotation": 0.06,
+          "phase": 1.0,
+          "motion": {"rotate": {"speed": 0.72, "amount": -0.01}}
+        },
+        {
+          "id": "right_shin",
+          "src": "parts/front/idle/right_shin.png",
+          "parentId": "right_thigh",
+          "positionPx": {"x": 1, "y": 70},
+          "size": {"width": 36, "height": 74},
+          "anchor": {"x": 0.5, "y": 0.08},
+          "rotation": -0.04
+        },
+        {
+          "id": "right_ankle",
+          "src": "parts/front/idle/right_ankle.png",
+          "parentId": "right_shin",
+          "positionPx": {"x": 0, "y": 63},
+          "size": {"width": 29, "height": 14},
+          "anchor": {"x": 0.5, "y": 0.1}
+        },
+        {
+          "id": "right_foot",
+          "src": "parts/front/idle/right_foot.png",
+          "parentId": "right_ankle",
+          "positionPx": {"x": 2, "y": 11},
+          "size": {"width": 50, "height": 32},
+          "anchor": {"x": 0.48, "y": 0.16},
+          "rotation": 0.04
+        },
+        {
+          "id": "left_upper_arm",
+          "src": "parts/front/idle/left_upper_arm.png",
+          "positionPx": {"x": 54, "y": 115},
+          "size": {"width": 36, "height": 70},
+          "anchor": {"x": 0.5, "y": 0.12},
+          "rotation": -0.28,
+          "phase": 0.2,
+          "motion": {"rotate": {"speed": 0.8, "amount": 0.012}}
+        },
+        {
+          "id": "left_forearm",
+          "src": "parts/front/idle/left_forearm.png",
+          "parentId": "left_upper_arm",
+          "positionPx": {"x": -2, "y": 62},
+          "size": {"width": 34, "height": 66},
+          "anchor": {"x": 0.5, "y": 0.12},
+          "rotation": -0.28
+        },
+        {
+          "id": "left_wrist",
+          "src": "parts/front/idle/left_wrist_cuff_alt.png",
+          "parentId": "left_forearm",
+          "positionPx": {"x": -1, "y": 56},
+          "size": {"width": 25, "height": 34},
+          "anchor": {"x": 0.5, "y": 0.14}
+        },
+        {
+          "id": "left_hand",
+          "src": "parts/front/idle/left_hand_open.png",
+          "parentId": "left_wrist",
+          "positionPx": {"x": -1, "y": 27},
+          "size": {"width": 38, "height": 58},
+          "anchor": {"x": 0.5, "y": 0.12},
+          "rotation": -0.15
+        },
+        {
+          "id": "right_upper_arm",
+          "src": "parts/front/idle/right_upper_arm.png",
+          "positionPx": {"x": 146, "y": 116},
+          "size": {"width": 36, "height": 70},
+          "anchor": {"x": 0.5, "y": 0.12},
+          "rotation": 0.24,
+          "phase": 0.7,
+          "motion": {"rotate": {"speed": 0.8, "amount": -0.012}}
+        },
+        {
+          "id": "right_forearm",
+          "src": "parts/front/idle/right_forearm.png",
+          "parentId": "right_upper_arm",
+          "positionPx": {"x": 2, "y": 62},
+          "size": {"width": 34, "height": 66},
+          "anchor": {"x": 0.5, "y": 0.12},
+          "rotation": 0.22
+        },
+        {
+          "id": "right_wrist",
+          "src": "parts/front/idle/right_wrist_cuff_alt.png",
+          "parentId": "right_forearm",
+          "positionPx": {"x": 1, "y": 56},
+          "size": {"width": 25, "height": 34},
+          "anchor": {"x": 0.5, "y": 0.14}
+        },
+        {
+          "id": "right_hand",
+          "src": "parts/front/idle/right_hand_fist.png",
+          "parentId": "right_wrist",
+          "positionPx": {"x": 1, "y": 27},
+          "size": {"width": 32, "height": 48},
+          "anchor": {"x": 0.5, "y": 0.12},
+          "rotation": 0.1
+        },
+        {
+          "id": "lower_abdomen",
+          "src": "parts/front/idle/lower_abdomen.png",
+          "positionPx": {"x": 100, "y": 178},
+          "size": {"width": 70, "height": 70},
+          "anchor": {"x": 0.5, "y": 0.52},
+          "motion": {"breathe": {"y": 2.2, "scaleX": 0.005, "scaleY": 0.006}}
+        },
+        {
+          "id": "upper_abdomen",
+          "src": "parts/front/idle/upper_abdomen.png",
+          "positionPx": {"x": 100, "y": 140},
+          "size": {"width": 74, "height": 74},
+          "anchor": {"x": 0.5, "y": 0.52},
+          "motion": {"breathe": {"y": 3.0, "scaleX": 0.007, "scaleY": 0.007}}
+        },
+        {
+          "id": "chest",
+          "src": "parts/front/idle/chest.png",
+          "positionPx": {"x": 100, "y": 116},
+          "size": {"width": 106, "height": 100},
+          "anchor": {"x": 0.5, "y": 0.55},
+          "motion": {"breathe": {"y": 4.2, "scaleX": 0.011, "scaleY": 0.01}}
+        },
+        {
+          "id": "pelvis",
+          "src": "parts/front/idle/pelvis_vcut.png",
+          "positionPx": {"x": 100, "y": 207},
+          "size": {"width": 86, "height": 72},
+          "anchor": {"x": 0.5, "y": 0.34}
+        },
+        {
+          "id": "neck",
+          "src": "parts/front/idle/neck.png",
+          "positionPx": {"x": 100, "y": 81},
+          "size": {"width": 48, "height": 43},
+          "anchor": {"x": 0.5, "y": 0.52}
+        },
+        {
+          "id": "head",
+          "src": "parts/front/idle/head.png",
+          "positionPx": {"x": 100, "y": 58},
+          "size": {"width": 62, "height": 50},
+          "anchor": {"x": 0.5, "y": 0.48},
+          "motion": {"look": {"x": 3.6, "y": 2.4, "rotate": 0.018}, "breathe": {"y": 1.8}}
+        },
+        {
+          "id": "left_ear",
+          "src": "parts/front/idle/left_ear.png",
+          "parentId": "head",
+          "positionPx": {"x": -21, "y": -25},
+          "size": {"width": 16, "height": 28},
+          "anchor": {"x": 0.5, "y": 0.9},
+          "rotation": -0.28,
+          "phase": 2.5,
+          "motion": {"rotate": {"speed": 1.9, "amount": 0.055}}
+        },
+        {
+          "id": "right_ear",
+          "src": "parts/front/idle/right_ear.png",
+          "parentId": "head",
+          "positionPx": {"x": 21, "y": -25},
+          "size": {"width": 16, "height": 28},
+          "anchor": {"x": 0.5, "y": 0.9},
+          "rotation": 0.28,
+          "phase": 3.0,
+          "motion": {"rotate": {"speed": 1.7, "amount": -0.055}}
+        },
+        {
+          "id": "left_eye_blink",
+          "src": "parts/front/idle/left_eye_half_lid.png",
+          "parentId": "head",
+          "positionPx": {"x": -10, "y": -1},
+          "size": {"width": 24, "height": 18},
+          "anchor": {"x": 0.5, "y": 0.5},
+          "alpha": 0.95,
+          "motion": {"blink": {"enabled": true, "mode": "show", "restAlpha": 0, "speed": 0.34}}
+        },
+        {
+          "id": "right_eye_blink",
+          "src": "parts/front/idle/right_eye_half_lid.png",
+          "parentId": "head",
+          "positionPx": {"x": 10, "y": -1},
+          "size": {"width": 24, "height": 18},
+          "anchor": {"x": 0.5, "y": 0.5},
+          "alpha": 0.95,
+          "phase": 0.02,
+          "motion": {"blink": {"enabled": true, "mode": "show", "restAlpha": 0, "speed": 0.34}}
+        },
+        {
+          "id": "mouth_talk",
+          "src": "parts/front/idle/mouth_open_talk.png",
+          "parentId": "head",
+          "positionPx": {"x": 0, "y": 16},
+          "size": {"width": 27, "height": 18},
+          "anchor": {"x": 0.5, "y": 0.5},
+          "alpha": 0.8,
+          "motion": {"mouth": {"mode": "talk", "restAlpha": 0, "minAlpha": 0.12, "speed": 5.2, "y": 0.6}}
+        }
+      ]
+    },
+    "working": {
+      "base": "fullbody/working.png",
+      "layers": [],
+      "motion": {
+        "breathe": {"speed": 1.34, "y": 5.4},
+        "sway": {"speed": 0.88, "x": 2.4, "rotate": 0.016}
+      }
+    },
+    "happy": {
+      "base": "fullbody/happy.png",
+      "layers": []
+    },
+    "warning": {
+      "base": "fullbody/warning.png",
+      "layers": []
+    },
+    "blocked": {
+      "base": "fullbody/blocked.png",
+      "layers": []
+    },
+    "sad": {
+      "base": "fullbody/sad.png",
+      "layers": []
+    }
+  }
+}

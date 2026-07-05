@@ -1,6 +1,6 @@
 import {useState, useEffect} from 'react';
 import useI18n from '../../locales/useI18n';
-import {EventsOn} from '../../../wailsjs/runtime/runtime';
+import {EventsOn} from '../../lib/wailsRuntime';
 import {
   ListLearningReplayCatalog,
   NativeDragExportLearningRun,

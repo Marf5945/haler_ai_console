@@ -1,5 +1,34 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import AnimatedFullBodyAvatar from './AnimatedFullBodyAvatar.jsx';
+import PixiAvatarStage from './PixiAvatarStage.jsx';
+
+// Pixi 動態舞台的最後防線：掛載/渲染期任何例外都不往上冒——
+// 一旦冒到 root，整片浮窗會被錯誤畫面（近黑底）蓋掉，看起來就是「大黑塊」。
+// 這裡直接退回 CSS 版動態全身像，並在人格/表情切換時自動重試 Pixi。
+class PixiStageErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = {broken: false};
+  }
+
+  static getDerivedStateFromError() {
+    return {broken: true};
+  }
+
+  componentDidCatch(error, info) {
+    console.warn('[FloatingAvatar] pixi stage crashed, falling back to static full body', error, info);
+  }
+
+  componentDidUpdate(prevProps) {
+    if (this.state.broken && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({broken: false});
+    }
+  }
+
+  render() {
+    return this.state.broken ? (this.props.fallback || null) : this.props.children;
+  }
+}
 
 const defaultAvatarSize = 64;
 const edgeGap = 12;
@@ -12,7 +41,7 @@ const shakeVomitDelayMs = 3500;
 const shakeVomitDistance = 500;
 const fullBodyAvatarWidth = 200;
 const fullBodyAvatarHeight = 360;
-const contextMenuWidth = 178;
+const contextMenuWidth = 188;
 const contextMenuGap = 14;
 
 function clamp(value, min, max) {
@@ -52,6 +81,7 @@ export default function FloatingAvatarMode({
   avatarSrc,
   fullBodyAvatarSrc = '',
   fullBodyAvatarKey = '',
+  fullBodyMotionManifest = null,
   avatarExpression,
   persona,
   personas = [],
@@ -72,7 +102,9 @@ export default function FloatingAvatarMode({
   compactWindowMode = false,
   panelOpenSignal = 0,
   bodyMode = 'head',
+  dynamicImageEnabled = false,
   onBodyModeChange,
+  onDynamicImageChange,
   onCompactDragStart,
   onCompactDrag,
   onCompactDragEnd,
@@ -114,14 +146,19 @@ export default function FloatingAvatarMode({
   const [bubbleDismissed, setBubbleDismissed] = useState(false);
   const [installArmed, setInstallArmed] = useState(false);
   const [scheduleConfirmPending, setScheduleConfirmPending] = useState(false);
+  const [tickleMode, setTickleMode] = useState(false);
+  const [pixiReady, setPixiReady] = useState(false);
   const setBodyMode = onBodyModeChange || (() => {});
   const showBody = bodyMode !== 'head';
+  const usePixiAvatar = showBody && dynamicImageEnabled && fullBodyMotionManifest?.renderer === 'pixi';
+  const tickleActive = tickleMode && usePixiAvatar;
   const avatarFrameWidth = showBody ? fullBodyAvatarWidth : avatarSize;
   const avatarFrameHeight = showBody ? fullBodyAvatarHeight : avatarSize;
   const rootRef = useRef(null);
   const dragRef = useRef(null);
   const clickTimerRef = useRef(null);
   const shakeResetRef = useRef(null);
+  const previousFrameRef = useRef(null);
   const shakeRef = useRef({startedAt: 0, lastPoint: null, distance: 0, previewFired: false, vomitFired: false});
 
   const clampedPosition = useMemo(() => {
@@ -141,6 +178,52 @@ export default function FloatingAvatarMode({
       onPositionChange?.(clampedPosition);
     }
   }, [active, clampedPosition, onPositionChange, position?.x, position?.y]);
+
+  useEffect(() => {
+    if (!active) {
+      previousFrameRef.current = null;
+      return;
+    }
+
+    const frame = {width: avatarFrameWidth, height: avatarFrameHeight, bodyMode};
+    const previous = previousFrameRef.current;
+    if (!previous) {
+      previousFrameRef.current = frame;
+      return;
+    }
+
+    if (previous.width === frame.width && previous.height === frame.height) {
+      previousFrameRef.current = frame;
+      return;
+    }
+
+    const rawX = Number(position?.x ?? clampedPosition.x);
+    const rawY = Number(position?.y ?? clampedPosition.y);
+    const maxX = Math.max(edgeGap, window.innerWidth - frame.width - edgeGap);
+    const maxY = Math.max(edgeGap, window.innerHeight - frame.height - edgeGap);
+    const anchorX = rawX + previous.width / 2;
+    const anchorY = rawY + Math.min(previous.height / 2, avatarSize / 2);
+    const nextPosition = {
+      x: clamp(anchorX - frame.width / 2, edgeGap, maxX),
+      y: clamp(anchorY - Math.min(frame.height * 0.22, avatarSize / 2), edgeGap, maxY),
+    };
+
+    previousFrameRef.current = frame;
+    if (Math.abs(nextPosition.x - rawX) > 0.5 || Math.abs(nextPosition.y - rawY) > 0.5) {
+      onPositionChange?.(nextPosition);
+    }
+  }, [
+    active,
+    avatarFrameHeight,
+    avatarFrameWidth,
+    avatarSize,
+    bodyMode,
+    clampedPosition.x,
+    clampedPosition.y,
+    onPositionChange,
+    position?.x,
+    position?.y,
+  ]);
 
   useEffect(() => {
     if (!active) return undefined;
@@ -184,6 +267,15 @@ export default function FloatingAvatarMode({
   useEffect(() => {
     if (!panelOpen) setScheduleConfirmPending(false);
   }, [panelOpen]);
+
+  // 離開 Pixi 全身動態時自動關閉搔癢模式（靜態頭像沒得搔）。
+  useEffect(() => {
+    if (!usePixiAvatar && tickleMode) setTickleMode(false);
+  }, [usePixiAvatar, tickleMode]);
+
+  useEffect(() => {
+    setPixiReady(false);
+  }, [avatarExpression, fullBodyMotionManifest?.id, fullBodyMotionManifest?.state, usePixiAvatar]);
 
   useEffect(() => {
     if (!active || !panelOpenSignal) return;
@@ -253,6 +345,13 @@ export default function FloatingAvatarMode({
     ['manual', t('floatingAvatar.muteManual')],
   ];
   const menuCheck = (active, label) => active ? `✓ ${label}` : label;
+  const toggleDynamicImage = () => {
+    const next = !dynamicImageEnabled;
+    onDynamicImageChange?.(next);
+    if (next && bodyMode === 'head') {
+      setBodyMode('full');
+    }
+  };
 
   function noteAction() {
     if (guideVisible) setGuideVisible(false);
@@ -300,6 +399,7 @@ export default function FloatingAvatarMode({
 
   function startDrag(event) {
     if (event.button !== 0) return;
+    if (tickleActive) return; // 搔癢模式下左鍵交給 Pixi 搔癢，不拖曳視窗
     if (guideVisible) setGuideVisible(false);
     onCompactDragStart?.();
     if (shakeResetRef.current) {
@@ -368,6 +468,7 @@ export default function FloatingAvatarMode({
   // 用 220ms 計時器分辨單擊與雙擊，雙擊時取消尚未觸發的單擊動作。
   function performSingleClick() {
     if (dragRef.current?.moved) return;
+    if (tickleActive) return; // 搔癢模式下單擊只搔癢，不開迷你框
     setBubbleDismissed(true);
     setGuideVisible(true);
     setPanelOpen((open) => !open);
@@ -446,7 +547,7 @@ export default function FloatingAvatarMode({
         )}
         <button
           type="button"
-          className={`floating-avatar-button ${expressionClass} ${dropActive ? 'floating-avatar-drop-active' : ''}`}
+          className={`floating-avatar-button ${expressionClass} ${dropActive ? 'floating-avatar-drop-active' : ''} ${tickleActive ? 'floating-avatar-tickling' : ''}`}
           title={t('floatingAvatar.doubleClickRestore')}
           aria-label={t('floatingAvatar.avatarAria', {name: persona?.name || t('floatingAvatar.agentFallback')})}
           onPointerDown={startDrag}
@@ -464,12 +565,44 @@ export default function FloatingAvatarMode({
           onDrop={handleDrop}
         >
           {showBody ? (
-            <AnimatedFullBodyAvatar
-              src={fullBodyAvatarSrc || avatarSrc}
-              fallbackSrc={avatarSrc}
-              pack={fullBodyAvatarKey}
-              mode={bodyMode}
-            />
+            usePixiAvatar ? (
+              <span className="floating-avatar-pixi-shell">
+                <img
+                  className={`floating-avatar-img floating-avatar-pixi-backstop ${pixiReady ? 'floating-avatar-pixi-backstop-ready' : ''}`}
+                  src={fullBodyAvatarSrc || avatarSrc}
+                  alt=""
+                  draggable={false}
+                />
+                <PixiStageErrorBoundary
+                  resetKey={`${fullBodyMotionManifest?.id || ''}|${fullBodyAvatarKey}|${bodyMode}|${avatarExpression}`}
+                  fallback={(
+                    <AnimatedFullBodyAvatar
+                      src={fullBodyAvatarSrc || avatarSrc}
+                      fallbackSrc={avatarSrc}
+                      pack={fullBodyAvatarKey}
+                      mode={bodyMode}
+                    />
+                  )}
+                >
+                  <PixiAvatarStage
+                    manifest={fullBodyMotionManifest}
+                    fallbackSrc={fullBodyAvatarSrc || avatarSrc}
+                    expression={avatarExpression}
+                    width={avatarFrameWidth}
+                    height={avatarFrameHeight}
+                    tickle={tickleActive}
+                    onReady={() => setPixiReady(true)}
+                  />
+                </PixiStageErrorBoundary>
+              </span>
+            ) : (
+              <AnimatedFullBodyAvatar
+                src={fullBodyAvatarSrc || avatarSrc}
+                fallbackSrc={avatarSrc}
+                pack={fullBodyAvatarKey}
+                mode={bodyMode}
+              />
+            )
           ) : (
             <img className="floating-avatar-img" src={avatarSrc} alt="" draggable={false} />
           )}
@@ -504,7 +637,7 @@ export default function FloatingAvatarMode({
                 setAgentPickerOpen(false);
               }}
             >
-              {menuCheck(chatMode, chatMode ? t('floatingAvatar.chatModeOff') : t('floatingAvatar.chatModeOn'))}
+              {menuCheck(chatMode, t('floatingAvatar.chatMode'))}
             </button>
             <div className="floating-avatar-body-switch" role="group" aria-label={t('floatingAvatar.bodySwitchLabel')}>
               {[['head', 'bodyHead'], ['full', 'bodyFull']].map(([mode, key]) => (
@@ -519,6 +652,28 @@ export default function FloatingAvatarMode({
                 </button>
               ))}
             </div>
+            <button
+              type="button"
+              className={dynamicImageEnabled ? 'floating-avatar-body-active-btn' : ''}
+              aria-pressed={dynamicImageEnabled}
+              onClick={toggleDynamicImage}
+            >
+              {menuCheck(dynamicImageEnabled, t('floatingAvatar.bodyDynamic'))}
+            </button>
+            {usePixiAvatar && (
+              <button
+                type="button"
+                className={tickleMode ? 'floating-avatar-body-active-btn' : ''}
+                aria-pressed={tickleMode}
+                onClick={() => {
+                  setTickleMode((on) => !on);
+                  setReminderPickerOpen(false);
+                  setAgentPickerOpen(false);
+                }}
+              >
+                {menuCheck(tickleMode, t('floatingAvatar.tickleInteraction'))}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {

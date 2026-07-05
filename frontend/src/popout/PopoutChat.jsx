@@ -37,6 +37,7 @@ export default function PopoutChat({boot = {}}) {
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
   const [error, setError] = useState('');
   const [loadFailed, setLoadFailed] = useState(false);
   const listRef = useRef(null);
@@ -98,9 +99,34 @@ export default function PopoutChat({boot = {}}) {
     callPopout('Unpin').catch(() => {});
   }
 
+  function updateConfig(patch) {
+    const next = {
+      persona_id: state?.persona_id || '',
+      adapter_id: state?.adapter_id || '',
+      model: state?.model || '',
+      ...patch,
+    };
+    setError('');
+    callPopout('SetConfig', next)
+      .then((snapshot) => {
+        setState((prev) => ({...(prev || {}), ...(snapshot || {})}));
+        if (Array.isArray(snapshot?.messages)) {
+          setMessages(snapshot.messages);
+        }
+      })
+      .catch((err) => setError(err?.message || String(err)));
+  }
+
   const title = state?.name || boot?.name || '';
   const personaName = state?.persona_name || '';
   const adapterId = state?.adapter_id || '';
+  const modelName = state?.model || '';
+  const personas = Array.isArray(state?.personas) ? state.personas : [];
+  const adapters = Array.isArray(state?.adapters) ? state.adapters : [];
+  const activeAdapter = adapters.find((adapter) => adapter?.id === adapterId) || adapters[0] || null;
+  const modelOptions = Array.isArray(activeAdapter?.models) ? activeAdapter.models : [];
+  const adapterLabel = activeAdapter?.name || adapterId || '';
+  const contextLabel = [personaName, modelName || adapterLabel || adapterId].filter(Boolean).join(' · ');
 
   return (
     <div className="popout-shell">
@@ -121,7 +147,70 @@ export default function PopoutChat({boot = {}}) {
         </button>
         <div className="popout-title">
           <strong>{title}</strong>
-          <span>{[personaName, adapterId].filter(Boolean).join(' · ')}</span>
+          <button
+            className="popout-context-trigger"
+            type="button"
+            aria-expanded={configOpen}
+            onClick={() => setConfigOpen((open) => !open)}
+            title="更改人格與使用模型"
+            style={{'--wails-draggable': 'no-drag'}}
+          >
+            <span>{contextLabel || '選擇人格與模型'}</span>
+            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+              <path fill="currentColor" d="M4 6l4 4 4-4z" />
+            </svg>
+          </button>
+          {configOpen && (
+            <div className="popout-config-menu" style={{'--wails-draggable': 'no-drag'}}>
+              <label>
+                <span>人格</span>
+                <select
+                  value={state?.persona_id || ''}
+                  onChange={(event) => updateConfig({persona_id: event.target.value})}
+                >
+                  {personas.map((persona) => (
+                    <option key={persona.id} value={persona.id}>
+                      {persona.name || persona.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>模型來源</span>
+                <select
+                  value={adapterId}
+                  onChange={(event) => {
+                    const nextAdapter = adapters.find((adapter) => adapter?.id === event.target.value);
+                    const models = Array.isArray(nextAdapter?.models) ? nextAdapter.models : [];
+                    updateConfig({
+                      adapter_id: event.target.value,
+                      model: nextAdapter?.model || models[0] || '',
+                    });
+                  }}
+                >
+                  {adapters.map((adapter) => (
+                    <option key={adapter.id} value={adapter.id}>
+                      {[adapter.name || adapter.id, adapter.kind].filter(Boolean).join(' / ')}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>模型</span>
+                <select
+                  value={modelName}
+                  disabled={modelOptions.length === 0}
+                  onChange={(event) => updateConfig({model: event.target.value})}
+                >
+                  {modelOptions.length === 0 ? (
+                    <option value="">使用預設模型</option>
+                  ) : (
+                    modelOptions.map((model) => <option key={model} value={model}>{model}</option>)
+                  )}
+                </select>
+              </label>
+            </div>
+          )}
         </div>
         {busy && <span className="popout-busy" aria-label="thinking">…</span>}
       </header>

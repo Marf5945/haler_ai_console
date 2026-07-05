@@ -1,6 +1,6 @@
 // DocumentReviewCard.jsx — 文件寫入/匯出確認卡片。
 import { useState, useEffect, useCallback } from 'react';
-import { EventsOn } from '../../wailsjs/runtime/runtime';
+import {EventsOn} from '../lib/wailsRuntime';
 import DecisionCard from './DecisionCard';
 import useI18n from '../locales/useI18n';
 

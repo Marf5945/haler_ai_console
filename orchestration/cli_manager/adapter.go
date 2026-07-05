@@ -578,6 +578,14 @@ func (a *SidecarCLIAdapter) SendMessage(opts skill_step.CLIMessageOptions) (skil
 				state.sentences.AddOutput(result.Text)
 				state.counter.Add(len([]rune(opts.UserText)) + len([]rune(result.Text)))
 				a.checkAndEmitSummarizationNeeded(continuityKey, state)
+			} else if strings.TrimSpace(opts.RecordText) != "" {
+				// direct code：本輪雖走 control message（不合成歷史、不進 action-chain
+				// 解析、回應照原文回傳），但仍以「乾淨原文」RecordText 記進 continuity
+				// store，讓之後的 composer 輪能看到這次程式碼問答，維持同條對話的上下文。
+				state.sentences.AddInput(opts.RecordText)
+				state.sentences.AddOutput(result.Text)
+				state.counter.Add(len([]rune(opts.RecordText)) + len([]rune(result.Text)))
+				a.checkAndEmitSummarizationNeeded(continuityKey, state)
 			}
 			return skill_step.CLIResponse{Text: result.Text}, nil
 		}

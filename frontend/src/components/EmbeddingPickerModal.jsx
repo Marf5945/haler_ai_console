@@ -18,7 +18,7 @@ import {
   DetectOllamaState,
   WakeOllamaDaemon,
 } from '../../wailsjs/go/main/App';
-import {EventsOn} from '../../wailsjs/runtime/runtime';
+import {EventsOn} from '../lib/wailsRuntime';
 
 // 推薦下載清單——使用者可改成自己想要的。
 const SUGGESTED_MODELS = [

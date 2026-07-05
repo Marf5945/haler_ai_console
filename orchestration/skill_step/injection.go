@@ -30,6 +30,7 @@ type CLIMessageOptions struct {
 	TraceID         string     // DEBUG_TRACE_REMOVE: debug-only correlation ID for UI -> CLI tracing
 	ToolRoutingMode string     // 空字串=一般工具選擇；judge=第一輪只判斷是否需要工具
 	SkipContinuity  bool       // true = 跳過 SentenceStore / Synthesize（閒聊用）
+	RecordText      string     // 選填；非空時，記入 continuity store 的乾淨原文（取代 UserText），供 direct code 不把指令包裝寫進歷史
 	IsCommand       bool       // true = Controller 已判定本輪走命令入口，需蓋 seal
 }
 

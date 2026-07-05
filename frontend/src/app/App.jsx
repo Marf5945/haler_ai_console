@@ -308,7 +308,6 @@ import {
 import {
   OnFileDrop,
   OnFileDropOff,
-  EventsOn,
   BrowserOpenURL,
   Quit,
   ClipboardGetText,
@@ -325,6 +324,7 @@ import {
   WindowShow,
   WindowUnminimise,
 } from '../../wailsjs/runtime/runtime';
+import {EventsOn} from '../lib/wailsRuntime';
 
 import DocumentReviewCard from '../components/DocumentReviewCard';
 import VisualLearningPanel from '../components/VisualLearningPanel';
@@ -351,6 +351,7 @@ import GoCodePreviewDock from './components/GoCodePreviewDock';
 import ToolPopup from './components/ToolPopup';
 import AvatarUploadModal from './components/AvatarUploadModal';
 import FloatingAvatarMode from './components/FloatingAvatarMode';
+import {resolveAvatarMotionManifest} from './avatarMotionRegistry';
 import PackageConfirmModal from './components/PackageConfirmModal';
 import SessionCloseDialog from './components/SessionCloseDialog';
 // small leaf components extracted to app/components
@@ -410,6 +411,50 @@ function firstFiniteNumber(...values) {
     if (Number.isFinite(value)) return Number(value);
   }
   return null;
+}
+
+function clampNumber(value, min, max) {
+  const lower = Math.min(min, max);
+  const upper = Math.max(min, max);
+  return Math.max(lower, Math.min(upper, value));
+}
+
+function floatingAvatarCenterPosition(width = FLOATING_AVATAR_WINDOW_SIZE, height = FLOATING_AVATAR_WINDOW_SIZE) {
+  const viewportW = firstFiniteNumber(window.innerWidth, width) || width;
+  const viewportH = firstFiniteNumber(window.innerHeight, height) || height;
+  const maxX = Math.max(12, viewportW - width - 12);
+  const maxY = Math.max(12, viewportH - height - 12);
+  return {
+    x: Math.round(clampNumber((viewportW - width) / 2, 12, maxX)),
+    y: Math.round(clampNumber((viewportH - height) / 2, 12, maxY)),
+  };
+}
+
+function normalizeFloatingAvatarViewportPosition(position, width = FLOATING_AVATAR_WINDOW_SIZE, height = FLOATING_AVATAR_WINDOW_SIZE) {
+  if (!Number.isFinite(position?.x) || !Number.isFinite(position?.y)) {
+    return floatingAvatarCenterPosition(width, height);
+  }
+  const viewportW = firstFiniteNumber(window.innerWidth, width) || width;
+  const viewportH = firstFiniteNumber(window.innerHeight, height) || height;
+  const maxX = Math.max(12, viewportW - width - 12);
+  const maxY = Math.max(12, viewportH - height - 12);
+  return {
+    x: Math.round(clampNumber(Number(position.x), 12, maxX)),
+    y: Math.round(clampNumber(Number(position.y), 12, maxY)),
+  };
+}
+
+function clampFloatingAvatarScreenPosition(position, width = FLOATING_AVATAR_WINDOW_SIZE, height = FLOATING_AVATAR_WINDOW_SIZE) {
+  const screenLeft = firstFiniteNumber(window.screen?.availLeft, window.screen?.left, 0) || 0;
+  const screenTop = firstFiniteNumber(window.screen?.availTop, window.screen?.top, 0) || 0;
+  const screenW = firstFiniteNumber(window.screen?.availWidth, window.screen?.width, window.innerWidth, width) || width;
+  const screenH = firstFiniteNumber(window.screen?.availHeight, window.screen?.height, window.innerHeight, height) || height;
+  const maxX = screenLeft + Math.max(0, screenW - width);
+  const maxY = screenTop + Math.max(0, screenH - height);
+  return {
+    x: Math.round(clampNumber(Number(position?.x ?? screenLeft), screenLeft, maxX)),
+    y: Math.round(clampNumber(Number(position?.y ?? screenTop), screenTop, maxY)),
+  };
 }
 
 const fallbackState = {
@@ -694,6 +739,59 @@ function personaPatrolDialogueBadge(persona) {
   if (entry?.label) return entry.label;
   if (!spec) return defaultPatrolDialogueVariant(persona) === 'fem' ? 'AssiStand' : 'YuRoSaKu';
   return manualPatrolDialogueOptions(spec).length > 0 ? 'Manual' : '';
+}
+
+function personaNameDisplayUnits(name = '') {
+  return Array.from(String(name || '').trim()).reduce((total, char) => {
+    if (/\s/.test(char)) return total + 0.45;
+    if (/[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/u.test(char)) return total + 1.35;
+    if (/[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/u.test(char)) return total + 1.12;
+    if (/[\u0e00-\u0e7f]/u.test(char)) return total + 0.95;
+    return total + 1;
+  }, 0);
+}
+
+function personaNameFontSize(name = '') {
+  const units = personaNameDisplayUnits(name);
+  if (units <= 8) return 17;
+  if (units <= 12) return 15;
+  if (units <= 15.5) return 13.5;
+  if (units <= 19) return 12;
+  return 10.5;
+}
+
+const defaultPersonaDisplayNames = {
+  'persona-a': {
+    key: 'persona.lockedName',
+    legacyNames: ['憂樂傻酷', 'YuRoSaKu'],
+  },
+  'persona-b': {
+    key: 'persona.defaultNameB',
+    legacyNames: ['人格 B', '厭世叔', '厭世大叔', 'Grumpy Uncle', 'Tío Gruñón', 'Tio Rabugento', '不機嫌おじさん', '심술쟁이 아저씨', 'ลุงขี้บ่น'],
+  },
+  'persona-c': {
+    key: 'persona.defaultNameC',
+    legacyNames: ['人格 C', '秘書小妹', 'Secretary Sis', 'Hermana Secretaria', 'Mana Secretária', '秘書お姉さん', '비서 아가씨', 'พี่สาวเลขาฯ'],
+  },
+  'persona-d': {
+    key: 'persona.defaultNameD',
+    legacyNames: ['人格 D', '規則警察', '警察桂澤', 'Rule Police', 'Officer Reggie Law', 'Agente Reglaz', 'Agente Regraldo', '木曽久巡査', '규식 순경', 'ผู้หมวดกฎเก่ง'],
+  },
+  'persona-e': {
+    key: 'persona.defaultNameE',
+    legacyNames: ['東春巫女', 'Touharu Miko', 'Miko Touharu', '東春の巫女', '동춘 무녀', 'มิโกะโทฮารุ'],
+  },
+};
+
+function personaCardDisplayName(persona = {}, t = _t) {
+  const display = defaultPersonaDisplayNames[persona.id];
+  if (!display) return persona.name || '';
+  const name = String(persona.name || '').trim();
+  const localizedName = t(display.key);
+  if (persona.id === lockedPersonaId || !name || display.legacyNames.includes(name)) {
+    return localizedName;
+  }
+  return persona.name;
 }
 
 function pickRotatingGreeting(currentText, source = 'male') {
@@ -1381,12 +1479,15 @@ const touharuAvatarUrls = {
   speechless: new URL('../assets/persona_avatars/touharu/speechless.png', import.meta.url).href,
 };
 
-// 全身立繪（直式、已去背）。每角色兩張姿勢：idle=等待、blocked=禁止（舉手停）。
+// 全身立繪（直式、已去背）。依角色狀態提供姿勢：idle=等待、blocked=禁止（舉手停）。
 // key 對齊 pixelPackForPersona 的 pack 名稱。
 const fullBodyAvatarUrls = {
   wolf: {
     idle: new URL('../assets/persona_fullbody/wolfdog/fullbody_idle.png', import.meta.url).href,
-    blocked: new URL('../assets/persona_fullbody/wolfdog/fullbody.png', import.meta.url).href,
+    thinking: new URL('../assets/persona_fullbody/wolfdog/fullbody_thinking.png', import.meta.url).href,
+    working: new URL('../assets/persona_fullbody/wolfdog/fullbody_working.png', import.meta.url).href,
+    sad: new URL('../assets/persona_fullbody/wolfdog/fullbody_sad.png', import.meta.url).href,
+    blocked: new URL('../assets/persona_fullbody/wolfdog/fullbody_block.png', import.meta.url).href,
   },
   uncle: {
     idle: new URL('../assets/persona_fullbody/uncle_bust/fullbody_idle.png', import.meta.url).href,
@@ -2189,6 +2290,7 @@ function App() {
   const [floatingAvatarCompactWindow, setFloatingAvatarCompactWindow] = useState(false);
   const [floatingAvatarSurfaceOnly, setFloatingAvatarSurfaceOnly] = useState(false);
   const [floatingAvatarBodyMode, setFloatingAvatarBodyMode] = useState('head');
+  const [floatingAvatarDynamicImage, setFloatingAvatarDynamicImage] = useState(false);
   const [floatingAvatarChatMode, setFloatingAvatarChatMode] = useState(false);
   const [floatingAvatarPanelOpenSignal, setFloatingAvatarPanelOpenSignal] = useState(0);
   const [floatingAvatarReplyBubble, setFloatingAvatarReplyBubble] = useState('');
@@ -2201,12 +2303,11 @@ function App() {
   const [floatingAvatarPosition, setFloatingAvatarPosition] = useState(() => {
     try {
       const saved = JSON.parse(window.localStorage.getItem('floating_avatar_position') || 'null');
-      if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) return saved;
+      if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
+        return normalizeFloatingAvatarViewportPosition(saved);
+      }
     } catch {}
-    return {
-      x: Math.max(12, window.innerWidth - FLOATING_AVATAR_WINDOW_SIZE),
-      y: Math.max(12, window.innerHeight - FLOATING_AVATAR_WINDOW_SIZE - 16),
-    };
+    return floatingAvatarCenterPosition();
   });
   const floatingAvatarModeRef = useRef(floatingAvatarMode);
   const floatingAvatarCompactWindowRef = useRef(floatingAvatarCompactWindow);
@@ -2221,11 +2322,11 @@ function App() {
   floatingAvatarChatModeRef.current = floatingAvatarChatMode;
 
   useEffect(() => {
-    if (floatingAvatarCompactWindow) return;
+    if (floatingAvatarMode || floatingAvatarCompactWindow) return;
     try {
       window.localStorage.setItem('floating_avatar_position', JSON.stringify(floatingAvatarPosition));
     } catch {}
-  }, [floatingAvatarCompactWindow, floatingAvatarPosition]);
+  }, [floatingAvatarCompactWindow, floatingAvatarMode, floatingAvatarPosition]);
 
   useEffect(() => {
     const nativeWindowActive = floatingAvatarMode && (ENABLE_NATIVE_FLOATING_AVATAR_WINDOW || floatingAvatarCompactWindow || floatingAvatarSurfaceOnly);
@@ -8143,12 +8244,11 @@ function App() {
           WindowGetSize().catch(() => ({w: window.innerWidth, h: window.innerHeight})),
           WindowGetPosition().catch(() => ({x: 0, y: 0})),
         ]);
-        const avatarPosition = floatingAvatarPositionRef.current || floatingAvatarPosition || {
-          x: Math.max(12, window.innerWidth - FLOATING_AVATAR_WINDOW_SIZE),
-          y: Math.max(12, window.innerHeight - FLOATING_AVATAR_WINDOW_SIZE - 16),
-        };
+        const avatarPosition = floatingAvatarCenterPosition();
         const overlayX = Math.round((windowPosition?.x ?? 0) + Number(avatarPosition?.x || 0));
         const overlayY = Math.round((windowPosition?.y ?? 0) + Number(avatarPosition?.y || 0));
+        floatingAvatarPositionRef.current = avatarPosition;
+        setFloatingAvatarPosition(avatarPosition);
         setFloatingAvatarBodyMode('head');
         await showFloatingAvatarOverlayAt('head', overlayX, overlayY);
         floatingAvatarCompactWindowRef.current = false;
@@ -8184,14 +8284,15 @@ function App() {
         WindowGetSize(),
         WindowGetPosition(),
       ]);
-      const avatarPosition = floatingAvatarPositionRef.current || floatingAvatarPosition || {
-        x: Math.max(12, window.innerWidth - FLOATING_AVATAR_WINDOW_SIZE),
-        y: Math.max(12, window.innerHeight - FLOATING_AVATAR_WINDOW_SIZE - 16),
-      };
-      const avatarX = Number(avatarPosition?.x ?? Math.max(12, window.innerWidth - FLOATING_AVATAR_WINDOW_SIZE));
-      const avatarY = Number(avatarPosition?.y ?? Math.max(12, window.innerHeight - FLOATING_AVATAR_WINDOW_SIZE - 16));
-      const compactX = Math.round((windowPosition?.x ?? 0) + avatarX - FLOATING_AVATAR_INSET);
-      const compactY = Math.round((windowPosition?.y ?? 0) + avatarY - FLOATING_AVATAR_INSET);
+      const avatarPosition = floatingAvatarCenterPosition();
+      const avatarX = Number(avatarPosition.x);
+      const avatarY = Number(avatarPosition.y);
+      const compactPosition = clampFloatingAvatarScreenPosition({
+        x: Math.round((windowPosition?.x ?? 0) + avatarX - FLOATING_AVATAR_INSET),
+        y: Math.round((windowPosition?.y ?? 0) + avatarY - FLOATING_AVATAR_INSET),
+      });
+      const compactX = compactPosition.x;
+      const compactY = compactPosition.y;
       floatingAvatarWindowRef.current = {
         restore: {
           size: windowSize || {w: window.innerWidth, h: window.innerHeight},
@@ -8236,8 +8337,12 @@ function App() {
     floatingAvatarTransitionRef.current = true;
     try {
       const overlayPosition = await callWails(() => GetFloatingAvatarOverlayPosition()).catch(() => null);
-      const avatarScreenX = Number.isFinite(overlayPosition?.x) ? Math.round(overlayPosition.x) : Math.max(12, window.innerWidth - FLOATING_AVATAR_WINDOW_SIZE);
-      const avatarScreenY = Number.isFinite(overlayPosition?.y) ? Math.round(overlayPosition.y) : Math.max(12, window.innerHeight - FLOATING_AVATAR_WINDOW_SIZE - 16);
+      const overlayFallback = clampFloatingAvatarScreenPosition({
+        x: (firstFiniteNumber(window.screen?.availLeft, window.screen?.left, 0) || 0) + ((firstFiniteNumber(window.screen?.availWidth, window.screen?.width, window.innerWidth) || FLOATING_AVATAR_WINDOW_SIZE) - FLOATING_AVATAR_WINDOW_SIZE) / 2,
+        y: (firstFiniteNumber(window.screen?.availTop, window.screen?.top, 0) || 0) + ((firstFiniteNumber(window.screen?.availHeight, window.screen?.height, window.innerHeight) || FLOATING_AVATAR_WINDOW_SIZE) - FLOATING_AVATAR_WINDOW_SIZE) / 2,
+      });
+      const avatarScreenX = Number.isFinite(overlayPosition?.x) ? Math.round(overlayPosition.x) : overlayFallback.x;
+      const avatarScreenY = Number.isFinite(overlayPosition?.y) ? Math.round(overlayPosition.y) : overlayFallback.y;
       await callWails(() => ExitFloatingAvatarOverlay()).catch((e) => console.warn('ExitFloatingAvatarOverlay failed', e));
 
       const screens = await ScreenGetAll().catch(() => []);
@@ -8319,13 +8424,11 @@ function App() {
     const expandedState = floatingAvatarWindowRef.current?.expanded;
     const compactLivePosition = await WindowGetPosition().catch(() => null);
     if (!expandedState && Number.isFinite(compactLivePosition?.x) && Number.isFinite(compactLivePosition?.y)) {
-      rememberFloatingAvatarCompactPosition(compactLivePosition);
+      const compactSafePosition = clampFloatingAvatarScreenPosition(compactLivePosition);
+      rememberFloatingAvatarCompactPosition(compactSafePosition);
       floatingAvatarWindowRef.current = {
         ...floatingAvatarWindowRef.current,
-        compactPosition: {
-          x: Math.round(compactLivePosition.x),
-          y: Math.round(compactLivePosition.y),
-        },
+        compactPosition: compactSafePosition,
       };
     } else if (Number.isFinite(floatingAvatarWindowRef.current?.compactPosition?.x) && Number.isFinite(floatingAvatarWindowRef.current?.compactPosition?.y)) {
       rememberFloatingAvatarCompactPosition(floatingAvatarWindowRef.current.compactPosition);
@@ -8357,11 +8460,9 @@ function App() {
     setFloatingAvatarFlyingBack(false);
     floatingAvatarDragWindowRef.current = null;
     floatingAvatarWindowRef.current = {restore: null, compactPosition: null};
-    const restoredAvatarPosition = restore?.avatarPosition
-      || {
-        x: Math.max(12, window.innerWidth - FLOATING_AVATAR_WINDOW_SIZE),
-        y: Math.max(12, window.innerHeight - FLOATING_AVATAR_WINDOW_SIZE - 16),
-      };
+    const restoredAvatarPosition = normalizeFloatingAvatarViewportPosition(
+      restore?.avatarPosition || floatingAvatarCenterPosition()
+    );
     floatingAvatarPositionRef.current = restoredAvatarPosition;
     setFloatingAvatarPosition(restoredAvatarPosition);
   }
@@ -8432,9 +8533,11 @@ function App() {
         if (ref.expanded) return;
         // compact 模式可由原生 draggable 移動，展開前先同步真實視窗位置。
         const livePosition = await WindowGetPosition().catch(() => null);
-        const origin = Number.isFinite(livePosition?.x) && Number.isFinite(livePosition?.y)
-          ? {x: Math.round(livePosition.x), y: Math.round(livePosition.y)}
-          : ref.compactPosition || {x: 0, y: 0};
+        const origin = clampFloatingAvatarScreenPosition(
+          Number.isFinite(livePosition?.x) && Number.isFinite(livePosition?.y)
+            ? livePosition
+            : ref.compactPosition || {x: 0, y: 0}
+        );
         ref.compactPosition = origin;
         rememberFloatingAvatarCompactPosition(origin);
         const avatarScreenX = origin.x + FLOATING_AVATAR_INSET;
@@ -8473,11 +8576,13 @@ function App() {
       } else {
         if (!ref.expanded) return;
         const {avatarScreenX, avatarScreenY} = ref.expanded;
-        const newX = Math.round(avatarScreenX - FLOATING_AVATAR_INSET);
-        const newY = Math.round(avatarScreenY - FLOATING_AVATAR_INSET);
+        const nextCompact = clampFloatingAvatarScreenPosition({
+          x: Math.round(avatarScreenX - FLOATING_AVATAR_INSET),
+          y: Math.round(avatarScreenY - FLOATING_AVATAR_INSET),
+        });
         WindowSetSize(FLOATING_AVATAR_WINDOW_SIZE, FLOATING_AVATAR_WINDOW_SIZE);
-        WindowSetPosition(newX, newY);
-        ref.compactPosition = {x: newX, y: newY};
+        WindowSetPosition(nextCompact.x, nextCompact.y);
+        ref.compactPosition = nextCompact;
         ref.expanded = null;
         const compactAvatarPosition = {x: FLOATING_AVATAR_INSET, y: FLOATING_AVATAR_INSET};
         floatingAvatarPositionRef.current = compactAvatarPosition;
@@ -8508,7 +8613,10 @@ function App() {
   function moveCompactFloatingAvatarWindow(dx, dy) {
     const start = floatingAvatarDragWindowRef.current;
     if (!start) return;
-    const next = {x: Math.round(start.x + dx), y: Math.round(start.y + dy)};
+    const next = clampFloatingAvatarScreenPosition({
+      x: Math.round(start.x + dx),
+      y: Math.round(start.y + dy),
+    });
     floatingAvatarWindowRef.current = {
       ...floatingAvatarWindowRef.current,
       compactPosition: next,
@@ -8520,7 +8628,7 @@ function App() {
   async function syncCompactFloatingAvatarWindowPosition() {
     const livePosition = await WindowGetPosition().catch(() => null);
     if (!Number.isFinite(livePosition?.x) || !Number.isFinite(livePosition?.y)) return;
-    const next = {x: Math.round(livePosition.x), y: Math.round(livePosition.y)};
+    const next = clampFloatingAvatarScreenPosition(livePosition);
     floatingAvatarWindowRef.current = {
       ...floatingAvatarWindowRef.current,
       compactPosition: next,
@@ -8740,6 +8848,19 @@ function App() {
     }
   }
 
+  async function changeFloatingAvatarDynamicImage(enabled) {
+    const next = Boolean(enabled);
+    setFloatingAvatarDynamicImage(next);
+    if (next && floatingAvatarBodyMode !== 'full') {
+      await changeFloatingAvatarBodyMode('full');
+    }
+    // macOS 原生浮窗：勾選動態後 Pixi(WebGL) 掛載會讓 WKWebView 重走合成路徑，
+    // 重套一次透明視窗參數（幂等），避免整片視窗變成不透明黑塊。
+    if (next && ENABLE_NATIVE_FLOATING_AVATAR_WINDOW && floatingAvatarModeRef.current) {
+      await callWails(() => EnterFloatingAvatarNative()).catch(() => {});
+    }
+  }
+
   async function switchFloatingAvatarAgent(personaId) {
     const persona = settingsState.personas.find((item) => item.id === personaId);
     if (!persona) return;
@@ -8797,6 +8918,11 @@ function App() {
   const floatingExpression = !floatingReminderPaused && (pendingTaskReview || schedulerConfirm) ? 'warning' : avatarExpression;
   const floatingFullBodyAvatarKey = pixelPackForPersona(floatingPersona, floatingAvatarConfig);
   const floatingFullBodyAvatarSrc = resolvePersonaFullBodySrc(floatingPersona, floatingAvatarConfig, floatingExpression);
+  const floatingFullBodyMotionManifest = resolveAvatarMotionManifest(
+    floatingFullBodyAvatarKey,
+    floatingExpression,
+    floatingFullBodyAvatarSrc || floatingAvatarSrc,
+  );
   // 紀念照「拍照」共用流程：Windows 原生浮窗選單與 mac 迷你面板的拍照鈕都走這裡，
   // 讓兩個平台的後台頭像介面行為一致。
   async function takeFloatingKeepsakePhoto() {
@@ -8901,6 +9027,7 @@ function App() {
         avatarSrc={floatingAvatarSrc}
         fullBodyAvatarSrc={floatingFullBodyAvatarSrc || floatingAvatarSrc}
         fullBodyAvatarKey={floatingFullBodyAvatarKey}
+        fullBodyMotionManifest={floatingFullBodyMotionManifest}
         avatarExpression={floatingExpression}
         persona={floatingPersona}
         personas={floatingAvatarPersonas}
@@ -8911,8 +9038,10 @@ function App() {
         compactWindowMode={floatingAvatarCompactWindow}
         panelOpenSignal={floatingAvatarPanelOpenSignal}
         bodyMode={floatingAvatarBodyMode}
+        dynamicImageEnabled={floatingAvatarDynamicImage}
         chatMode={floatingAvatarChatMode}
         onBodyModeChange={changeFloatingAvatarBodyMode}
+        onDynamicImageChange={changeFloatingAvatarDynamicImage}
         onChatModeChange={(enabled) => setFloatingAvatarChatModeEnabled(enabled, {clearHistory: !enabled})}
         onChatModeToggle={toggleFloatingAvatarChatMode}
         onCompactDragStart={beginCompactFloatingAvatarDrag}
@@ -12057,7 +12186,9 @@ export function PersonaSettingsDrawer({
   return (
     <main className="settings-persona-drawer" aria-label={t('persona.settingsAriaLabel')}>
       <div className="persona-card-row" ref={personaRowRef}>
-        {personas.map((persona) => (
+        {personas.map((persona) => {
+          const displayName = personaCardDisplayName(persona, t);
+          return (
           <div className="settings-persona-card-wrap" key={persona.id}>
             <button
               className={`settings-persona-card ${persona.id === activePersona.id ? 'settings-persona-card-active' : ''} ${persona.id === draggedPersonaId ? 'settings-persona-card-dragging' : ''} ${persona.id === lockedPersonaId ? 'settings-persona-card-locked' : ''}`}
@@ -12089,12 +12220,18 @@ export function PersonaSettingsDrawer({
                   ));
                 }}
                 src={resolvePersonaAvatarSrc(persona, avatarConfigs[persona.id], staticAvatarPreviews, renderedPixelAvatars[persona.id] || '')}
-                alt={t('persona.avatarAlt', { name: persona.name })}
+                alt={t('persona.avatarAlt', { name: displayName })}
               />
-              <strong>{persona.name}</strong>
-              {persona.id === lockedPersonaId && personaPatrolDialogueBadge(persona) && (
+              <strong
+                title={displayName}
+                style={{'--persona-name-font-size': `${personaNameFontSize(displayName)}px`}}
+              >
+                {displayName}
+              </strong>
+              {personaPatrolDialogueBadge(persona) && (
                 <small className="settings-persona-patrol-badge">{personaPatrolDialogueBadge(persona)}</small>
               )}
+              {persona.id === lockedPersonaId && <small className="settings-persona-lock">{t('persona.lockedName')}</small>}
             </button>
             {avatarMenuPersonaId === persona.id && persona.id !== lockedPersonaId && (
               <div className="settings-persona-avatar-menu" role="menu" aria-label={t('persona.changeAvatarTitle')}>
@@ -12113,7 +12250,8 @@ export function PersonaSettingsDrawer({
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
         {personaExportDialog && (
           <DragActionModal
             ariaLabel={t('persona.dragAriaLabel')}

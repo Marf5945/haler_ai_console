@@ -6,6 +6,7 @@ const manifestModules = import.meta.glob('../assets/persona_motion/*/manifest.js
 const motionAssetUrls = import.meta.glob([
   '../assets/persona_motion/**/*.png',
   '!../assets/persona_motion/**/_source/*.png',
+  '!../assets/persona_motion/**/tmp/**/*.png',
 ], {
   eager: true,
   query: '?url',
@@ -23,7 +24,14 @@ function folderFromManifestPath(path) {
 
 function assetURL(folder, relativePath) {
   if (!folder || !relativePath) return '';
+  if (isUnsafeMotionAssetPath(relativePath)) return '';
   return motionAssetUrls[`../assets/persona_motion/${folder}/${relativePath}`] || '';
+}
+
+function isUnsafeMotionAssetPath(relativePath) {
+  const value = String(relativePath || '').toLowerCase();
+  return /(^|\/)(?:_source|tmp)\//.test(value)
+    || /(?:contact[_-]?sheet|source[_-]?boxes|sprite[_-]?sheet|regen(?:erated)?|_green)(?:[./_-]|$)/.test(value);
 }
 
 function hydrateSequence(folder, sequence) {
@@ -31,7 +39,7 @@ function hydrateSequence(folder, sequence) {
   return {
     ...sequence,
     frames: sequence.frames
-      .map((frame) => assetURL(folder, frame))
+      .map((frame) => assetURL(folder, typeof frame === 'string' ? frame : frame?.src))
       .filter(Boolean),
   };
 }
@@ -61,6 +69,17 @@ function hydrateLayer(folder, layer = {}) {
   };
 }
 
+function mergeLayerMotion(base = {}, override = {}) {
+  const merged = {...base};
+  Object.entries(override || {}).forEach(([key, value]) => {
+    const baseValue = base?.[key];
+    merged[key] = value && typeof value === 'object' && !Array.isArray(value)
+      ? {...(baseValue || {}), ...value}
+      : value;
+  });
+  return merged;
+}
+
 function inheritedLayerDefs(manifest, stateManifest = {}) {
   const parentStateName = stateManifest.extends;
   if (!parentStateName) return null;
@@ -72,7 +91,11 @@ function inheritedLayerDefs(manifest, stateManifest = {}) {
     .map((layer) => [layer.id, layer]));
   const seen = new Set();
 
-  const layers = parentLayers
+  const layers = (stateManifest.prependLayers || [])
+    .filter((layer) => layer?.id && !omit.has(layer.id));
+  layers.forEach((layer) => seen.add(layer.id));
+
+  layers.push(...parentLayers
     .filter((layer) => !omit.has(layer.id))
     .map((layer) => {
       const override = overrides.get(layer.id);
@@ -84,9 +107,9 @@ function inheritedLayerDefs(manifest, stateManifest = {}) {
         positionPx: {...(layer.positionPx || {}), ...(override.positionPx || {})},
         size: {...(layer.size || {}), ...(override.size || {})},
         anchor: {...(layer.anchor || {}), ...(override.anchor || {})},
-        motion: {...(layer.motion || {}), ...(override.motion || {})},
+        motion: mergeLayerMotion(layer.motion || {}, override.motion || {}),
       };
-    });
+    }));
 
   (stateManifest.layers || []).forEach((layer) => {
     if (layer?.id && !omit.has(layer.id)) {
@@ -119,29 +142,44 @@ function proceduralManifest(pack, state, fallbackSrc) {
 
 // Cursor turn steps, ordered from back-left through back-right.
 const TURN_LADDER = [
-  {id: 'back_left30', value: -6},
-  {id: 'back_left60', value: -5},
-  {id: 'side_left', value: -4},
-  {id: 'front_left60', value: -3},
-  {id: 'front_left45', value: -2},
-  {id: 'front_left30', value: -1},
-  {id: 'front_right30', value: 1},
-  {id: 'front_right45', value: 2},
-  {id: 'front_right60', value: 3},
-  {id: 'side_right', value: 4},
-  {id: 'back_right60', value: 5},
-  {id: 'back_right30', value: 6},
+  {id: 'back_left30', value: -9},
+  {id: 'back_left60', value: -8},
+  {id: 'side_left', value: -7},
+  {id: 'front_left85', value: -6},
+  {id: 'front_left75', value: -5},
+  {id: 'front_left60', value: -4},
+  {id: 'front_left45', value: -3},
+  {id: 'front_left30', value: -2},
+  {id: 'front_left15', value: -1},
+  {id: 'front_right15', value: 1},
+  {id: 'front_right30', value: 2},
+  {id: 'front_right45', value: 3},
+  {id: 'front_right60', value: 4},
+  {id: 'front_right75', value: 5},
+  {id: 'front_right85', value: 6},
+  {id: 'side_right', value: 7},
+  {id: 'back_right60', value: 8},
+  {id: 'back_right30', value: 9},
 ];
 
 const POSE_STATES = ['front_left30_arms_up', 'front_right30_arms_up', 'back_waist', 'working_reaction', 'happy_tail_wag_front'];
 const SHY_SEQUENCE = ['back_full', 'back_3q'];
+const FLAT_POSE_STATES = new Set(['back_waist']);
 
 function resolveSubState(entry, stateName) {
   const stateManifest = entry.manifest?.states?.[stateName];
   if (!stateManifest) return null;
   const baseSrc = assetURL(entry.folder, stateManifest.base);
-  const stateSequence = hydrateSequence(entry.folder, stateManifest.sequence);
-  const layers = (stateManifest.layers || [])
+  const matchedSequence = Object.values(entry.manifest?.sequences || {})
+    .find((sequence) => sequence?.sourceState === stateName);
+  const stateSequence = hydrateSequence(entry.folder, stateManifest.sequence || matchedSequence);
+  const inheritedLayers = inheritedLayerDefs(entry.manifest, stateManifest);
+  const sourceLayers = FLAT_POSE_STATES.has(stateName)
+    ? []
+    : stateSequence?.frames?.length
+    ? []
+    : (inheritedLayers?.length ? inheritedLayers : (stateManifest.layers || []));
+  const layers = sourceLayers
     .map((layer) => hydrateLayer(entry.folder, layer))
     .filter((layer) => layer.src);
   if (!layers.length && !baseSrc && !stateSequence?.frames?.length) return null;

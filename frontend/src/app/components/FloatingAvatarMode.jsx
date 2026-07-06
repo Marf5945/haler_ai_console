@@ -41,6 +41,7 @@ const shakeVomitDelayMs = 3500;
 const shakeVomitDistance = 500;
 const fullBodyAvatarWidth = 200;
 const fullBodyAvatarHeight = 360;
+const fullBodyBubbleSafeTop = 180;
 const contextMenuWidth = 188;
 const contextMenuGap = 14;
 
@@ -174,11 +175,12 @@ export default function FloatingAvatarMode({
   const clampedPosition = useMemo(() => {
     const maxX = Math.max(edgeGap, window.innerWidth - avatarFrameWidth - edgeGap);
     const maxY = Math.max(edgeGap, window.innerHeight - avatarFrameHeight - edgeGap);
+    const minY = showBody ? Math.min(fullBodyBubbleSafeTop, maxY) : edgeGap;
     return {
       x: clamp(Number(position?.x ?? maxX), edgeGap, maxX),
-      y: clamp(Number(position?.y ?? maxY), edgeGap, maxY),
+      y: clamp(Number(position?.y ?? maxY), minY, maxY),
     };
-  }, [avatarFrameHeight, avatarFrameWidth, position?.x, position?.y]);
+  }, [avatarFrameHeight, avatarFrameWidth, position?.x, position?.y, showBody]);
 
   useEffect(() => {
     if (!active) return;
@@ -196,6 +198,10 @@ export default function FloatingAvatarMode({
     }
 
     const frame = {width: avatarFrameWidth, height: avatarFrameHeight, bodyMode};
+    if (compactWindowMode && showBody) {
+      previousFrameRef.current = frame;
+      return;
+    }
     const previous = previousFrameRef.current;
     if (!previous) {
       previousFrameRef.current = frame;
@@ -230,9 +236,11 @@ export default function FloatingAvatarMode({
     bodyMode,
     clampedPosition.x,
     clampedPosition.y,
+    compactWindowMode,
     onPositionChange,
     position?.x,
     position?.y,
+    showBody,
   ]);
 
   useEffect(() => {
@@ -257,7 +265,12 @@ export default function FloatingAvatarMode({
   useEffect(() => {
     if (!compactWindowMode) return undefined;
     const hasTopBubble = (Boolean(String(bubbleText || '').trim()) && !bubbleDismissed) || shakeMessageVisible;
-    onCompactExpandChange?.(panelOpen || contextOpen || hasTopBubble || Boolean(installCandidate) || showBody);
+    const needsPanelSpace = panelOpen || contextOpen || Boolean(installCandidate);
+    onCompactExpandChange?.(needsPanelSpace || hasTopBubble || showBody, {
+      body: showBody,
+      bubble: hasTopBubble,
+      panel: needsPanelSpace,
+    });
     return undefined;
   }, [compactWindowMode, panelOpen, contextOpen, bubbleText, bubbleDismissed, shakeMessageVisible, installCandidate, showBody, bodyMode]);
 
@@ -338,6 +351,18 @@ export default function FloatingAvatarMode({
   const contextMenuLeft = clampedPosition.x + contextMenuRightLeft + contextMenuWidth <= window.innerWidth - edgeGap
     ? contextMenuRightLeft
     : Math.max(edgeGap - clampedPosition.x, -contextMenuWidth - contextMenuGap);
+  const contextMenuTop = compactWindowMode && showBody
+    ? -Math.min(Math.max(0, clampedPosition.y - edgeGap), 152)
+    : 0;
+  const contextMenuMaxHeight = Math.max(
+    220,
+    window.innerHeight - (clampedPosition.y + contextMenuTop) - edgeGap,
+  );
+  const contextMenuStyle = {
+    left: contextMenuLeft,
+    top: contextMenuTop,
+    maxHeight: contextMenuMaxHeight,
+  };
   const displayStatus = pendingConfirm?.title || statusTitle || t('floatingAvatar.statusIdle');
   const displayLatest = pendingConfirm?.reason || latestText || statusText || t('floatingAvatar.latestIdle');
   const speakerName = persona?.name || t('floatingAvatar.agentFallback');
@@ -347,9 +372,10 @@ export default function FloatingAvatarMode({
   const cleanBubbleText = String(shakeMessage || bubbleText || '').replace(/^Ai[:：]\s*/, '').trim();
   const displayedBubbleText = attentionBubbleText || cleanBubbleText;
   const topBubbleVisible = (compactWindowMode || attentionPaused) && displayedBubbleText && (attentionPaused || !bubbleDismissed || shakeMessageVisible);
+  const topBubbleOffset = showBody ? 168 : 92;
   const topBubbleStyle = {
     left: clamp(clampedPosition.x - 124, edgeGap, Math.max(edgeGap, window.innerWidth - 318)),
-    top: clamp(clampedPosition.y - 92, edgeGap, Math.max(edgeGap, window.innerHeight - 92)),
+    top: clamp(clampedPosition.y - topBubbleOffset, edgeGap, Math.max(edgeGap, window.innerHeight - 92)),
   };
   const expressionClass = shakeState
     ? `floating-avatar-${shakeState}`
@@ -645,7 +671,7 @@ export default function FloatingAvatarMode({
         </aside>
         )}
         {contextOpen && (
-          <nav className="floating-avatar-menu" style={{left: contextMenuLeft}} aria-label={t('floatingAvatar.menuLabel')}>
+          <nav className="floating-avatar-menu" style={contextMenuStyle} aria-label={t('floatingAvatar.menuLabel')}>
             <button type="button" onClick={onRestore}>{t('floatingAvatar.restore')}</button>
             <button type="button" onClick={onOpenSettings}>{t('floatingAvatar.settings')}</button>
             <button

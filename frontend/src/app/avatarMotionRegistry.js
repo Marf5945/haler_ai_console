@@ -26,6 +26,16 @@ function assetURL(folder, relativePath) {
   return motionAssetUrls[`../assets/persona_motion/${folder}/${relativePath}`] || '';
 }
 
+function hydrateSequence(folder, sequence) {
+  if (!sequence?.frames?.length) return sequence;
+  return {
+    ...sequence,
+    frames: sequence.frames
+      .map((frame) => assetURL(folder, frame))
+      .filter(Boolean),
+  };
+}
+
 const manifestEntries = Object.entries(manifestModules).map(([path, manifest]) => ({
   folder: folderFromManifestPath(path),
   manifest,
@@ -42,11 +52,53 @@ const manifestByAlias = manifestEntries.reduce((map, entry) => {
 }, new Map());
 
 function hydrateLayer(folder, layer = {}) {
-  const src = assetURL(folder, layer.src);
+  const sequence = hydrateSequence(folder, layer.sequence);
+  const src = assetURL(folder, layer.src) || sequence?.frames?.[0] || '';
   return {
     ...layer,
     src,
+    sequence,
   };
+}
+
+function inheritedLayerDefs(manifest, stateManifest = {}) {
+  const parentStateName = stateManifest.extends;
+  if (!parentStateName) return null;
+
+  const parentLayers = manifest.states?.[parentStateName]?.layers || [];
+  const omit = new Set(stateManifest.omitLayers || []);
+  const overrides = new Map((stateManifest.layerOverrides || [])
+    .filter((layer) => layer?.id)
+    .map((layer) => [layer.id, layer]));
+  const seen = new Set();
+
+  const layers = parentLayers
+    .filter((layer) => !omit.has(layer.id))
+    .map((layer) => {
+      const override = overrides.get(layer.id);
+      seen.add(layer.id);
+      if (!override) return layer;
+      return {
+        ...layer,
+        ...override,
+        positionPx: {...(layer.positionPx || {}), ...(override.positionPx || {})},
+        size: {...(layer.size || {}), ...(override.size || {})},
+        anchor: {...(layer.anchor || {}), ...(override.anchor || {})},
+        motion: {...(layer.motion || {}), ...(override.motion || {})},
+      };
+    });
+
+  (stateManifest.layers || []).forEach((layer) => {
+    if (layer?.id && !omit.has(layer.id)) {
+      layers.push(layer);
+      seen.add(layer.id);
+    }
+  });
+  (stateManifest.layerOverrides || []).forEach((layer) => {
+    if (layer?.id && !seen.has(layer.id) && !omit.has(layer.id)) layers.push(layer);
+  });
+
+  return layers;
 }
 
 function proceduralManifest(pack, state, fallbackSrc) {
@@ -65,30 +117,38 @@ function proceduralManifest(pack, state, fallbackSrc) {
   };
 }
 
-// 游標轉向階梯：value 絕對值越大轉越多，負=面向畫面左，正=面向畫面右。
+// Cursor turn steps, ordered from back-left through back-right.
 const TURN_LADDER = [
-  {id: 'side_left', value: -3},
+  {id: 'back_left30', value: -6},
+  {id: 'back_left60', value: -5},
+  {id: 'side_left', value: -4},
+  {id: 'front_left60', value: -3},
   {id: 'front_left45', value: -2},
   {id: 'front_left30', value: -1},
   {id: 'front_right30', value: 1},
   {id: 'front_right45', value: 2},
-  {id: 'side_right', value: 3},
+  {id: 'front_right60', value: 3},
+  {id: 'side_right', value: 4},
+  {id: 'back_right60', value: 5},
+  {id: 'back_right30', value: 6},
 ];
 
-// 無聊行為姿勢庫：待機久了輪播；arms_up 也做「撫摸抬手」的目標姿勢。
-const POSE_STATES = ['front_left30_arms_up', 'front_right30_arms_up', 'back_waist'];
+const POSE_STATES = ['front_left30_arms_up', 'front_right30_arms_up', 'back_waist', 'working_reaction', 'happy_tail_wag_front'];
+const SHY_SEQUENCE = ['back_full', 'back_3q'];
 
 function resolveSubState(entry, stateName) {
   const stateManifest = entry.manifest?.states?.[stateName];
   if (!stateManifest) return null;
   const baseSrc = assetURL(entry.folder, stateManifest.base);
+  const stateSequence = hydrateSequence(entry.folder, stateManifest.sequence);
   const layers = (stateManifest.layers || [])
     .map((layer) => hydrateLayer(entry.folder, layer))
     .filter((layer) => layer.src);
-  if (!layers.length && !baseSrc) return null;
+  if (!layers.length && !baseSrc && !stateSequence?.frames?.length) return null;
   return {
     id: stateName,
-    baseSrc,
+    baseSrc: baseSrc || stateSequence?.frames?.[0] || '',
+    sequence: stateSequence,
     layers,
     motion: {
       ...(entry.manifest.motion || {}),
@@ -98,7 +158,11 @@ function resolveSubState(entry, stateName) {
 }
 
 function walkFrameURLs(folder) {
-  const prefix = `../assets/persona_motion/${folder}/sequences/walk_forward/`;
+  return sequenceFrameURLs(folder, 'walk_forward');
+}
+
+function sequenceFrameURLs(folder, sequenceName) {
+  const prefix = `../assets/persona_motion/${folder}/sequences/${sequenceName}/`;
   return Object.keys(motionAssetUrls)
     .filter((key) => key.startsWith(prefix))
     .sort()
@@ -113,15 +177,24 @@ export function resolveAvatarMotionManifest(pack, state, fallbackSrc = '') {
   const activeState = state && manifest.states?.[state] ? state : 'idle';
   const stateManifest = manifest.states?.[activeState] || manifest.states?.idle || {};
   const stateBaseSrc = assetURL(entry.folder, stateManifest.base);
-  const sourceLayers = stateManifest.layers?.length
+  const stateSequence = hydrateSequence(entry.folder, stateManifest.sequence);
+  const inheritedLayers = inheritedLayerDefs(manifest, stateManifest);
+  const sourceLayers = inheritedLayers?.length
+    ? inheritedLayers
+    : stateManifest.layers?.length
     ? stateManifest.layers
     : (stateBaseSrc ? [] : (manifest.states?.idle?.layers || []));
   const layers = sourceLayers
     .map((layer) => hydrateLayer(entry.folder, layer))
     .filter((layer) => layer.src);
 
-  // 只有 idle（站姿待機）掛上轉向／行為資源；其他表情維持單一姿勢。
-  const interactive = activeState === 'idle';
+  const usesStateSequence = Boolean(stateSequence?.frames?.length);
+  const sharedRigInteractive = stateManifest.interactive !== false
+    && !usesStateSequence
+    && Boolean(manifest.turnRigContract?.transitionOrder?.length);
+  const interactive = stateManifest.interactive === true
+    || activeState === 'idle'
+    || sharedRigInteractive;
   const turnStates = interactive
     ? TURN_LADDER
       .map((t) => {
@@ -133,17 +206,27 @@ export function resolveAvatarMotionManifest(pack, state, fallbackSrc = '') {
   const poseStates = interactive
     ? POSE_STATES.map((id) => resolveSubState(entry, id)).filter(Boolean)
     : [];
+  const shyStates = interactive
+    ? SHY_SEQUENCE.map((id) => resolveSubState(entry, id)).filter(Boolean)
+    : [];
   const walkFrames = interactive ? walkFrameURLs(entry.folder) : [];
+  const walkStartFrames = interactive ? sequenceFrameURLs(entry.folder, 'walk_start') : [];
+  const walkStopFrames = interactive ? sequenceFrameURLs(entry.folder, 'walk_stop') : [];
 
   return {
     ...manifest,
     state: activeState,
+    interactive,
     folder: entry.folder,
-    baseSrc: stateBaseSrc || fallbackSrc || '',
+    baseSrc: stateBaseSrc || stateSequence?.frames?.[0] || fallbackSrc || '',
+    sequence: stateSequence,
     layers,
     turnStates,
     poseStates,
+    shyStates,
     walkFrames,
+    walkStartFrames,
+    walkStopFrames,
     motion: {
       ...(manifest.motion || {}),
       ...(stateManifest.motion || {}),

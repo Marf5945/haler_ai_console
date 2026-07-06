@@ -42,12 +42,16 @@
       "idle",
       "front_left30",
       "front_left45",
+      "front_left60",
       "side_left",
+      "back_left60",
       "back_left30",
       "back_3q",
       "back_full",
       "back_right30",
+      "back_right60",
       "side_right",
+      "front_right60",
       "front_right45",
       "front_right30",
       "idle"
@@ -2741,9 +2745,67 @@
         }
       }
     },
+    "working_reaction": {
+      "base": "sequences/working_reaction/frame_000.png",
+      "layers": [],
+      "sequence": {
+        "fps": 8,
+        "loop": true,
+        "frames": [
+          "sequences/working_reaction/frame_000.png",
+          "sequences/working_reaction/frame_001.png",
+          "sequences/working_reaction/frame_002.png",
+          "sequences/working_reaction/frame_003.png",
+          "sequences/working_reaction/frame_004.png",
+          "sequences/working_reaction/frame_005.png",
+          "sequences/working_reaction/frame_006.png",
+          "sequences/working_reaction/frame_007.png"
+        ]
+      },
+      "motion": {
+        "breathe": {
+          "speed": 1.2,
+          "y": 2.4
+        },
+        "sway": {
+          "speed": 0.72,
+          "x": 0,
+          "rotate": 0
+        }
+      }
+    },
     "happy": {
       "base": "fullbody/happy.png",
       "layers": []
+    },
+    "happy_tail_wag_front": {
+      "base": "sequences/tail_wag_happy_front/frame_000.png",
+      "layers": [],
+      "sequence": {
+        "fps": 14,
+        "loop": true,
+        "frames": [
+          "sequences/tail_wag_happy_front/frame_000.png",
+          "sequences/tail_wag_happy_front/frame_001.png",
+          "sequences/tail_wag_happy_front/frame_002.png",
+          "sequences/tail_wag_happy_front/frame_003.png",
+          "sequences/tail_wag_happy_front/frame_004.png",
+          "sequences/tail_wag_happy_front/frame_005.png",
+          "sequences/tail_wag_happy_front/frame_006.png",
+          "sequences/tail_wag_happy_front/frame_007.png"
+        ]
+      },
+      "motion": {
+        "breathe": {
+          "speed": 1.18,
+          "y": 1.4
+        },
+        "sway": {
+          "speed": 0.9,
+          "x": 0,
+          "rotate": 0
+        }
+      }
     },
     "warning": {
       "base": "fullbody/warning.png",
@@ -2754,7 +2816,89 @@
       "layers": []
     },
     "sad": {
-      "base": "fullbody/sad.png",
+      "base": "sequences/cry_transition/frame_000.png",
+      "layers": [],
+      "sequence": {
+        "fps": 7,
+        "loop": true,
+        "frames": [
+          "sequences/cry_transition/frame_000.png",
+          "sequences/cry_transition/frame_001.png",
+          "sequences/cry_transition/frame_002.png",
+          "sequences/cry_transition/frame_003.png",
+          "sequences/cry_transition/frame_004.png",
+          "sequences/cry_transition/frame_005.png"
+        ]
+      },
+      "motion": {
+        "breathe": {
+          "speed": 1.02,
+          "y": 6.2,
+          "scaleX": 0.006,
+          "scaleY": 0.006
+        },
+        "sway": {
+          "speed": 0.58,
+          "x": 1.5,
+          "rotate": 0.011
+        }
+      }
+    },
+    "crying": {
+      "base": "sequences/cry_transition/frame_000.png",
+      "layers": [],
+      "sequence": {
+        "fps": 7,
+        "loop": true,
+        "frames": [
+          "sequences/cry_transition/frame_000.png",
+          "sequences/cry_transition/frame_001.png",
+          "sequences/cry_transition/frame_002.png",
+          "sequences/cry_transition/frame_003.png",
+          "sequences/cry_transition/frame_004.png",
+          "sequences/cry_transition/frame_005.png"
+        ]
+      },
+      "motion": {
+        "breathe": {
+          "speed": 1.02,
+          "y": 6.2,
+          "scaleX": 0.006,
+          "scaleY": 0.006
+        },
+        "sway": {
+          "speed": 0.58,
+          "x": 1.5,
+          "rotate": 0.011
+        }
+      }
+    },
+    "sleepy": {
+      "base": "fullbody/sleepy.png",
+      "layers": []
+    },
+    "speechless": {
+      "base": "fullbody/speechless.png",
+      "layers": []
+    },
+    "thinking": {
+      "base": "fullbody/thinking.png",
+      "layers": []
+    },
+    "front_left60": {
+      "base": "fullbody/front_left60.png",
+      "layers": []
+    },
+    "front_right60": {
+      "base": "fullbody/front_right60.png",
+      "layers": []
+    },
+    "back_left60": {
+      "base": "fullbody/back_left60.png",
+      "layers": []
+    },
+    "back_right60": {
+      "base": "fullbody/back_right60.png",
       "layers": []
     },
     "side_left": {
@@ -11970,7 +12114,7 @@
   "sequences": {
     "walk_forward": {
       "type": "frame-sequence",
-      "fps": 12,
+      "fps": 8,
       "loop": true,
       "size": {
         "width": 200,
@@ -12069,66 +12213,183 @@
         }
       ]
     },
+    "walk_start": {
+      "type": "frame-sequence",
+      "fps": 8,
+      "loop": false,
+      "size": {
+        "width": 200,
+        "height": 360
+      },
+      "sourceState": "idle-to-walk",
+      "frames": [
+        {
+          "src": "sequences/walk_start/frame_000.png",
+          "label": "idle_to_walk_bridge",
+          "phase": 0.0
+        }
+      ]
+    },
+    "walk_stop": {
+      "type": "frame-sequence",
+      "fps": 8,
+      "loop": false,
+      "size": {
+        "width": 200,
+        "height": 360
+      },
+      "sourceState": "walk-to-idle",
+      "frames": [
+        {
+          "src": "sequences/walk_stop/frame_000.png",
+          "label": "walk_to_idle_bridge",
+          "phase": 0.0
+        }
+      ]
+    },
+    "cry_transition": {
+      "type": "frame-sequence",
+      "fps": 10,
+      "loop": false,
+      "size": {
+        "width": 200,
+        "height": 360
+      },
+      "sourceState": "sad",
+      "frames": [
+        {
+          "src": "sequences/cry_transition/frame_000.png",
+          "label": "mouth_slightly_open",
+          "phase": 0.0
+        },
+        {
+          "src": "sequences/cry_transition/frame_001.png",
+          "label": "watery_eyes",
+          "phase": 0.2
+        },
+        {
+          "src": "sequences/cry_transition/frame_002.png",
+          "label": "tears_start",
+          "phase": 0.4
+        },
+        {
+          "src": "sequences/cry_transition/frame_003.png",
+          "label": "big_cry",
+          "phase": 0.6
+        },
+        {
+          "src": "sequences/cry_transition/frame_004.png",
+          "label": "calming_down",
+          "phase": 0.8
+        },
+        {
+          "src": "sequences/cry_transition/frame_005.png",
+          "label": "recovering_sob",
+          "phase": 1.0
+        }
+      ]
+    },
+    "working_reaction": {
+      "type": "frame-sequence",
+      "fps": 8,
+      "loop": true,
+      "size": {
+        "width": 200,
+        "height": 360
+      },
+      "sourceState": "working_reaction_sheet",
+      "frames": [
+        {
+          "src": "sequences/working_reaction/frame_000.png",
+          "label": "grounded_start",
+          "phase": 0.0
+        },
+        {
+          "src": "sequences/working_reaction/frame_001.png",
+          "label": "hands_start",
+          "phase": 0.125
+        },
+        {
+          "src": "sequences/working_reaction/frame_002.png",
+          "label": "lift_half",
+          "phase": 0.25
+        },
+        {
+          "src": "sequences/working_reaction/frame_003.png",
+          "label": "near_peak",
+          "phase": 0.375
+        },
+        {
+          "src": "sequences/working_reaction/frame_004.png",
+          "label": "work_pop",
+          "phase": 0.5
+        },
+        {
+          "src": "sequences/working_reaction/frame_005.png",
+          "label": "release_down",
+          "phase": 0.625
+        },
+        {
+          "src": "sequences/working_reaction/frame_006.png",
+          "label": "settle_down",
+          "phase": 0.75
+        },
+        {
+          "src": "sequences/working_reaction/frame_007.png",
+          "label": "grounded_end",
+          "phase": 0.875
+        }
+      ]
+    },
     "tail_wag_happy_front": {
-      "type": "part-sequence",
-      "target": "front_idle_tail",
+      "type": "frame-sequence",
       "fps": 14,
       "loop": true,
       "size": {
         "width": 200,
         "height": 360
       },
-      "sourceState": "idle",
-      "source": "fullbody/idle.png tail mask",
-      "notes": "Happy front-facing large left/right tail wag. Frames are transparent 200x360 tail overlays aligned to the idle design canvas. Cropped clean tail-frame materials are in parts/front/idle/happy_tail_wag/. Tail pixels are re-cut from fullbody/idle.png with hand, body, and leg foreground masked out.",
+      "sourceState": "happy_tail_wag_front",
       "frames": [
         {
           "src": "sequences/tail_wag_happy_front/frame_000.png",
-          "label": "right_extreme",
-          "phase": 0.0,
-          "tailOffset": 1.0
+          "label": "right_high",
+          "phase": 0.0
         },
         {
           "src": "sequences/tail_wag_happy_front/frame_001.png",
           "label": "right_return",
-          "phase": 0.125,
-          "tailOffset": 0.58
+          "phase": 0.125
         },
         {
           "src": "sequences/tail_wag_happy_front/frame_002.png",
-          "label": "center_right",
-          "phase": 0.25,
-          "tailOffset": 0.16
+          "label": "center_high",
+          "phase": 0.25
         },
         {
           "src": "sequences/tail_wag_happy_front/frame_003.png",
           "label": "left_swing",
-          "phase": 0.375,
-          "tailOffset": -0.58
+          "phase": 0.375
         },
         {
           "src": "sequences/tail_wag_happy_front/frame_004.png",
-          "label": "left_extreme",
-          "phase": 0.5,
-          "tailOffset": -1.0
+          "label": "left_high",
+          "phase": 0.5
         },
         {
           "src": "sequences/tail_wag_happy_front/frame_005.png",
           "label": "left_return",
-          "phase": 0.625,
-          "tailOffset": -0.58
+          "phase": 0.625
         },
         {
           "src": "sequences/tail_wag_happy_front/frame_006.png",
-          "label": "center_right",
-          "phase": 0.75,
-          "tailOffset": 0.16
+          "label": "center_return",
+          "phase": 0.75
         },
         {
           "src": "sequences/tail_wag_happy_front/frame_007.png",
-          "label": "right_swing",
-          "phase": 0.875,
-          "tailOffset": 0.58
+          "label": "right_return",
+          "phase": 0.875
         }
       ]
     }

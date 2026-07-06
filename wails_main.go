@@ -11,6 +11,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
+	"github.com/wailsapp/wails/v2/pkg/options/windows"
 )
 
 //go:embed all:frontend/dist
@@ -83,6 +84,17 @@ func main() {
 		Mac: &mac.Options{
 			WebviewIsTransparent: true,
 			WindowIsTranslucent:  false,
+		},
+		// v2.7：Windows 照 mac 接法。WebView2 底色設為可透明（wails 會把所有
+		// WindowSetBackgroundColour 的 alpha 強制為 0，實際外觀由前端 CSS 決定，
+		// 主控台 CSS 是不透明 #050505 所以平時看不出差別）。
+		// WindowIsTranslucent 讓建窗時帶 WS_EX_NOREDIRECTIONBITMAP（此旗標只能在
+		// 建窗當下給，執行期補不了），配 BackdropType None = 乾淨真透明、不帶
+		// Mica/壓克力模糊。無框＋置頂由 floating_avatar_windows.go 於執行期切換。
+		Windows: &windows.Options{
+			WebviewIsTransparent: true,
+			WindowIsTranslucent:  true,
+			BackdropType:         windows.None,
 		},
 		// Phase G：排程喚醒時不跳視窗（隱藏啟動）。
 		StartHidden: scheduledWake,

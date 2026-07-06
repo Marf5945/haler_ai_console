@@ -133,6 +133,7 @@ assets/models/yolox_button_s.onnx
 
 # === Local development notes / sensitive drafts ===
 TASKS*.md
+DEV_AVATAR*.md
 *AUDIT*.md
 *DECISIONS*.md
 *Spec_Draft.md
@@ -151,6 +152,9 @@ __pycache__/
 **/.venv/
 image_caption_tagger/.wd14-cache/
 frontend/src/assets/persona_motion/**/_source/
+frontend/src/assets/persona_motion/**/sequences/**/contact_sheet.png
+frontend/src/assets/persona_motion/**/sequences/**/preview.gif
+frontend/src/assets/persona_motion/**/sequences/**/sequence.json
 
 # === Device-local secrets and runtime history ===
 /data/secrets/
@@ -167,3 +171,4 @@ frontend/src/assets/persona_motion/**/_source/
 # === Local screenshots / visual notes ===
 /reference/*.png
 /wolf_ui.png
+/tmp/

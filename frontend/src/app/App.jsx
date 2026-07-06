@@ -404,7 +404,14 @@ const FLOATING_AVATAR_PANEL_W = 720;
 const FLOATING_AVATAR_PANEL_H = 540;
 const FLOATING_AVATAR_LEFT_TIP_ROOM = 260;
 const IS_WINDOWS_RUNTIME = typeof window !== 'undefined' && /\bWindows\b/i.test(window.navigator?.userAgent || '');
-const ENABLE_NATIVE_FLOATING_AVATAR_WINDOW = !IS_WINDOWS_RUNTIME;
+// v2.7：Windows 改走 mac 接法——主視窗直接變形成無框透明置頂浮窗，
+// React 前端（含 Pixi 動態全身像）繼續在同一個 webview 裡渲染。
+// 原生端：macOS 走 floating_avatar_darwin.go（cgo/AppKit），
+// Windows 走 floating_avatar_windows.go（Win32 樣式切換）＋ wails_main.go 的
+// Windows 建窗選項（WebviewIsTransparent/WindowIsTranslucent）。舊的靜態 PNG
+// overlay 路徑（floating_avatar_overlay_windows.go）保留為死碼，改回
+// !IS_WINDOWS_RUNTIME 即可退回。
+const ENABLE_NATIVE_FLOATING_AVATAR_WINDOW = true;
 
 function firstFiniteNumber(...values) {
   for (const value of values) {
@@ -1131,12 +1138,13 @@ const getChatTonePresets = () => [
   {id: 'witty_playful', label: _t('persona.toneWittyPlayful')},
   {id: 'tsundere', label: _t('persona.toneTsundere')},
 ];
-const avatarStateOptions = ['idle', 'thinking', 'working', 'happy', 'warning', 'blocked', 'sleepy', 'sad', 'speechless'];
+const avatarStateOptions = ['idle', 'thinking', 'working', 'working_reaction', 'happy', 'warning', 'blocked', 'sleepy', 'sad', 'speechless'];
 /* i18n: avatar state labels */
 const getAvatarStateLabels = () => ({
   idle: _t('avatar.idle'),
   thinking: _t('avatar.thinking'),
   working: _t('avatar.working'),
+  working_reaction: '工作反應',
   happy: _t('avatar.happy'),
   warning: _t('avatar.warning'),
   blocked: _t('avatar.blocked'),
@@ -1512,7 +1520,7 @@ const fullBodyAvatarUrls = {
 const pixelAvatarRenderSize = 128;
 const pixelAvatarRenderVersion = '2026-06-21-transparent-touharu-raster-v1';
 const pixelAvatarRenderCache = new Map();
-const autoAvatarOverrideStates = new Set(['blocked', 'warning', 'working']);
+const autoAvatarOverrideStates = new Set(['blocked', 'warning', 'working', 'working_reaction']);
 /* i18n: composer pending */ const composerPendingInitialText = _t('composer.pendingInitial');
 const composerPendingSlowText = _t('composer.pendingSlow');
 const composerPendingVerySlowText = _t('composer.pendingVerySlow');
@@ -2334,8 +2342,11 @@ function App() {
     const nativeWindowActive = floatingAvatarMode && (ENABLE_NATIVE_FLOATING_AVATAR_WINDOW || floatingAvatarCompactWindow || floatingAvatarSurfaceOnly);
     document.documentElement.classList.toggle('floating-avatar-window-active', nativeWindowActive);
     document.body.classList.toggle('floating-avatar-window-active', nativeWindowActive);
-    document.documentElement.classList.toggle('floating-avatar-window-keyed', nativeWindowActive && IS_WINDOWS_RUNTIME);
-    document.body.classList.toggle('floating-avatar-window-keyed', nativeWindowActive && IS_WINDOWS_RUNTIME);
+    // v2.7：Windows 已走 mac 接法（真透明原生浮窗），不再套 keyed 不透明底色。
+    // keyed class 與其 CSS 保留給日後 fallback（此處恆為 false）。
+    const keyedFallback = false && IS_WINDOWS_RUNTIME;
+    document.documentElement.classList.toggle('floating-avatar-window-keyed', nativeWindowActive && keyedFallback);
+    document.body.classList.toggle('floating-avatar-window-keyed', nativeWindowActive && keyedFallback);
     return () => {
       document.documentElement.classList.remove('floating-avatar-window-active');
       document.documentElement.classList.remove('floating-avatar-window-keyed');
@@ -2343,6 +2354,20 @@ function App() {
       document.body.classList.remove('floating-avatar-window-keyed');
     };
   }, [floatingAvatarMode, floatingAvatarCompactWindow, floatingAvatarSurfaceOnly]);
+
+  // v2.7 fix：浮窗模式下，臨時情緒表情（happy/sad/speechless）數秒後自動歸還 idle。
+  // 原因：manifest 只有 idle（含轉身/走路）拆了骨架部件，表情狀態是單張平面立繪
+  // （layers=[]，by design）。進浮窗的問候 happy 若不收回，manualAvatarState 會
+  // 永遠霸佔表情，Pixi 只能一直畫平面 fallback——跟滑鼠轉頭、轉向階梯、發呆走路
+  // 全部無法啟動。工作中/警告/封鎖等「任務態」不在此列，由任務結束自行復原。
+  useEffect(() => {
+    if (!floatingAvatarMode) return undefined;
+    if (!['happy', 'sad', 'speechless'].includes(manualAvatarState)) return undefined;
+    const timer = window.setTimeout(() => {
+      setManualAvatarState('');
+    }, 5000);
+    return () => window.clearTimeout(timer);
+  }, [floatingAvatarMode, manualAvatarState]);
 
   useEffect(() => {
     if (!floatingAvatarMode) return undefined;
@@ -3493,7 +3518,6 @@ function App() {
     }
     clearPendingTimers?.();
     const cliResp = await applyComposerBuiltInSideEffects(normalizeCLIResponse(resp));
-    console.log('[CLI_MONITOR] frontend raw resp -> normalized', {traceId, resp, cliResp});
     postDebugTrace(apiAdapter ? 'ui.composer.after.SendAPIMessage' : 'ui.composer.after.SendCLIMessage', traceId, {response: cliResp || null});
     const cliAction = String(cliResp?.action || '').trim();
     const cliNext = String(cliResp?.next || '').trim();
@@ -5149,7 +5173,6 @@ function App() {
     const trimmed = text.trim();
     if (!trimmed) return null;
     unlockManualGreeting();
-    // DEBUG_TRACE_REMOVE: Correlates every debug trace event for this inspector send.
     const traceId = makeDebugTraceID('inspect');
     postDebugTrace('ui.inspector.submit.raw', traceId, {user_text: trimmed});
     const sessionId = appSessionId || '';
@@ -5170,9 +5193,7 @@ function App() {
       postDebugTrace('ui.inspector.before.SendTopInteractionMessage', traceId, payload);
       const resp = await callWails(() => SendTopInteractionMessage(payload.adapter_id, sessionId, escaped || trimmed, traceId));
       const cliResp = normalizeCLIResponse(resp);
-      console.log('[CLI_MONITOR] frontend raw resp -> normalized', {traceId, resp, cliResp});
       postDebugTrace('ui.inspector.after.SendTopInteractionMessage', traceId, {response: cliResp || null});
-      console.log('[CLI_MONITOR] frontend cliInspectorLog.response write', {traceId, response: cliResp || null});
       setCliInspectorLog((prev) => ({
         ...(prev || {payload}),
         status: cliResp?.error ? 'error' : 'done',
@@ -5292,7 +5313,6 @@ function App() {
     const displayText = String(options.displayText || '').trim() || text;
     unlockManualGreeting();
     const conversationId = activeConversationIdRef.current || 'main';
-    // DEBUG_TRACE_REMOVE: Correlates every debug trace event for this composer send.
     const traceId = makeDebugTraceID('chat');
     const sessionId = appSessionId || '';
     const pendingMessage = makeComposerPendingMessage(traceId);
@@ -5497,73 +5517,6 @@ function App() {
     setGachaPhase(null);
     setLongPressProgress(0);
   }
-
-  // ── DEV-ONLY 語系驗收矩陣鉤子（import.meta.env.DEV 閘控，不進 production）──
-  // 為什麼：Computer Use 模擬鍵盤對 CJK 會掉字，原生日文/韓文題目打不進 UI。
-  // 此鉤子把 CJK 題目寫死在 JS，逐題切角色語言並送入「真 UI」，讓操作者目視
-  // 選項卡等渲染（選項卡人工檢核）。自動語系判定在 Go 端
-  // （cjklang.go + lang_matrix_integration_test.go）；此處只負責驅動真 UI。
-  // 用法：DevTools console 執行  await window.__runLangMatrix()
-  useEffect(() => {
-    if (!import.meta.env.DEV) return undefined;
-    const LANG_MATRIX = [
-      { label: '日本語', category: '一般對答', text: 'こんにちは、今日も手伝ってくれますか？' },
-      { label: '日本語', category: '網路搜尋', text: 'ネットで夜行性の動物を調べて' },
-      { label: '日本語', category: '非顏色選項', text: '6月21日、6月22日、6月23日から一つ選んで' },
-      { label: '日本語', category: '本機搜尋', text: 'ローカルで動物のレポートを探して' },
-      { label: '日本語', category: '程式流程', text: 'CSVをグラフに変換するプログラムを作って' },
-      { label: '한국어', category: '一般對答', text: '안녕하세요, 오늘도 도와줄 수 있나요?' },
-      { label: '한국어', category: '網路搜尋', text: '인터넷에서 야행성 동물을 검색해줘' },
-      { label: '한국어', category: '非顏色選項', text: '6월 21일, 6월 22일, 6월 23일 중에서 하나 골라줘' },
-      { label: '한국어', category: '本機搜尋', text: '로컬에서 동물 보고서를 찾아줘' },
-      { label: '한국어', category: '程式流程', text: 'CSV를 그래프로 변환하는 프로그램을 만들어줘' },
-      { label: 'English', category: '一般對答', text: 'Hello, can you help me today?' },
-      { label: 'English', category: '網路搜尋', text: 'Search the web for nocturnal animal species' },
-      { label: 'English', category: '非顏色選項', text: 'Choose one date: June 21, June 22, June 23' },
-      { label: 'English', category: '本機搜尋', text: 'Find local animal reports' },
-      { label: 'English', category: '程式流程', text: 'Make a program that charts animal counts from CSV' },
-      { label: '中文', category: '一般對答', text: '你好，今天可以幫我嗎？' },
-    ];
-    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    window.__runLangMatrix = async (opts = {}) => {
-      const waitMs = opts.waitMs ?? 9000;
-      const rounds = opts.rounds ?? 2;
-      console.log('%c[langMatrix] 開始；請先在模型選單選好本地 Ollama 模型', 'color:#3b82f6');
-      console.log('[langMatrix] 預設跑兩輪；選項題用日期，搜尋題用動物。');
-      console.log('[langMatrix] 人工目視：選項卡 label 語系正確、可點選；韓文不得吐日文片假名，也不得用英文句子混過。');
-      for (let round = 0; round < rounds; round += 1) {
-        console.group(`[langMatrix] Round ${round + 1}/${rounds}`);
-        for (let i = 0; i < LANG_MATRIX.length; i += 1) {
-          const c = LANG_MATRIX[i];
-          try {
-            await callWails(() => ApplyUIStyleDiff(JSON.stringify({ panel_language: '繁中', role_language: c.label })));
-          } catch (e) {
-            console.warn('[langMatrix] 切語言失敗', c.label, e);
-          }
-          await sleep(400);
-          console.group(`[langMatrix] ${i + 1}/${LANG_MATRIX.length} ${c.label} / ${c.category}`);
-          console.log('送出：', c.text);
-          try {
-            await submitComposerText(c.text);
-          } catch (e) {
-            console.error('[langMatrix] 送出失敗', e);
-          }
-          console.log(`等待 ${waitMs}ms 讓模型回覆與 UI 渲染…`);
-          console.groupEnd();
-          await sleep(waitMs);
-        }
-        console.groupEnd();
-      }
-      try {
-        await callWails(() => ApplyUIStyleDiff(JSON.stringify({ panel_language: '繁中', role_language: '中文' })));
-      } catch (e) { /* ignore */ }
-      console.log('%c[langMatrix] 完成；角色語言已切回中文。請人工覆核選項卡與 debug trace。', 'color:#16a34a');
-    };
-    return () => {
-      try { delete window.__runLangMatrix; } catch (e) { /* ignore */ }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // ── v3.6.4 Readiness Gate UI Interaction Layer helper 函式 ──
   //
@@ -9933,7 +9886,6 @@ function App() {
 	                  setCliAuthRequest(null);
 	                  setConversationMessages(conversationId, (prev) => [...prev, t('auth.retryingMessage')]);
                   try {
-                    // DEBUG_TRACE_REMOVE: Preserve auth retry as a distinct trace.
                     const traceId = req.trace_id || makeDebugTraceID('auth-retry');
                     postDebugTrace('ui.authRetry.before.SendCLIMessage', traceId, req);
                     const resp = await callWails(() =>
@@ -11528,10 +11480,10 @@ function deriveAvatarExpression({dagRun, reviewState, sourceTrustHint, hasConver
   if (reviewState?.hasBlocking || hasPendingLowRiskAmbiguity(reviewState)) return 'warning';
   if (sourceTrustHint?.risk_level === 'high' || sourceTrustHint?.risk_level === 'danger') return 'blocked';
   if (sourceTrustHint && sourceTrustHint.level !== 'trusted') return 'warning';
-  if (dagRun?.status === 'running' || dagRun?.status === 'starting') return 'working';
+  if (dagRun?.status === 'running' || dagRun?.status === 'starting') return 'working_reaction';
   if (dagRun?.status === 'blocked') return 'warning';
   if (dagRun?.status === 'failed') return 'sad';
-  if (dagRun?.status === 'completed') return 'happy';
+  if (dagRun?.status === 'completed') return 'working_reaction';
   const messageExpression = deriveMessageAvatarExpression(lastMessageText);
   if (messageExpression) return messageExpression;
   if (!hasConversation) return idleMs >= 15 * 60 * 1000 ? 'idle' : 'sleepy';

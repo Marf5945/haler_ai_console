@@ -361,33 +361,6 @@ export namespace dag {
 
 }
 
-export namespace debugtrace {
-
-	export class LinkSnapshot {
-	    url: string;
-	    addr: string;
-	    started: boolean;
-	    version: number;
-	    updated_at: string;
-	    last_error?: string;
-
-	    static createFrom(source: any = {}) {
-	        return new LinkSnapshot(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.url = source["url"];
-	        this.addr = source["addr"];
-	        this.started = source["started"];
-	        this.version = source["version"];
-	        this.updated_at = source["updated_at"];
-	        this.last_error = source["last_error"];
-	    }
-	}
-
-}
-
 export namespace go_program {
 
 	export class Toolchain {

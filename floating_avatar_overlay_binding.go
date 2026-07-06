@@ -144,7 +144,7 @@ func overlayPackFromMode(mode string) string {
 func overlayModeSize(mode string) (int, int) {
 	switch normalizeOverlayMode(mode) {
 	case "full":
-		return 300, 540
+		return 200, 360
 	}
 	return 96, 96
 }

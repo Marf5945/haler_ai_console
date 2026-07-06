@@ -4,25 +4,32 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-// WKWebView（macOS 後台浮窗）已知相容性問題：透明視窗一旦出現 WebGL 加速內容，
-// 合成器可能把整片 webview 畫成不透明黑。對 WebKit 引擎改用 premultipliedAlpha:false
-// 並關閉 MSAA；Windows（WebView2/Chromium）維持預設不受影響。
+// WKWebView can render transparent WebGL views as black; keep WebKit on the
+// conservative alpha path while Chromium/WebView2 uses the default path.
 const IS_WEBKIT_ENGINE = typeof navigator !== 'undefined'
   && /AppleWebKit/i.test(navigator.userAgent || '')
   && !/Chrome|Chromium|Edg\//i.test(navigator.userAgent || '');
 
-// 搔癢感應半徑（畫布像素）
 const TICKLE_REACH = 58;
-// 撫摸感應半徑：游標貼著手/腕慢慢滑 → 抬手
 const PET_REACH = 34;
-// 游標多久沒動視為「無聊」，開始輪播行為（走路、換姿勢）
+const TICKLE_POKE_SCALE = 0.58;
+const TICKLE_MAX_POWER = 0.72;
+const WALK_SPEED_SCALE = 5 / 8;
+const LOOK_EASE_RATE = 8;
+const TURN_EASE_RATE = 4.2;
+const TURN_FAST_STEP_DELAY_MS = 140;
+const TURN_SLOW_STEP_DELAY_MS = 240;
+const TURN_CENTER_STEP_DELAY_MS = 80;
+const POSE_FADE_IN_RATE = 9;
+const POSE_FADE_OUT_RATE = 8;
+const TURN_FADE_IN_RATE = 18;
+const TURN_FADE_OUT_RATE = 32;
+const TURN_FADE_CUTOFF = 0.18;
 const BORED_AFTER_MS = 10000;
-// 轉向階梯進入閾值，單位=「身位」（頭像框寬度）：
-// 游標離中心 1 個身位轉 30°、2 個身位轉 45°、3.2 個身位轉側面。
-// 依驗收規格：游標離頭像中心 0.7 個身位 → 30°；1.4 個身位（選單那一帶）→ 45°；2.6 → 完全側面
-const TURN_ENTER = [0, 0.7, 1.4, 2.6];
-// 退出遲滯（身位）：往回走要少掉這麼多距離才會轉回來，防抖。
-const TURN_EXIT_GAP = 0.25;
+const ATTENTION_RETURN_DELAY_MS = 5000;
+const ATTENTION_CENTER_WIDTH = 200;
+const TURN_ENTER = [0, 0.14, 0.28, 0.42, 0.58, 0.74, 0.9];
+const TURN_EXIT_GAP = 0.06;
 
 function numberValue(value, fallback) {
   const parsed = Number(value);
@@ -40,6 +47,20 @@ function layerMotion(layer, manifestMotion) {
   };
 }
 
+function tickleLayerWeight(layerID = '') {
+  const id = String(layerID || '').replace(/^viewer_/, '');
+  if (/tail_(mid|tip)|ear|muzzle|mouth|eye|brow|hand|wrist/.test(id)) return 1;
+  if (/head|forearm|upper_arm/.test(id)) return 0.42;
+  if (/tail_base/.test(id)) return 0.28;
+  return 0;
+}
+
+function frameSequenceDurationMs(def) {
+  const frames = Array.isArray(def?.frames) ? def.frames.length : 0;
+  if (!frames) return 0;
+  return (frames / Math.max(1, numberValue(def?.fps, 8))) * 1000;
+}
+
 function targetFromPoint(element, clientX, clientY) {
   const rect = element?.getBoundingClientRect?.();
   if (!rect || rect.width <= 0 || rect.height <= 0) return {x: 0, y: 0, turnX: 0};
@@ -48,8 +69,7 @@ function targetFromPoint(element, clientX, clientY) {
   return {
     x: clamp((clientX - centerX) / Math.max(42, rect.width * 0.44), -1, 1),
     y: clamp((clientY - centerY) / Math.max(58, rect.height * 0.34), -1, 1),
-    // 轉向用：游標離中心幾個「身位」（不截斷，給距離階梯判斷）
-    turnX: (clientX - centerX) / Math.max(1, rect.width),
+    turnX: clamp((clientX - centerX) / Math.max(42, rect.width * 0.44), -1, 1),
   };
 }
 
@@ -77,9 +97,7 @@ function applyRigRoot(root, width, height, designSize) {
   root.y = (height - designHeight * scale) / 2;
 }
 
-// 關節軸心：旋轉/縮放繞「關節」轉（肩、髖、頸），不是部件圖幾何中心。
-// layer.pivotPx 可明訂；沒訂時用啟發式——子部件的 positionPx 是它相對父件中心的向量，
-// 關節約在兩中心連線中點，故預設 pivot = -positionPx/2（夾限在部件範圍內）。
+// Pivot around a rough joint position instead of the sprite center.
 function layerPivot(layer, texture, visualScale) {
   const explicit = layer.pivotPx;
   if (explicit) {
@@ -108,7 +126,6 @@ function applyRigLayout(node, layer) {
   sprite.y = numberValue(layer.offsetPx?.y, 0);
   sprite.scale.set(scaleX, scaleY);
 
-  // pivot 平移補償：靜止姿勢與原本逐像素相同，只有旋轉/縮放時繞關節轉。
   const pivot = layerPivot(layer, sprite.texture, visualScale);
   node.pivot.set(pivot.x, pivot.y);
 
@@ -136,14 +153,16 @@ export default function PixiAvatarStage({
   alt = '',
   tickle = false,
   onReady,
+  onAttentionPauseChange,
 }) {
   const hostRef = useRef(null);
   const lookRef = useRef({x: 0, y: 0});
+  const targetLookRef = useRef({x: 0, y: 0, turnX: 0});
   const [failed, setFailed] = useState(false);
   const [ready, setReady] = useState(false);
   const onReadyRef = useRef(onReady);
+  const onAttentionPauseChangeRef = useRef(onAttentionPauseChange);
   const stateKey = manifest?.state || expression || 'idle';
-  // manifest 每次 render 都是新物件參考；序列化成穩定字串當依賴，避免不斷重掛 Pixi。
   const manifestKey = useMemo(() => {
     try {
       return JSON.stringify(manifest);
@@ -156,6 +175,10 @@ export default function PixiAvatarStage({
   useEffect(() => {
     onReadyRef.current = onReady;
   }, [onReady]);
+
+  useEffect(() => {
+    onAttentionPauseChangeRef.current = onAttentionPauseChange;
+  }, [onAttentionPauseChange]);
 
   useEffect(() => {
     tickleModeRef.current = tickle;
@@ -180,7 +203,6 @@ export default function PixiAvatarStage({
     let tickerHandler = null;
     let tmpPointRef = null;
 
-    // ===== 行為控制器（游標活動、轉向階梯、無聊輪播、撫摸） =====
     const ctl = {
       lastActive: performance.now(),
       nextBehaviorAt: performance.now() + BORED_AFTER_MS,
@@ -192,13 +214,33 @@ export default function PixiAvatarStage({
       turnSwitched: 0,
     };
     const pet = {lift: 0, arm: 'right'};
+    const shy = {petStart: 0, active: false, phaseIndex: -1, phaseUntil: 0, threshold: 0, cooldownUntil: 0};
+    const attention = {paused: false, side: null, timer: null};
 
+    const clearAttentionTimer = () => {
+      if (attention.timer) {
+        window.clearTimeout(attention.timer);
+        attention.timer = null;
+      }
+    };
+
+    const setAttentionPaused = (paused, now = performance.now()) => {
+      if (attention.paused === paused) return;
+      attention.paused = paused;
+      if (paused) {
+        targetLookRef.current = {x: 0, y: 0, turnX: 0};
+        ctl.behavior = null;
+        ctl.nextBehaviorAt = now + BORED_AFTER_MS;
+      }
+      onAttentionPauseChangeRef.current?.(paused);
+    };
     async function start() {
       try {
         const rigEnabled = manifest?.renderRig !== false && manifest?.layers?.length > 0;
         const mainDef = {
           layers: rigEnabled ? manifest.layers : [],
           baseSrc: manifest?.baseSrc || fallbackSrc,
+          sequence: manifest?.sequence || null,
           motion: manifest?.motion || {},
         };
         if (!mainDef.layers.length && !mainDef.baseSrc) {
@@ -206,9 +248,7 @@ export default function PixiAvatarStage({
         }
 
         const {Application, Assets, Container, Sprite, Point, loadTextures} = await import('pixi.js');
-        // 嚴格 CSP（無 unsafe-eval）：載入官方相容模組，改用非 eval polyfill。
         await import('pixi.js/unsafe-eval');
-        // CSP 三道相容（都不動 CSP）：不開 blob worker；用 <img> 而非 fetch 載圖。
         if (loadTextures?.config) {
           loadTextures.config.preferWorkers = false;
           loadTextures.config.preferCreateImageBitmap = false;
@@ -231,7 +271,7 @@ export default function PixiAvatarStage({
           try {
             instance.destroy(true, {children: true, texture: false, textureSource: false});
           } catch (_) {
-            /* 尚未完全初始化的 app 銷毀失敗可安全忽略 */
+            /* Ignore destroy errors from a partially initialized Pixi app. */
           }
           return;
         }
@@ -244,31 +284,72 @@ export default function PixiAvatarStage({
 
         const designSize = manifest?.size || {width, height};
 
-        // ===== 群組（rig / 平面立繪 / 走路序列），全部掛在 stage 上交叉淡化 =====
         const groups = new Map();
         const groupDefs = new Map();
         groupDefs.set('turn:0', mainDef);
-        const turnEnabled = stateKey === 'idle'
-          && Array.isArray(manifest?.turnStates) && manifest.turnStates.length > 0;
+        const turnEnabled = Array.isArray(manifest?.turnStates) && manifest.turnStates.length > 0;
         if (turnEnabled) {
           manifest.turnStates.forEach((ts) => {
             groupDefs.set(`turn:${ts.value}`, {layers: ts.layers || [], baseSrc: ts.baseSrc, motion: ts.motion || {}});
           });
           (manifest.poseStates || []).forEach((ps) => {
-            groupDefs.set(`pose:${ps.id}`, {layers: ps.layers || [], baseSrc: ps.baseSrc, motion: ps.motion || {}});
+            groupDefs.set(`pose:${ps.id}`, {layers: ps.layers || [], baseSrc: ps.baseSrc, sequence: ps.sequence || null, motion: ps.motion || {}});
+          });
+          (manifest.shyStates || []).forEach((ps) => {
+            if (!groupDefs.has(`pose:${ps.id}`)) {
+              groupDefs.set(`pose:${ps.id}`, {layers: ps.layers || [], baseSrc: ps.baseSrc, motion: ps.motion || {}});
+            }
           });
           if (manifest.walkFrames?.length) {
-            groupDefs.set('walk', {kind: 'walk', frames: manifest.walkFrames});
+            if (manifest.walkStartFrames?.length) {
+              groupDefs.set('walk_start', {
+                kind: 'walk',
+                frames: manifest.walkStartFrames,
+                fps: numberValue(manifest.sequences?.walk_start?.fps, 8),
+                loop: false,
+              });
+            }
+            groupDefs.set('walk', {
+              kind: 'walk',
+              frames: manifest.walkFrames,
+              fps: numberValue(manifest.sequences?.walk_forward?.fps, 9) * WALK_SPEED_SCALE,
+              loop: true,
+            });
+            if (manifest.walkStopFrames?.length) {
+              groupDefs.set('walk_stop', {
+                kind: 'walk',
+                frames: manifest.walkStopFrames,
+                fps: numberValue(manifest.sequences?.walk_stop?.fps, 8),
+                loop: false,
+              });
+            }
           }
         }
+        const walkStartDurationMs = frameSequenceDurationMs(groupDefs.get('walk_start'));
+        const walkStopDurationMs = frameSequenceDurationMs(groupDefs.get('walk_stop'));
         const behaviorPlaylist = [];
         if (turnEnabled) {
+          const happyTailPose = groupDefs.has('pose:happy_tail_wag_front')
+            ? {key: 'pose:happy_tail_wag_front', duration: stateKey === 'happy' ? 3600 : 2600}
+            : null;
+          if (stateKey === 'happy' && happyTailPose) {
+            behaviorPlaylist.push(happyTailPose, happyTailPose, happyTailPose);
+          }
           if (groupDefs.has('walk')) behaviorPlaylist.push({key: 'walk', duration: 7000});
+          if (groupDefs.has('pose:working_reaction')) behaviorPlaylist.push({key: 'pose:working_reaction', duration: 2500});
+          if (happyTailPose) behaviorPlaylist.push(happyTailPose);
           if (groupDefs.has('pose:front_left30_arms_up')) behaviorPlaylist.push({key: 'pose:front_left30_arms_up', duration: 4500});
           if (groupDefs.has('walk')) behaviorPlaylist.push({key: 'walk', duration: 5500});
           if (groupDefs.has('pose:back_waist')) behaviorPlaylist.push({key: 'pose:back_waist', duration: 5000});
+          if (stateKey === 'happy' && happyTailPose) behaviorPlaylist.push(happyTailPose, happyTailPose);
+          if (groupDefs.has('pose:working_reaction')) behaviorPlaylist.push({key: 'pose:working_reaction', duration: 2500});
           if (groupDefs.has('pose:front_right30_arms_up')) behaviorPlaylist.push({key: 'pose:front_right30_arms_up', duration: 4500});
         }
+        const shySteps = (manifest.shyStates || [])
+          .map((ps) => `pose:${ps.id}`)
+          .filter((k) => groupDefs.has(k));
+        const shyDurations = [1600, 2400];
+        const shyEnabled = turnEnabled && shySteps.length > 0;
 
         function layoutGroup(group) {
           applyRigRoot(group.root, app.screen.width, app.screen.height, designSize);
@@ -316,10 +397,15 @@ export default function PixiAvatarStage({
           if (layers.length) {
             const nodeMap = new Map();
             for (const layer of layers) {
-              // 單一部件載入失敗不炸整個骨架，跳過該層即可。
               let texture = null;
+              let sequenceTextures = [];
               try {
                 texture = await Assets.load(layer.src);
+                if (layer.sequence?.frames?.length) {
+                  sequenceTextures = (await Promise.all(layer.sequence.frames.map((src) => Assets.load(src))))
+                    .filter(Boolean);
+                  if (sequenceTextures[0]) texture = sequenceTextures[0];
+                }
               } catch (err) {
                 console.warn('[PixiAvatarStage] layer load failed:', layer.id, err);
                 continue;
@@ -332,6 +418,8 @@ export default function PixiAvatarStage({
               node.__sprite = sprite;
               node.__layer = layer;
               node.__motion = layerMotion(layer, def.motion || {});
+              node.__sequence = layer.sequence || null;
+              node.__sequenceTextures = sequenceTextures;
               node.addChild(sprite);
               applyRigLayout(node, layer);
               group.nodes.push(node);
@@ -340,7 +428,6 @@ export default function PixiAvatarStage({
             group.nodes.forEach((node) => {
               const parent = nodeMap.get(node.__layer.parentId);
               if (node.__layer.parentId && !parent) {
-                // 父件沒載成功：座標系失效，隱藏勝於錯位。
                 node.visible = false;
               }
               (parent || group.root).addChild(node);
@@ -351,11 +438,18 @@ export default function PixiAvatarStage({
             try {
               const texture = await Assets.load(def.baseSrc);
               if (cancelled) return group;
+              const sequenceTextures = def.sequence?.frames?.length
+                ? (await Promise.all(def.sequence.frames.map((src) => Assets.load(src)))).filter(Boolean)
+                : [];
+              if (cancelled) return group;
               const sprite = new Sprite(texture);
+              if (sequenceTextures[0]) sprite.texture = sequenceTextures[0];
               sprite.width = numberValue(designSize.width, width);
               sprite.height = numberValue(designSize.height, height);
               group.root.addChild(sprite);
               group.__flatSprite = sprite;
+              group.__flatSequence = def.sequence || null;
+              group.__flatTextures = sequenceTextures;
               group.kind = 'flat';
               group.ready = true;
             } catch (err) {
@@ -366,7 +460,6 @@ export default function PixiAvatarStage({
           return group;
         }
 
-        // 主姿勢必須先就緒
         const mainGroup = await buildGroup('turn:0', mainDef);
         if (cancelled) return;
         if (!mainGroup.ready) throw new Error('Pixi avatar main pose failed to load');
@@ -374,7 +467,6 @@ export default function PixiAvatarStage({
         mainGroup.root.alpha = 1;
         mainGroup.root.visible = true;
 
-        // 其餘姿勢背景預載（不擋首繪）
         if (groupDefs.size > 1) {
           (async () => {
             for (const [key, def] of groupDefs) {
@@ -401,24 +493,18 @@ export default function PixiAvatarStage({
         resizeObserver.observe(host);
         resize();
 
-        try {
-          const hr = host.getBoundingClientRect();
-          console.log('[PIXI-DIAG] mounted',
-            '| engine=', IS_WEBKIT_ENGINE ? 'webkit' : 'chromium',
-            '| canvas=', app.canvas.width + 'x' + app.canvas.height,
-            '| host=', Math.round(hr.width) + 'x' + Math.round(hr.height),
-            '| groups=', groupDefs.size,
-            '| mainNodes=', mainGroup.nodes.length,
-            '| turn=', turnEnabled);
-        } catch (diagErr) {
-          console.warn('[PIXI-DIAG] log failed', diagErr);
-        }
-
         tickerHandler = (ticker) => {
           const time = performance.now() / 1000;
           const now = performance.now();
           const delta = ticker.deltaTime / 60;
           const look = lookRef.current;
+          const lookTarget = targetLookRef.current;
+          const lookAlpha = Math.min(1, delta * LOOK_EASE_RATE);
+          const turnAlpha = Math.min(1, delta * TURN_EASE_RATE);
+          look.x += (lookTarget.x - look.x) * lookAlpha;
+          look.y += (lookTarget.y - look.y) * lookAlpha;
+          look.turnX = numberValue(look.turnX, 0)
+            + (numberValue(lookTarget.turnX, 0) - numberValue(look.turnX, 0)) * turnAlpha;
           const pointer = pointerRef.current;
           const tickleOn = tickleModeRef.current;
           pointer.speed *= 0.82;
@@ -428,25 +514,31 @@ export default function PixiAvatarStage({
             pointer.speed *= 0.4;
           }
           const speedNorm = clamp(pointer.speed / 1.4, 0, 1);
+          if (attention.paused) {
+            targetLookRef.current = {x: 0, y: 0, turnX: 0};
+            ctl.lastActive = now;
+            ctl.behavior = null;
+            ctl.nextBehaviorAt = now + BORED_AFTER_MS;
+          }
 
-          // ===== 1) 行為決策 =====
-          // 互動（搔癢）模式：凍結無聊行為與轉向切換，專心被搔，避免姿勢中途跳掉。
           if (tickleOn && ctl.behavior) {
             ctl.behavior = null;
             ctl.nextBehaviorAt = now + BORED_AFTER_MS;
           }
           if (turnEnabled && !tickleOn) {
-            // 無聊輪播：游標動了立刻收工；時間到換下一個行為
             if (ctl.behavior && ctl.lastActive > ctl.behaviorStarted) {
               ctl.behavior = null;
               ctl.nextBehaviorAt = now + BORED_AFTER_MS;
             } else if (ctl.behavior && now > ctl.behaviorUntil) {
               ctl.behavior = null;
-              ctl.nextBehaviorAt = now + 6000 + Math.random() * 6000;
+              ctl.nextBehaviorAt = stateKey === 'happy'
+                ? now + 900 + Math.random() * 1800
+                : now + 6000 + Math.random() * 6000;
             }
+            const behaviorIdleDelay = stateKey === 'happy' ? 1200 : 9500;
             if (!ctl.behavior && behaviorPlaylist.length
-              && now - ctl.lastActive > 9500 && now >= ctl.nextBehaviorAt) {
-              const next = behaviorPlaylist[ctl.behaviorIndex % behaviorPlaylist.length];
+              && now - ctl.lastActive > behaviorIdleDelay && now >= ctl.nextBehaviorAt) {
+              const next = behaviorPlaylist[Math.floor(Math.random() * behaviorPlaylist.length)];
               ctl.behaviorIndex += 1;
               const g = groups.get(next.key);
               if (g?.ready) {
@@ -455,23 +547,29 @@ export default function PixiAvatarStage({
                 ctl.behaviorUntil = now + next.duration;
               }
             }
-            // 轉向階梯：一步一步走（0 ↔ 30° ↔ 45° ↔ 側面），距離以「身位」計，帶遲滯防抖
             const lx = look.turnX || 0;
             const mag = Math.abs(lx);
             const sgn = lx < 0 ? -1 : 1;
             let desired = 0;
-            if (mag >= TURN_ENTER[3]) desired = 3;
-            else if (mag >= TURN_ENTER[2]) desired = 2;
-            else if (mag >= TURN_ENTER[1]) desired = 1;
+            for (let i = TURN_ENTER.length - 1; i >= 1; i -= 1) {
+              if (mag >= TURN_ENTER[i]) {
+                desired = i;
+                break;
+              }
+            }
             desired *= sgn;
             const cur = ctl.turnValue;
-            if (desired !== cur && now - ctl.turnSwitched > 220) {
-              const target = cur + (desired > cur ? 1 : -1);
+            const crossesCenter = cur !== 0 && desired !== 0 && Math.sign(cur) !== Math.sign(desired);
+            const turnDelay = crossesCenter
+              ? TURN_CENTER_STEP_DELAY_MS
+              : (speedNorm > 0.45 ? TURN_FAST_STEP_DELAY_MS : TURN_SLOW_STEP_DELAY_MS);
+            if (desired !== cur && now - ctl.turnSwitched > turnDelay) {
+              const target = crossesCenter ? 0 : cur + (desired > cur ? 1 : -1);
               const growing = Math.abs(target) > Math.abs(cur);
               const need = growing
                 ? TURN_ENTER[Math.abs(target)]
                 : TURN_ENTER[Math.abs(cur)] - TURN_EXIT_GAP;
-              const ok = growing ? mag >= need : mag < need;
+              const ok = target === 0 || (growing ? mag >= need : mag < need);
               if (ok && groupDefs.has(`turn:${target}`)) {
                 ctl.turnValue = target;
                 ctl.turnSwitched = now;
@@ -479,7 +577,6 @@ export default function PixiAvatarStage({
             }
           }
 
-          // ===== 2) 撫摸偵測（貼著手慢慢滑）=====
           let petTarget = 0;
           const probeGroup = groups.get(ctl.__activeKey || 'turn:0');
           if (probeGroup?.kind === 'rig' && pointer.inside
@@ -500,9 +597,48 @@ export default function PixiAvatarStage({
           pet.lift += (petTarget - pet.lift) * Math.min(1, delta * (petTarget ? 2.4 : 1.1));
           if (pet.lift < 0.004) pet.lift = 0;
 
-          // ===== 3) 決定活動群組 =====
+          if (shyEnabled) {
+            if (!shy.active) {
+              if (pet.lift > 0.5 && now > shy.cooldownUntil) {
+                if (!shy.petStart) {
+                  shy.petStart = now;
+                  shy.threshold = 2000 + Math.random() * 3000;
+                } else if (now - shy.petStart > shy.threshold) {
+                  shy.active = true;
+                  shy.phaseIndex = 0;
+                  shy.phaseUntil = now + (shyDurations[0] || 1600);
+                }
+              } else if (pet.lift < 0.15 && shy.petStart) {
+                shy.petStart = 0;
+              }
+            } else if (now > shy.phaseUntil) {
+              shy.phaseIndex += 1;
+              if (shy.phaseIndex >= shySteps.length) {
+                shy.active = false;
+                shy.phaseIndex = -1;
+                shy.petStart = 0;
+                shy.cooldownUntil = now + 10000;
+                pet.lift = 0;
+              } else {
+                shy.phaseUntil = now + (shyDurations[shy.phaseIndex] || 2400);
+              }
+            }
+          }
+
           let key = 'turn:0';
-          if (ctl.behavior) key = ctl.behavior.key;
+          if (shy.active && shySteps[shy.phaseIndex]) key = shySteps[shy.phaseIndex];
+          else if (attention.paused && ctl.turnValue === 0 && groupDefs.has('pose:working_reaction')) key = 'pose:working_reaction';
+          else if (ctl.behavior?.key === 'walk') {
+            const behaviorElapsed = now - ctl.behaviorStarted;
+            const behaviorRemaining = ctl.behaviorUntil - now;
+            if (walkStartDurationMs > 0 && behaviorElapsed < walkStartDurationMs) {
+              key = 'walk_start';
+            } else if (walkStopDurationMs > 0 && behaviorRemaining < walkStopDurationMs) {
+              key = 'walk_stop';
+            } else {
+              key = 'walk';
+            }
+          } else if (ctl.behavior) key = ctl.behavior.key;
           else if (ctl.turnValue !== 0) key = `turn:${ctl.turnValue}`;
           if (!groups.get(key)?.ready) {
             if (!groups.has(key) && groupDefs.has(key)) {
@@ -510,40 +646,54 @@ export default function PixiAvatarStage({
             }
             key = 'turn:0';
           }
+          const previousActiveKey = ctl.__activeKey;
           ctl.__activeKey = key;
+          if (previousActiveKey !== key) {
+            const activeGroup = groups.get(key);
+            if (activeGroup) activeGroup.__playStartedAt = now;
+          }
 
-          // ===== 4) 姿勢切換：先讓舊姿勢快速退場，清場後新姿勢才進場 =====
-          // （兩張差異大的姿勢若同時半透明疊著，看起來像破圖；序列式切換乾淨俐落）
-          let stageBusy = false;
+          const activeIsTurn = key.startsWith('turn:');
           groups.forEach((group) => {
-            if (group.key !== key && group.fade > 0.06) stageBusy = true;
-          });
-          groups.forEach((group) => {
-            const target = (group.key === key && !stageBusy) ? 1 : 0;
-            const rate = target === 1 ? 10 : 13;
+            const target = group.key === key ? 1 : 0;
+            const groupIsTurn = group.key.startsWith('turn:');
+            const rate = activeIsTurn && groupIsTurn
+              ? (target === 1 ? TURN_FADE_IN_RATE : TURN_FADE_OUT_RATE)
+              : (target === 1 ? POSE_FADE_IN_RATE : POSE_FADE_OUT_RATE);
             group.fade += (target - group.fade) * Math.min(1, delta * rate);
+            if (activeIsTurn && groupIsTurn && target === 0 && group.fade < TURN_FADE_CUTOFF) group.fade = 0;
             if (group.fade < 0.012 && target === 0) group.fade = 0;
             group.root.alpha = Math.min(1, group.fade);
             group.root.visible = group.fade > 0.01;
           });
 
-          // ===== 5) 各群組動畫 =====
           groups.forEach((group) => {
             if (!group.root.visible || !group.ready) return;
             if (group.kind === 'walk') {
               const textures = group.__walkTextures;
-              const frame = Math.floor(time * 9) % textures.length;
+              const walkFps = Math.max(1, numberValue(group.def?.fps, 9));
+              const elapsed = Math.max(0, (now - (group.__playStartedAt || now)) / 1000);
+              const frame = group.def?.loop === false
+                ? Math.min(textures.length - 1, Math.floor(elapsed * walkFps))
+                : Math.floor(time * walkFps) % textures.length;
               if (group.__walkSprite.texture !== textures[frame]) {
                 group.__walkSprite.texture = textures[frame];
               }
-              // 無聊踱步：左右緩慢漂移
               group.root.x = group.__rootBase.x
                 + Math.sin(time * 0.5) * 16 * group.root.scale.x;
               return;
             }
             if (group.kind === 'flat') {
-              // 平面立繪（側面）：輕輕呼吸浮動
-              group.__flatSprite.y = Math.sin(time * 1.05) * 2.4;
+              if (group.__flatTextures?.length > 1) {
+                const sequenceFps = Math.max(1, numberValue(group.__flatSequence?.fps, 8));
+                const rawFrame = Math.floor(time * sequenceFps);
+                const frame = group.__flatSequence?.loop === false
+                  ? Math.min(group.__flatTextures.length - 1, rawFrame)
+                  : rawFrame % group.__flatTextures.length;
+                if (group.__flatSprite.texture !== group.__flatTextures[frame]) {
+                  group.__flatSprite.texture = group.__flatTextures[frame];
+                }
+              }
               return;
             }
             const isActive = group.key === key;
@@ -551,6 +701,16 @@ export default function PixiAvatarStage({
               const base = node.__base;
               const motion = node.__motion;
               const layer = node.__layer;
+              if (node.__sequenceTextures?.length > 1) {
+                const sequenceFps = Math.max(1, numberValue(node.__sequence?.fps, 8));
+                const rawFrame = Math.floor(time * sequenceFps);
+                const frame = node.__sequence?.loop === false
+                  ? Math.min(node.__sequenceTextures.length - 1, rawFrame)
+                  : rawFrame % node.__sequenceTextures.length;
+                if (node.__sprite.texture !== node.__sequenceTextures[frame]) {
+                  node.__sprite.texture = node.__sequenceTextures[frame];
+                }
+              }
               const phase = numberValue(layer.phase, index * 0.37);
               const breathe = motion.breathe || {};
               const sway = motion.sway || {};
@@ -594,8 +754,6 @@ export default function PixiAvatarStage({
                 node.rotation += Math.sin(time * 1.8 + phase) * 0.018 * delta;
               }
 
-              // 撫摸抬手：被摸的那隻手臂鏈輕輕抬起＋開心晃動
-              // （幅度收在肉邊縫份內，不會露背景）
               if (isActive && pet.lift > 0.01) {
                 const id = (layer.id || '').replace('viewer_', '');
                 if (pet.arm === 'left') {
@@ -613,17 +771,17 @@ export default function PixiAvatarStage({
                 }
               }
 
-              // 搔癢（僅活動群組）
               let tickleTarget = 0;
               let dirX = 0;
               let dirY = 0;
-              if (isActive && tickleOn && tmpPointRef && (pointer.inside || pointer.poke > 0.02)) {
+              const tickleWeight = tickleLayerWeight(layer.id);
+              if (isActive && tickleOn && tmpPointRef && tickleWeight > 0 && pointer.poke > 0.02) {
                 const gp = node.getGlobalPosition(tmpPointRef);
                 const dx = gp.x - pointer.x;
                 const dy = gp.y - pointer.y;
                 const dist = Math.hypot(dx, dy) || 1;
                 const proximity = clamp(1 - dist / TICKLE_REACH, 0, 1);
-                tickleTarget = proximity * (pointer.inside ? 1 : 0) + proximity * pointer.poke;
+                tickleTarget = proximity * pointer.poke * tickleWeight * TICKLE_POKE_SCALE;
                 dirX = dx / dist;
                 dirY = dy / dist;
               }
@@ -633,17 +791,17 @@ export default function PixiAvatarStage({
                 : prevTickle * 0.84;
               node.__tickle = nextTickle < 0.001 ? 0 : nextTickle;
               if (node.__tickle > 0.001) {
-                const power = Math.min(1.2, node.__tickle + pointer.poke * 0.6);
+                const power = Math.min(TICKLE_MAX_POWER, node.__tickle + pointer.poke * 0.18);
                 const giggleW = speedNorm * power;
                 const dodgeW = (1 - speedNorm) * power;
-                node.x += dirX * 7.5 * dodgeW;
-                node.y += dirY * 5.5 * dodgeW;
-                node.rotation += (dirX >= 0 ? 1 : -1) * 0.16 * dodgeW;
+                node.x += dirX * 3.2 * dodgeW;
+                node.y += dirY * 2.4 * dodgeW;
+                node.rotation += (dirX >= 0 ? 1 : -1) * 0.055 * dodgeW;
                 const jitter = time * 34 + phase;
-                node.x += Math.sin(jitter) * 3.6 * giggleW;
-                node.y += Math.cos(jitter * 0.92) * 3.0 * giggleW;
-                node.scale.x *= 1 + Math.sin(jitter) * 0.06 * giggleW;
-                node.scale.y *= 1 - Math.sin(jitter) * 0.06 * giggleW;
+                node.x += Math.sin(jitter) * 1.4 * giggleW;
+                node.y += Math.cos(jitter * 0.92) * 1.1 * giggleW;
+                node.scale.x *= 1 + Math.sin(jitter) * 0.02 * giggleW;
+                node.scale.y *= 1 - Math.sin(jitter) * 0.02 * giggleW;
               }
             });
           });
@@ -684,21 +842,57 @@ export default function PixiAvatarStage({
       return true;
     };
 
+    const updateAttentionLock = (event) => {
+      const rect = host.getBoundingClientRect();
+      if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+      const centerX = rect.left + rect.width / 2;
+      const halfWidth = ATTENTION_CENTER_WIDTH / 2;
+      const side = event.clientX < centerX - halfWidth
+        ? 'left'
+        : event.clientX > centerX + halfWidth
+          ? 'right'
+          : null;
+      if (!side) {
+        clearAttentionTimer();
+        attention.side = null;
+        setAttentionPaused(false);
+        return false;
+      }
+      if (attention.paused) return true;
+      if (attention.side !== side) {
+        clearAttentionTimer();
+        attention.side = side;
+        attention.timer = window.setTimeout(() => {
+          attention.timer = null;
+          setAttentionPaused(true);
+        }, ATTENTION_RETURN_DELAY_MS);
+      }
+      return false;
+    };
+
     const updateLook = (event) => {
-      const prev = lookRef.current;
+      if (updateAttentionLock(event)) {
+        targetLookRef.current = {x: 0, y: 0, turnX: 0};
+        updateTicklePointer(event);
+        return;
+      }
+      const prev = targetLookRef.current;
       const next = targetFromPoint(host, event.clientX, event.clientY);
-      // 游標活動偵測：位移夠大才算「有人在」，餵給無聊計時器
       if (Math.abs(next.x - prev.x) + Math.abs(next.y - prev.y) > 0.012) {
         ctl.lastActive = performance.now();
       }
-      lookRef.current = next;
+      targetLookRef.current = next;
       updateTicklePointer(event);
     };
     const settleLook = () => {
-      lookRef.current = {
-        x: lookRef.current.x * 0.42,
-        y: lookRef.current.y * 0.42,
-        turnX: lookRef.current.turnX || 0,
+      if (attention.paused) {
+        targetLookRef.current = {x: 0, y: 0, turnX: 0};
+        return;
+      }
+      targetLookRef.current = {
+        x: targetLookRef.current.x * 0.42,
+        y: targetLookRef.current.y * 0.42,
+        turnX: targetLookRef.current.turnX || 0,
       };
     };
     const pokeDown = (event) => {
@@ -717,6 +911,8 @@ export default function PixiAvatarStage({
       window.removeEventListener('pointermove', updateLook);
       window.removeEventListener('pointerup', settleLook);
       window.removeEventListener('pointerdown', pokeDown);
+      clearAttentionTimer();
+      setAttentionPaused(false);
       resizeObserver?.disconnect();
       try {
         if (tickerHandler) app?.ticker?.remove?.(tickerHandler);
@@ -739,7 +935,14 @@ export default function PixiAvatarStage({
         console.warn('[PixiAvatarStage] host cleanup failed', error);
       }
     };
-  }, [alt, fallbackSrc, height, manifestKey, stateKey, width]);
+  }, [
+    alt,
+    fallbackSrc,
+    height,
+    manifestKey,
+    stateKey,
+    width,
+  ]);
 
   if (failed) {
     const fallbackImageSrc = manifest?.baseSrc || fallbackSrc;

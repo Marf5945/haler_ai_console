@@ -148,6 +148,7 @@ export default function FloatingAvatarMode({
   const [scheduleConfirmPending, setScheduleConfirmPending] = useState(false);
   const [tickleMode, setTickleMode] = useState(false);
   const [pixiReady, setPixiReady] = useState(false);
+  const [attentionPaused, setAttentionPaused] = useState(false);
   const setBodyMode = onBodyModeChange || (() => {});
   const showBody = bodyMode !== 'head';
   const bodyAvatarSrc = fullBodyAvatarSrc || fullBodyMotionManifest?.baseSrc || '';
@@ -287,6 +288,10 @@ export default function FloatingAvatarMode({
   }, [avatarExpression, fullBodyMotionManifest?.id, fullBodyMotionManifest?.state, usePixiAvatar]);
 
   useEffect(() => {
+    if (!active || !usePixiAvatar) setAttentionPaused(false);
+  }, [active, usePixiAvatar]);
+
+  useEffect(() => {
     if (!active || !panelOpenSignal) return;
     setContextOpen(false);
     setAgentPickerOpen(false);
@@ -338,8 +343,10 @@ export default function FloatingAvatarMode({
   const speakerName = persona?.name || t('floatingAvatar.agentFallback');
   const cleanLatest = String(displayLatest || '').replace(/^Ai[:：]\s*/, '');
   const shakeMessage = shakeDialogue || (shakeState === 'speechless' ? t('floatingAvatar.shakeTooLong') : '');
+  const attentionBubbleText = attentionPaused ? '主人，今天好嗎？' : '';
   const cleanBubbleText = String(shakeMessage || bubbleText || '').replace(/^Ai[:：]\s*/, '').trim();
-  const topBubbleVisible = compactWindowMode && cleanBubbleText && (!bubbleDismissed || shakeMessageVisible);
+  const displayedBubbleText = attentionBubbleText || cleanBubbleText;
+  const topBubbleVisible = (compactWindowMode || attentionPaused) && displayedBubbleText && (attentionPaused || !bubbleDismissed || shakeMessageVisible);
   const topBubbleStyle = {
     left: clamp(clampedPosition.x - 124, edgeGap, Math.max(edgeGap, window.innerWidth - 318)),
     top: clamp(clampedPosition.y - 92, edgeGap, Math.max(edgeGap, window.innerHeight - 92)),
@@ -517,8 +524,8 @@ export default function FloatingAvatarMode({
       {topBubbleVisible && (
         <aside className="floating-avatar-top-bubble" style={topBubbleStyle}>
           <strong>{speakerName}</strong>
-          <span>{expanded ? cleanBubbleText : truncateStatus(cleanBubbleText, 72)}</span>
-          {cleanBubbleText.length > 72 && (
+          <span>{expanded ? displayedBubbleText : truncateStatus(displayedBubbleText, 72)}</span>
+          {displayedBubbleText.length > 72 && (
             <button type="button" onClick={() => setExpanded((value) => !value)}>
               {expanded ? t('floatingAvatar.less') : t('floatingAvatar.more')}
             </button>
@@ -608,6 +615,7 @@ export default function FloatingAvatarMode({
                     height={avatarFrameHeight}
                     tickle={tickleActive}
                     onReady={() => setPixiReady(true)}
+                    onAttentionPauseChange={setAttentionPaused}
                   />
                 </PixiStageErrorBoundary>
               </span>

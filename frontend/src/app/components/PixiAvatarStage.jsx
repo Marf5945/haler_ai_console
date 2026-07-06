@@ -17,19 +17,24 @@ const TICKLE_MAX_POWER = 0.72;
 const WALK_SPEED_SCALE = 5 / 8;
 const LOOK_EASE_RATE = 8;
 const TURN_EASE_RATE = 4.2;
-const TURN_FAST_STEP_DELAY_MS = 140;
-const TURN_SLOW_STEP_DELAY_MS = 240;
+const TURN_FAST_STEP_DELAY_MS = 180;
+const TURN_SLOW_STEP_DELAY_MS = 280;
 const TURN_CENTER_STEP_DELAY_MS = 80;
 const POSE_FADE_IN_RATE = 9;
 const POSE_FADE_OUT_RATE = 8;
-const TURN_FADE_IN_RATE = 18;
-const TURN_FADE_OUT_RATE = 32;
-const TURN_FADE_CUTOFF = 0.18;
+const TURN_FADE_IN_RATE = 8;
+const TURN_FADE_OUT_RATE = 10;
+const TURN_FADE_CUTOFF = 0.08;
 const BORED_AFTER_MS = 10000;
 const ATTENTION_RETURN_DELAY_MS = 5000;
 const ATTENTION_CENTER_WIDTH = 200;
-const TURN_ENTER = [0, 0.14, 0.28, 0.42, 0.58, 0.74, 0.9];
+const TURN_ENTER = [0, 0.06, 0.14, 0.24, 0.36, 0.5, 0.64, 0.78, 0.88, 0.96];
+const TURN_SIDE_STEP = 7;
+const TURN_CURSOR_START_STEP = 3;
+const TURN_CURSOR_45PX = 300;
+const TURN_CURSOR_SIDE_PX = 650;
 const TURN_EXIT_GAP = 0.06;
+const ATTENTION_FINISH_COOLDOWN_MS = 3000;
 
 function numberValue(value, fallback) {
   const parsed = Number(value);
@@ -66,10 +71,21 @@ function targetFromPoint(element, clientX, clientY) {
   if (!rect || rect.width <= 0 || rect.height <= 0) return {x: 0, y: 0, turnX: 0};
   const centerX = rect.left + rect.width / 2;
   const centerY = rect.top + rect.height * 0.22;
+  const dx = clientX - centerX;
+  const turnAbsPx = Math.abs(dx);
+  const turnSign = dx < 0 ? -1 : 1;
+  const sideProgress = clamp(
+    (turnAbsPx - TURN_CURSOR_45PX) / Math.max(1, TURN_CURSOR_SIDE_PX - TURN_CURSOR_45PX),
+    0,
+    1,
+  );
+  const turnX = turnAbsPx < TURN_CURSOR_45PX
+    ? 0
+    : turnSign * (TURN_ENTER[TURN_CURSOR_START_STEP] + (TURN_ENTER[TURN_SIDE_STEP] - TURN_ENTER[TURN_CURSOR_START_STEP]) * sideProgress);
   return {
     x: clamp((clientX - centerX) / Math.max(42, rect.width * 0.44), -1, 1),
     y: clamp((clientY - centerY) / Math.max(58, rect.height * 0.34), -1, 1),
-    turnX: clamp((clientX - centerX) / Math.max(42, rect.width * 0.44), -1, 1),
+    turnX,
   };
 }
 
@@ -210,12 +226,13 @@ export default function PixiAvatarStage({
       behaviorStarted: 0,
       behaviorUntil: 0,
       behaviorIndex: 0,
+      attentionBehaviorIndex: 0,
       turnValue: 0,
       turnSwitched: 0,
     };
     const pet = {lift: 0, arm: 'right'};
     const shy = {petStart: 0, active: false, phaseIndex: -1, phaseUntil: 0, threshold: 0, cooldownUntil: 0};
-    const attention = {paused: false, side: null, timer: null};
+    const attention = {paused: false, side: null, timer: null, cooldownUntil: 0};
 
     const clearAttentionTimer = () => {
       if (attention.timer) {
@@ -224,13 +241,19 @@ export default function PixiAvatarStage({
       }
     };
 
-    const setAttentionPaused = (paused, now = performance.now()) => {
+    const setAttentionPaused = (paused, now = performance.now(), finishBehavior = null) => {
       if (attention.paused === paused) return;
       attention.paused = paused;
       if (paused) {
         targetLookRef.current = {x: 0, y: 0, turnX: 0};
-        ctl.behavior = null;
+        ctl.behavior = finishBehavior;
         ctl.nextBehaviorAt = now + BORED_AFTER_MS;
+        if (finishBehavior) {
+          ctl.behaviorStarted = now;
+          ctl.behaviorUntil = now + finishBehavior.duration;
+        }
+      } else {
+        attention.cooldownUntil = now + ATTENTION_FINISH_COOLDOWN_MS;
       }
       onAttentionPauseChangeRef.current?.(paused);
     };
@@ -328,10 +351,13 @@ export default function PixiAvatarStage({
         const walkStartDurationMs = frameSequenceDurationMs(groupDefs.get('walk_start'));
         const walkStopDurationMs = frameSequenceDurationMs(groupDefs.get('walk_stop'));
         const behaviorPlaylist = [];
+        const attentionFinishPlaylist = [];
         if (turnEnabled) {
           const happyTailPose = groupDefs.has('pose:happy_tail_wag_front')
             ? {key: 'pose:happy_tail_wag_front', duration: stateKey === 'happy' ? 3600 : 2600}
             : null;
+          if (happyTailPose) attentionFinishPlaylist.push({...happyTailPose, source: 'attention'});
+          if (groupDefs.has('walk')) attentionFinishPlaylist.push({key: 'walk', duration: 5000, source: 'attention'});
           if (stateKey === 'happy' && happyTailPose) {
             behaviorPlaylist.push(happyTailPose, happyTailPose, happyTailPose);
           }
@@ -345,6 +371,16 @@ export default function PixiAvatarStage({
           if (groupDefs.has('pose:working_reaction')) behaviorPlaylist.push({key: 'pose:working_reaction', duration: 2500});
           if (groupDefs.has('pose:front_right30_arms_up')) behaviorPlaylist.push({key: 'pose:front_right30_arms_up', duration: 4500});
         }
+        const nextAttentionFinishBehavior = () => {
+          if (!attentionFinishPlaylist.length) {
+            return groupDefs.has('pose:working_reaction')
+              ? {key: 'pose:working_reaction', duration: 1800, source: 'attention'}
+              : null;
+          }
+          const next = attentionFinishPlaylist[ctl.attentionBehaviorIndex % attentionFinishPlaylist.length];
+          ctl.attentionBehaviorIndex += 1;
+          return next;
+        };
         const shySteps = (manifest.shyStates || [])
           .map((ps) => `pose:${ps.id}`)
           .filter((k) => groupDefs.has(k));
@@ -514,10 +550,12 @@ export default function PixiAvatarStage({
             pointer.speed *= 0.4;
           }
           const speedNorm = clamp(pointer.speed / 1.4, 0, 1);
+          if (!attention.paused && now - ctl.lastActive >= ATTENTION_RETURN_DELAY_MS) {
+            targetLookRef.current = {x: 0, y: 0, turnX: 0};
+          }
           if (attention.paused) {
             targetLookRef.current = {x: 0, y: 0, turnX: 0};
             ctl.lastActive = now;
-            ctl.behavior = null;
             ctl.nextBehaviorAt = now + BORED_AFTER_MS;
           }
 
@@ -525,18 +563,25 @@ export default function PixiAvatarStage({
             ctl.behavior = null;
             ctl.nextBehaviorAt = now + BORED_AFTER_MS;
           }
-          if (turnEnabled && !tickleOn) {
-            if (ctl.behavior && ctl.lastActive > ctl.behaviorStarted) {
+          if (turnEnabled) {
+            if (ctl.behavior && ctl.behavior.source !== 'attention' && ctl.lastActive > ctl.behaviorStarted) {
               ctl.behavior = null;
               ctl.nextBehaviorAt = now + BORED_AFTER_MS;
             } else if (ctl.behavior && now > ctl.behaviorUntil) {
+              const wasAttentionBehavior = ctl.behavior.source === 'attention';
               ctl.behavior = null;
-              ctl.nextBehaviorAt = stateKey === 'happy'
-                ? now + 900 + Math.random() * 1800
-                : now + 6000 + Math.random() * 6000;
+              if (wasAttentionBehavior && attention.paused) {
+                setAttentionPaused(false, now);
+                ctl.lastActive = now;
+                ctl.nextBehaviorAt = now + BORED_AFTER_MS;
+              } else {
+                ctl.nextBehaviorAt = stateKey === 'happy'
+                  ? now + 900 + Math.random() * 1800
+                  : now + 6000 + Math.random() * 6000;
+              }
             }
             const behaviorIdleDelay = stateKey === 'happy' ? 1200 : 9500;
-            if (!ctl.behavior && behaviorPlaylist.length
+            if (!tickleOn && !ctl.behavior && behaviorPlaylist.length
               && now - ctl.lastActive > behaviorIdleDelay && now >= ctl.nextBehaviorAt) {
               const next = behaviorPlaylist[Math.floor(Math.random() * behaviorPlaylist.length)];
               ctl.behaviorIndex += 1;
@@ -564,7 +609,8 @@ export default function PixiAvatarStage({
               ? TURN_CENTER_STEP_DELAY_MS
               : (speedNorm > 0.45 ? TURN_FAST_STEP_DELAY_MS : TURN_SLOW_STEP_DELAY_MS);
             if (desired !== cur && now - ctl.turnSwitched > turnDelay) {
-              const target = crossesCenter ? 0 : cur + (desired > cur ? 1 : -1);
+              let target = crossesCenter ? 0 : cur + (desired > cur ? 1 : -1);
+              if (desired === 0 && Math.abs(cur) <= 2) target = 0;
               const growing = Math.abs(target) > Math.abs(cur);
               const need = growing
                 ? TURN_ENTER[Math.abs(target)]
@@ -845,6 +891,8 @@ export default function PixiAvatarStage({
     const updateAttentionLock = (event) => {
       const rect = host.getBoundingClientRect();
       if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+      const now = performance.now();
+      if (now < attention.cooldownUntil) return false;
       const centerX = rect.left + rect.width / 2;
       const halfWidth = ATTENTION_CENTER_WIDTH / 2;
       const side = event.clientX < centerX - halfWidth
@@ -864,7 +912,7 @@ export default function PixiAvatarStage({
         attention.side = side;
         attention.timer = window.setTimeout(() => {
           attention.timer = null;
-          setAttentionPaused(true);
+          setAttentionPaused(true, performance.now(), nextAttentionFinishBehavior());
         }, ATTENTION_RETURN_DELAY_MS);
       }
       return false;
@@ -892,7 +940,7 @@ export default function PixiAvatarStage({
       targetLookRef.current = {
         x: targetLookRef.current.x * 0.42,
         y: targetLookRef.current.y * 0.42,
-        turnX: targetLookRef.current.turnX || 0,
+        turnX: (targetLookRef.current.turnX || 0) * 0.42,
       };
     };
     const pokeDown = (event) => {

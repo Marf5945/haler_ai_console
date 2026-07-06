@@ -71,7 +71,7 @@
 
 已補上側面中間幀 `states.side_left` / `states.side_right`，fallback 整體圖放在 `fullbody/side_left.png` 與 `fullbody/side_right.png`；這兩張是 75 到 90 度側身角度，不是把正面圖旋轉或鏡射硬接。
 
-側面也已拆成同一套 22 個 Pixi canonical slots，放在 `parts/side/left/` 與 `parts/side/right/`。拆圖直接使用既有 200x360 fullbody 圖，不縮放、不調整比例；`turnRigContract.angles` 裡用 `front_left75` / `front_right75` 作為別名，表示這兩張在轉身 sequence 裡扮演接近 75 度的側面橋接幀。
+側面也已拆成同一套 22 個 Pixi canonical slots，放在 `parts/side/left/` 與 `parts/side/right/`。拆圖直接使用既有 200x360 fullbody 圖，不縮放、不調整比例；`turnRigContract.angles` 裡用 `front_left90` / `front_right90` 作為別名，避免和新增的 `front_left75` / `front_right75` 中間幀混淆。
 
 `fullbody/back_waist.png` 也已重生為肉球修正版；背面白色腳掌現在包含可讀的黑色 toe beans 與中央肉球，避免從 `side_*` 接到 `back_waist` 時腳掌細節突然消失。
 
@@ -91,7 +91,9 @@
 
 已補齊這些轉身角度，讓側面轉背面時不用瞬間切成全背：
 
+- 正面 15 度：`front_left15`、`front_right15`。
 - 正面 45 度：`front_left45`、`front_right45`。
+- 正面 75 度：`front_left75`、`front_right75`，放在 60 度與 85 度中間。
 - 背面 30 度 / 背面 3/4：`back_left30`、`back_right30`，別名可記作 `back_3q_left`、`back_3q_right`。
 - 中性背面 3/4 hold：`back_3q`。
 - 中性完整背面：`back_full`，不要拿 `back_waist` 直接硬接側面。
@@ -108,9 +110,4 @@
 
 `manifest.json` 的 `turnRigContract` 是這份規格的機器可讀入口。完成的角度都已升成 state，且 layer id 維持 canonical slot，不會因為檔名有 `_back`、`_left45` 就改掉 Pixi 的骨架名稱。背面完整圖沒有可見臉部，因此 `back_full` 的吻部、嘴、眼是透明 placeholder，保留槽位給 Pixi runtime。
 
-驗證指令：
-
-```bash
-cd frontend
-node ./scripts/validate-yulesaku-motion-pack.js
-```
+公開包只保留 runtime 需要的 manifest、全身 fallback、分層 parts 與 sequence frame；切圖來源與暫存素材不放進倉庫。

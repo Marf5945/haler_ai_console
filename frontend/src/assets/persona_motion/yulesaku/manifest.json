@@ -40,9 +40,12 @@
     "runtimePolicy": "Do not add a planned angle to states until its fullbody fallback and split parts exist. Planned angles live here first so Pixi never loads missing PNGs.",
     "transitionOrder": [
       "idle",
+      "front_left15",
       "front_left30",
       "front_left45",
       "front_left60",
+      "front_left75",
+      "front_left85",
       "side_left",
       "back_left60",
       "back_left30",
@@ -51,9 +54,12 @@
       "back_right30",
       "back_right60",
       "side_right",
+      "front_right85",
+      "front_right75",
       "front_right60",
       "front_right45",
       "front_right30",
+      "front_right15",
       "idle"
     ],
     "angles": [
@@ -117,8 +123,8 @@
         "base": "fullbody/side_left.png",
         "partsDir": "parts/side/left",
         "aliases": [
-          "front_left75",
-          "left75"
+          "front_left90",
+          "left90"
         ],
         "purpose": "front-to-back side bridge",
         "notes": "Split from the existing 200x360 side fallback without resizing. Slots preserve the canonical Pixi part contract."
@@ -129,8 +135,8 @@
         "base": "fullbody/side_right.png",
         "partsDir": "parts/side/right",
         "aliases": [
-          "front_right75",
-          "right75"
+          "front_right90",
+          "right90"
         ],
         "purpose": "front-to-back side bridge",
         "notes": "Split from the existing 200x360 side fallback without resizing. Slots preserve the canonical Pixi part contract."
@@ -214,6 +220,7 @@
           "parts/front/idle/mouth_neutral.png",
           "parts/front/idle/mouth_neutral_alt.png",
           "parts/front/idle/mouth_smile.png",
+          "parts/front/idle/mouth_half_talk.png",
           "parts/front/idle/mouth_open_talk.png",
           "parts/front/idle/left_eye_open.png",
           "parts/front/idle/right_eye_open.png",
@@ -1823,6 +1830,96 @@
           },
           "rotation": 0,
           "parentId": "head"
+        },
+        {
+          "id": "mouth_talk_half",
+          "src": "parts/front/idle/mouth_half_talk.png",
+          "positionPx": {
+            "x": 3.5,
+            "y": 12.5
+          },
+          "size": {
+            "width": 50,
+            "height": 35
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "alpha": 1,
+          "phase": 0.0,
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "mouth": {
+              "mode": "talk",
+              "speed": 8.8,
+              "restAlpha": 0,
+              "minAlpha": 0,
+              "y": 0.15
+            },
+            "rotate": {
+              "amount": 0
+            }
+          },
+          "parentId": "head"
+        },
+        {
+          "id": "mouth_talk_open",
+          "src": "parts/front/idle/mouth_open_talk.png",
+          "positionPx": {
+            "x": 3.5,
+            "y": 12.5
+          },
+          "size": {
+            "width": 50,
+            "height": 35
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "alpha": 1,
+          "phase": 1.35,
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "mouth": {
+              "mode": "talk",
+              "speed": 11.2,
+              "restAlpha": 0,
+              "minAlpha": 0,
+              "y": 0.4
+            },
+            "rotate": {
+              "amount": 0
+            }
+          },
+          "parentId": "head"
         }
       ]
     },
@@ -2733,6 +2830,7 @@
     "working": {
       "base": "fullbody/working.png",
       "layers": [],
+      "extends": "idle",
       "motion": {
         "breathe": {
           "speed": 1.34,
@@ -2780,7 +2878,50 @@
     },
     "happy_tail_wag_front": {
       "base": "sequences/tail_wag_happy_front/frame_000.png",
-      "layers": [],
+      "extends": "idle",
+      "layerOverrides": [
+        {
+          "id": "tail_base",
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "rotate": {
+              "speed": 1.8,
+              "amount": 0.038
+            }
+          }
+        },
+        {
+          "id": "tail_mid",
+          "motion": {
+            "rotate": {
+              "speed": 2.05,
+              "amount": 0.052
+            }
+          }
+        },
+        {
+          "id": "tail_tip",
+          "motion": {
+            "rotate": {
+              "speed": 2.35,
+              "amount": 0.072
+            }
+          }
+        }
+      ],
       "sequence": {
         "fps": 14,
         "loop": true,
@@ -2885,12 +3026,36 @@
       "base": "fullbody/thinking.png",
       "layers": []
     },
+    "front_left15": {
+      "base": "fullbody/front_left15.png",
+      "layers": []
+    },
+    "front_right15": {
+      "base": "fullbody/front_right15.png",
+      "layers": []
+    },
     "front_left60": {
       "base": "fullbody/front_left60.png",
       "layers": []
     },
     "front_right60": {
       "base": "fullbody/front_right60.png",
+      "layers": []
+    },
+    "front_left75": {
+      "base": "fullbody/front_left75.png",
+      "layers": []
+    },
+    "front_right75": {
+      "base": "fullbody/front_right75.png",
+      "layers": []
+    },
+    "front_left85": {
+      "base": "fullbody/front_left85.png",
+      "layers": []
+    },
+    "front_right85": {
+      "base": "fullbody/front_right85.png",
       "layers": []
     },
     "back_left60": {
@@ -3677,6 +3842,94 @@
               "rotate": 0.005
             }
           }
+        },
+        {
+          "id": "mouth_talk_half",
+          "src": "parts/side/left/mouth_half_talk.png",
+          "positionPx": {
+            "x": 50.0,
+            "y": 54.5
+          },
+          "size": {
+            "width": 42,
+            "height": 29
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "alpha": 1,
+          "phase": 0.0,
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "mouth": {
+              "mode": "talk",
+              "speed": 8.8,
+              "restAlpha": 0,
+              "minAlpha": 0,
+              "y": 0.15
+            },
+            "rotate": {
+              "amount": 0
+            }
+          }
+        },
+        {
+          "id": "mouth_talk_open",
+          "src": "parts/side/left/mouth_open_talk.png",
+          "positionPx": {
+            "x": 50.0,
+            "y": 54.5
+          },
+          "size": {
+            "width": 42,
+            "height": 29
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "alpha": 1,
+          "phase": 1.35,
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "mouth": {
+              "mode": "talk",
+              "speed": 11.2,
+              "restAlpha": 0,
+              "minAlpha": 0,
+              "y": 0.4
+            },
+            "rotate": {
+              "amount": 0
+            }
+          }
         }
       ]
     },
@@ -4456,6 +4709,94 @@
               "rotate": 0.005
             }
           }
+        },
+        {
+          "id": "mouth_talk_half",
+          "src": "parts/side/right/mouth_half_talk.png",
+          "positionPx": {
+            "x": 141.5,
+            "y": 54.0
+          },
+          "size": {
+            "width": 45,
+            "height": 28
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "alpha": 1,
+          "phase": 0.0,
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "mouth": {
+              "mode": "talk",
+              "speed": 8.8,
+              "restAlpha": 0,
+              "minAlpha": 0,
+              "y": 0.15
+            },
+            "rotate": {
+              "amount": 0
+            }
+          }
+        },
+        {
+          "id": "mouth_talk_open",
+          "src": "parts/side/right/mouth_open_talk.png",
+          "positionPx": {
+            "x": 141.5,
+            "y": 54.0
+          },
+          "size": {
+            "width": 45,
+            "height": 28
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "alpha": 1,
+          "phase": 1.35,
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "mouth": {
+              "mode": "talk",
+              "speed": 11.2,
+              "restAlpha": 0,
+              "minAlpha": 0,
+              "y": 0.4
+            },
+            "rotate": {
+              "amount": 0
+            }
+          }
         }
       ]
     },
@@ -5221,6 +5562,94 @@
               "x": 1.2,
               "y": 0.7,
               "rotate": 0.006
+            }
+          }
+        },
+        {
+          "id": "mouth_talk_half",
+          "src": "parts/front/left30/mouth_half_talk.png",
+          "positionPx": {
+            "x": 87.0,
+            "y": 67.0
+          },
+          "size": {
+            "width": 78,
+            "height": 42
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "alpha": 1,
+          "phase": 0.0,
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "mouth": {
+              "mode": "talk",
+              "speed": 8.8,
+              "restAlpha": 0,
+              "minAlpha": 0,
+              "y": 0.15
+            },
+            "rotate": {
+              "amount": 0
+            }
+          }
+        },
+        {
+          "id": "mouth_talk_open",
+          "src": "parts/front/left30/mouth_open_talk.png",
+          "positionPx": {
+            "x": 87.0,
+            "y": 67.0
+          },
+          "size": {
+            "width": 78,
+            "height": 42
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "alpha": 1,
+          "phase": 1.35,
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "mouth": {
+              "mode": "talk",
+              "speed": 11.2,
+              "restAlpha": 0,
+              "minAlpha": 0,
+              "y": 0.4
+            },
+            "rotate": {
+              "amount": 0
             }
           }
         }
@@ -5990,6 +6419,94 @@
               "rotate": 0.006
             }
           }
+        },
+        {
+          "id": "mouth_talk_half",
+          "src": "parts/front/right30/mouth_half_talk.png",
+          "positionPx": {
+            "x": 113.0,
+            "y": 67.0
+          },
+          "size": {
+            "width": 78,
+            "height": 42
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "alpha": 1,
+          "phase": 0.0,
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "mouth": {
+              "mode": "talk",
+              "speed": 8.8,
+              "restAlpha": 0,
+              "minAlpha": 0,
+              "y": 0.15
+            },
+            "rotate": {
+              "amount": 0
+            }
+          }
+        },
+        {
+          "id": "mouth_talk_open",
+          "src": "parts/front/right30/mouth_open_talk.png",
+          "positionPx": {
+            "x": 113.0,
+            "y": 67.0
+          },
+          "size": {
+            "width": 78,
+            "height": 42
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "alpha": 1,
+          "phase": 1.35,
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "mouth": {
+              "mode": "talk",
+              "speed": 11.2,
+              "restAlpha": 0,
+              "minAlpha": 0,
+              "y": 0.4
+            },
+            "rotate": {
+              "amount": 0
+            }
+          }
         }
       ]
     },
@@ -6755,6 +7272,94 @@
               "x": 1.2,
               "y": 0.7,
               "rotate": 0.006
+            }
+          }
+        },
+        {
+          "id": "mouth_talk_half",
+          "src": "parts/front/left30/mouth_half_talk.png",
+          "positionPx": {
+            "x": 87.0,
+            "y": 67.0
+          },
+          "size": {
+            "width": 78,
+            "height": 42
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "alpha": 1,
+          "phase": 0.0,
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "mouth": {
+              "mode": "talk",
+              "speed": 8.8,
+              "restAlpha": 0,
+              "minAlpha": 0,
+              "y": 0.15
+            },
+            "rotate": {
+              "amount": 0
+            }
+          }
+        },
+        {
+          "id": "mouth_talk_open",
+          "src": "parts/front/left30/mouth_open_talk.png",
+          "positionPx": {
+            "x": 87.0,
+            "y": 67.0
+          },
+          "size": {
+            "width": 78,
+            "height": 42
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "alpha": 1,
+          "phase": 1.35,
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "mouth": {
+              "mode": "talk",
+              "speed": 11.2,
+              "restAlpha": 0,
+              "minAlpha": 0,
+              "y": 0.4
+            },
+            "rotate": {
+              "amount": 0
             }
           }
         }
@@ -7524,6 +8129,94 @@
               "rotate": 0.006
             }
           }
+        },
+        {
+          "id": "mouth_talk_half",
+          "src": "parts/front/right30/mouth_half_talk.png",
+          "positionPx": {
+            "x": 113.0,
+            "y": 67.0
+          },
+          "size": {
+            "width": 78,
+            "height": 42
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "alpha": 1,
+          "phase": 0.0,
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "mouth": {
+              "mode": "talk",
+              "speed": 8.8,
+              "restAlpha": 0,
+              "minAlpha": 0,
+              "y": 0.15
+            },
+            "rotate": {
+              "amount": 0
+            }
+          }
+        },
+        {
+          "id": "mouth_talk_open",
+          "src": "parts/front/right30/mouth_open_talk.png",
+          "positionPx": {
+            "x": 113.0,
+            "y": 67.0
+          },
+          "size": {
+            "width": 78,
+            "height": 42
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "alpha": 1,
+          "phase": 1.35,
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "mouth": {
+              "mode": "talk",
+              "speed": 11.2,
+              "restAlpha": 0,
+              "minAlpha": 0,
+              "y": 0.4
+            },
+            "rotate": {
+              "amount": 0
+            }
+          }
         }
       ]
     },
@@ -8219,6 +8912,94 @@
               "x": 0,
               "y": 0,
               "rotate": 0
+            }
+          }
+        },
+        {
+          "id": "mouth_talk_half",
+          "src": "parts/front/left45/mouth_half_talk.png",
+          "positionPx": {
+            "x": 90.0,
+            "y": 62.5
+          },
+          "size": {
+            "width": 92,
+            "height": 59
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "alpha": 1,
+          "phase": 0.0,
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "mouth": {
+              "mode": "talk",
+              "speed": 8.8,
+              "restAlpha": 0,
+              "minAlpha": 0,
+              "y": 0.15
+            },
+            "rotate": {
+              "amount": 0
+            }
+          }
+        },
+        {
+          "id": "mouth_talk_open",
+          "src": "parts/front/left45/mouth_open_talk.png",
+          "positionPx": {
+            "x": 90.0,
+            "y": 62.5
+          },
+          "size": {
+            "width": 92,
+            "height": 59
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "alpha": 1,
+          "phase": 1.35,
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "mouth": {
+              "mode": "talk",
+              "speed": 11.2,
+              "restAlpha": 0,
+              "minAlpha": 0,
+              "y": 0.4
+            },
+            "rotate": {
+              "amount": 0
             }
           }
         },
@@ -10508,6 +11289,94 @@
               "x": 0,
               "y": 0,
               "rotate": 0
+            }
+          }
+        },
+        {
+          "id": "mouth_talk_half",
+          "src": "parts/front/right45/mouth_half_talk.png",
+          "positionPx": {
+            "x": 94.5,
+            "y": 62.5
+          },
+          "size": {
+            "width": 83,
+            "height": 59
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "alpha": 1,
+          "phase": 0.0,
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "mouth": {
+              "mode": "talk",
+              "speed": 8.8,
+              "restAlpha": 0,
+              "minAlpha": 0,
+              "y": 0.15
+            },
+            "rotate": {
+              "amount": 0
+            }
+          }
+        },
+        {
+          "id": "mouth_talk_open",
+          "src": "parts/front/right45/mouth_open_talk.png",
+          "positionPx": {
+            "x": 94.5,
+            "y": 62.5
+          },
+          "size": {
+            "width": 83,
+            "height": 59
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "alpha": 1,
+          "phase": 1.35,
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "mouth": {
+              "mode": "talk",
+              "speed": 11.2,
+              "restAlpha": 0,
+              "minAlpha": 0,
+              "y": 0.4
+            },
+            "rotate": {
+              "amount": 0
             }
           }
         },

@@ -12182,9 +12182,20 @@
   top: 0;
   width: 188px;
   border-radius: 8px;
-  padding: 7px;
+  padding: 7px 7px 12px;
   display: grid;
   gap: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 246, 223, .28) transparent;
+}
+.floating-avatar-menu::-webkit-scrollbar {
+  width: 8px;
+}
+.floating-avatar-menu::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 246, 223, .28);
 }
 .floating-avatar-menu button {
   border: 0;
@@ -12293,11 +12304,11 @@
 }
 @keyframes floating-avatar-enter {
   from {
-    transform: translate(-120px, -80px) scale(2.6);
+    transform: translate(-18px, -12px);
     opacity: 0;
   }
   to {
-    transform: translate(0, 0) scale(1);
+    transform: translate(0, 0);
     opacity: 1;
   }
 }
@@ -12398,15 +12409,15 @@
 }
 @keyframes floatingAvatarFlyIn {
   0% {
-    transform: scale(1.8) translateY(-14px);
+    transform: translateY(-10px);
     opacity: 0;
   }
   60% {
-    transform: scale(0.92) translateY(0);
+    transform: translateY(1px);
     opacity: 1;
   }
   100% {
-    transform: scale(1);
+    transform: translateY(0);
     opacity: 1;
   }
 }

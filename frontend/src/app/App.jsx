@@ -403,6 +403,12 @@ const FLOATING_AVATAR_WINDOW_SIZE = FLOATING_AVATAR_SIZE + FLOATING_AVATAR_INSET
 const FLOATING_AVATAR_PANEL_W = 720;
 const FLOATING_AVATAR_PANEL_H = 540;
 const FLOATING_AVATAR_LEFT_TIP_ROOM = 260;
+const FLOATING_AVATAR_BODY_W = 200;
+const FLOATING_AVATAR_BODY_H = 360;
+const FLOATING_AVATAR_BODY_WINDOW_W = 720;
+const FLOATING_AVATAR_BODY_WINDOW_H = 560;
+const FLOATING_AVATAR_BODY_LOCAL_X = Math.round((FLOATING_AVATAR_BODY_WINDOW_W - FLOATING_AVATAR_BODY_W) / 2);
+const FLOATING_AVATAR_BODY_LOCAL_Y = 180;
 const IS_WINDOWS_RUNTIME = typeof window !== 'undefined' && /\bWindows\b/i.test(window.navigator?.userAgent || '');
 // v2.7：Windows 改走 mac 接法——主視窗直接變形成無框透明置頂浮窗，
 // React 前端（含 Pixi 動態全身像）繼續在同一個 webview 裡渲染。
@@ -8465,7 +8471,7 @@ function App() {
 
   // 單擊頭像展開迷你框時，把浮窗放大到面板尺寸；關閉時縮回頭像尺寸。
   // 視窗會貼著頭像展開，並自動避開螢幕右/下邊緣，頭像螢幕位置維持不變。
-  async function setCompactAvatarExpanded(open) {
+  async function setCompactAvatarExpanded(open, detail = {}) {
     if (!floatingAvatarCompactWindowRef.current) return;
     const ref = floatingAvatarWindowRef.current;
     if (!ref) return;
@@ -8485,18 +8491,22 @@ function App() {
     }
     try {
       if (open) {
-        if (ref.expanded) return;
-        // compact 模式可由原生 draggable 移動，展開前先同步真實視窗位置。
-        const livePosition = await WindowGetPosition().catch(() => null);
-        const origin = clampFloatingAvatarScreenPosition(
-          Number.isFinite(livePosition?.x) && Number.isFinite(livePosition?.y)
-            ? livePosition
-            : ref.compactPosition || {x: 0, y: 0}
-        );
-        ref.compactPosition = origin;
-        rememberFloatingAvatarCompactPosition(origin);
-        const avatarScreenX = origin.x + FLOATING_AVATAR_INSET;
-        const avatarScreenY = origin.y + FLOATING_AVATAR_INSET;
+        const bodyViewport = (detail?.body || floatingAvatarBodyMode === 'full') && !detail?.panel;
+        let avatarScreenX = ref.expanded?.avatarScreenX;
+        let avatarScreenY = ref.expanded?.avatarScreenY;
+        if (!Number.isFinite(avatarScreenX) || !Number.isFinite(avatarScreenY)) {
+          // compact 模式可由原生 draggable 移動，展開前先同步真實視窗位置。
+          const livePosition = await WindowGetPosition().catch(() => null);
+          const origin = clampFloatingAvatarScreenPosition(
+            Number.isFinite(livePosition?.x) && Number.isFinite(livePosition?.y)
+              ? livePosition
+              : ref.compactPosition || {x: 0, y: 0}
+          );
+          ref.compactPosition = origin;
+          rememberFloatingAvatarCompactPosition(origin);
+          avatarScreenX = origin.x + FLOATING_AVATAR_INSET;
+          avatarScreenY = origin.y + FLOATING_AVATAR_INSET;
+        }
         const screens = await ScreenGetAll().catch(() => []);
         const currentScreen = (screens || []).find((item) => item?.isCurrent) || (screens || []).find((item) => item?.isPrimary) || null;
         // 視窗展開後保留上方回覆泡泡、左側提示、右側迷你框與下方選項，
@@ -8506,10 +8516,12 @@ function App() {
         const screenTop = firstFiniteNumber(window.screen?.availTop, window.screen?.top);
         const screenWidth = firstFiniteNumber(window.screen?.availWidth, currentScreen?.width, window.innerWidth) || FLOATING_AVATAR_PANEL_W;
         const screenHeight = firstFiniteNumber(window.screen?.availHeight, currentScreen?.height, window.innerHeight) || FLOATING_AVATAR_PANEL_H;
-        const expandedW = Math.min(FLOATING_AVATAR_PANEL_W, screenWidth);
-        const expandedH = Math.min(FLOATING_AVATAR_PANEL_H, screenHeight);
-        let newX = avatarScreenX - FLOATING_AVATAR_LEFT_TIP_ROOM;
-        let newY = avatarScreenY - TOP_ROOM;
+        const expandedW = Math.min(bodyViewport ? FLOATING_AVATAR_BODY_WINDOW_W : FLOATING_AVATAR_PANEL_W, screenWidth);
+        const expandedH = Math.min(bodyViewport ? FLOATING_AVATAR_BODY_WINDOW_H : FLOATING_AVATAR_PANEL_H, screenHeight);
+        const preferredLocalX = bodyViewport ? FLOATING_AVATAR_BODY_LOCAL_X : FLOATING_AVATAR_LEFT_TIP_ROOM;
+        const preferredLocalY = bodyViewport ? FLOATING_AVATAR_BODY_LOCAL_Y : TOP_ROOM;
+        let newX = avatarScreenX - preferredLocalX;
+        let newY = avatarScreenY - preferredLocalY;
         if (Number.isFinite(screenLeft)) {
           const minX = screenLeft;
           const maxX = screenLeft + screenWidth - expandedW;
@@ -8520,9 +8532,12 @@ function App() {
           const maxY = screenTop + screenHeight - expandedH;
           newY = Math.max(Math.min(newY, Math.max(minY, maxY)), Math.min(minY, maxY));
         }
-        const avatarLocalX = avatarScreenX - newX;
-        const avatarLocalY = avatarScreenY - newY;
-        ref.expanded = {avatarScreenX, avatarScreenY};
+        const avatarLocalX = bodyViewport ? FLOATING_AVATAR_BODY_LOCAL_X : avatarScreenX - newX;
+        const avatarLocalY = bodyViewport ? FLOATING_AVATAR_BODY_LOCAL_Y : avatarScreenY - newY;
+        ref.expanded = {
+          avatarScreenX: Math.round(newX + avatarLocalX),
+          avatarScreenY: Math.round(newY + avatarLocalY),
+        };
         WindowSetSize(expandedW, expandedH);
         WindowSetPosition(Math.round(newX), Math.round(newY));
         const expandedAvatarPosition = {x: Math.round(avatarLocalX), y: Math.round(avatarLocalY)};
@@ -8824,7 +8839,7 @@ function App() {
       // 全身像預設維持靜態（不自動勾動態）；使用者要動態自行勾選。
       // 仍需把 macOS 原生浮窗展開到足夠容納 200×360 立繪，否則高瘦身體會被 128px 方窗裁掉看似消失。
       if (ENABLE_NATIVE_FLOATING_AVATAR_WINDOW && floatingAvatarModeRef.current) {
-        await setCompactAvatarExpanded(true).catch((error) => {
+        await setCompactAvatarExpanded(true, {body: true}).catch((error) => {
           console.warn('expand floating avatar for full body failed', error);
         });
         // 視窗尺寸變更後重套一次透明置頂參數（幂等），避免 WKWebView 合成殘留。

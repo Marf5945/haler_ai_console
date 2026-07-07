@@ -10755,11 +10755,7 @@
   transition: opacity .18s ease;
 }
 
-.floating-avatar-pixi-backstop-ready {
-  opacity: 0;
-}
-
-/* 搔癢模式：整個頭像框改用「手」游標，暗示可以左鍵點/滑過身體搔癢。 */
+/* Pixi 角色靠近即可互動，游標提示可拖曳/觸摸。 */
 .floating-avatar-button.floating-avatar-tickling {
   cursor: grab;
 }

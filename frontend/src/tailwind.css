@@ -12575,9 +12575,6 @@
   opacity: 1;
   transition: opacity .18s ease;
 }
-.floating-avatar-pixi-backstop-ready {
-  opacity: 0;
-}
 .floating-avatar-button.floating-avatar-tickling {
   cursor: grab;
 }

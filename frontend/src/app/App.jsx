@@ -470,6 +470,49 @@ function clampFloatingAvatarScreenPosition(position, width = FLOATING_AVATAR_WIN
   };
 }
 
+function currentFloatingAvatarScreenBounds(width = FLOATING_AVATAR_WINDOW_SIZE, height = FLOATING_AVATAR_WINDOW_SIZE) {
+  const left = firstFiniteNumber(window.screen?.availLeft, window.screen?.left, 0);
+  const top = firstFiniteNumber(window.screen?.availTop, window.screen?.top, 0);
+  const screenWidth = firstFiniteNumber(window.screen?.availWidth, window.screen?.width, window.innerWidth, width);
+  const screenHeight = firstFiniteNumber(window.screen?.availHeight, window.screen?.height, window.innerHeight, height);
+  if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(screenWidth) || !Number.isFinite(screenHeight)) {
+    return null;
+  }
+  return {left, top, right: left + screenWidth, bottom: top + screenHeight, width: screenWidth, height: screenHeight};
+}
+
+function pointInsideFloatingAvatarScreen(point, bounds) {
+  if (!bounds || !Number.isFinite(point?.x) || !Number.isFinite(point?.y)) return false;
+  return point.x >= bounds.left && point.x <= bounds.right && point.y >= bounds.top && point.y <= bounds.bottom;
+}
+
+function roundFloatingAvatarScreenPosition(position, fallback = {x: 0, y: 0}) {
+  return {
+    x: Math.round(Number.isFinite(position?.x) ? Number(position.x) : Number(fallback?.x || 0)),
+    y: Math.round(Number.isFinite(position?.y) ? Number(position.y) : Number(fallback?.y || 0)),
+  };
+}
+
+function clampFloatingAvatarAnchorPosition(anchor, width = FLOATING_AVATAR_SIZE, height = FLOATING_AVATAR_SIZE) {
+  const raw = roundFloatingAvatarScreenPosition(anchor);
+  const bounds = currentFloatingAvatarScreenBounds(width, height);
+  if (!pointInsideFloatingAvatarScreen(raw, bounds)) {
+    return raw;
+  }
+  return {
+    x: Math.round(clampNumber(raw.x, bounds.left, bounds.right - width)),
+    y: Math.round(clampNumber(raw.y, bounds.top, bounds.bottom - height)),
+  };
+}
+
+function compactWindowPositionFromAvatarAnchor(anchor) {
+  const safeAnchor = clampFloatingAvatarAnchorPosition(anchor, FLOATING_AVATAR_SIZE, FLOATING_AVATAR_SIZE);
+  return {
+    x: Math.round(safeAnchor.x - FLOATING_AVATAR_INSET),
+    y: Math.round(safeAnchor.y - FLOATING_AVATAR_INSET),
+  };
+}
+
 const fallbackState = {
   /* i18n: fallbackState */ greeting: _t('greeting.hello'),
   statusRail: {text: _t('greeting.hello'), layer: 'L1', degraded: true, lockedCount: 0},
@@ -2327,6 +2370,7 @@ function App() {
   });
   const floatingAvatarModeRef = useRef(floatingAvatarMode);
   const floatingAvatarCompactWindowRef = useRef(floatingAvatarCompactWindow);
+  const floatingAvatarBodyModeRef = useRef(floatingAvatarBodyMode);
   const floatingAvatarPositionRef = useRef(floatingAvatarPosition);
   const floatingAvatarTransitionRef = useRef(false);
   const floatingAvatarChatModeRef = useRef(floatingAvatarChatMode);
@@ -2334,6 +2378,7 @@ function App() {
   const floatingAvatarChatRequestSeqRef = useRef(0);
   floatingAvatarModeRef.current = floatingAvatarMode;
   floatingAvatarCompactWindowRef.current = floatingAvatarCompactWindow;
+  floatingAvatarBodyModeRef.current = floatingAvatarBodyMode;
   floatingAvatarPositionRef.current = floatingAvatarPosition;
   floatingAvatarChatModeRef.current = floatingAvatarChatMode;
 
@@ -8248,9 +8293,9 @@ function App() {
       const avatarPosition = floatingAvatarCenterPosition();
       const avatarX = Number(avatarPosition.x);
       const avatarY = Number(avatarPosition.y);
-      const compactPosition = clampFloatingAvatarScreenPosition({
-        x: Math.round((windowPosition?.x ?? 0) + avatarX - FLOATING_AVATAR_INSET),
-        y: Math.round((windowPosition?.y ?? 0) + avatarY - FLOATING_AVATAR_INSET),
+      const compactPosition = compactWindowPositionFromAvatarAnchor({
+        x: Math.round((windowPosition?.x ?? 0) + avatarX),
+        y: Math.round((windowPosition?.y ?? 0) + avatarY),
       });
       const compactX = compactPosition.x;
       const compactY = compactPosition.y;
@@ -8308,22 +8353,19 @@ function App() {
 
       const screens = await ScreenGetAll().catch(() => []);
       const currentScreen = (screens || []).find((item) => item?.isCurrent) || (screens || []).find((item) => item?.isPrimary) || null;
-      const screenLeft = firstFiniteNumber(window.screen?.availLeft, window.screen?.left);
-      const screenTop = firstFiniteNumber(window.screen?.availTop, window.screen?.top);
       const screenWidth = firstFiniteNumber(window.screen?.availWidth, currentScreen?.width, window.innerWidth) || FLOATING_AVATAR_PANEL_W;
       const screenHeight = firstFiniteNumber(window.screen?.availHeight, currentScreen?.height, window.innerHeight) || FLOATING_AVATAR_PANEL_H;
       const panelW = Math.min(FLOATING_AVATAR_PANEL_W, screenWidth);
       const panelH = Math.min(FLOATING_AVATAR_PANEL_H, screenHeight);
       let panelX = avatarScreenX - FLOATING_AVATAR_LEFT_TIP_ROOM;
       let panelY = avatarScreenY - 118;
-      if (Number.isFinite(screenLeft)) {
-        const minX = screenLeft;
-        const maxX = screenLeft + screenWidth - panelW;
+      const knownBounds = currentFloatingAvatarScreenBounds(panelW, panelH);
+      if (pointInsideFloatingAvatarScreen({x: avatarScreenX, y: avatarScreenY}, knownBounds)) {
+        const minX = knownBounds.left;
+        const maxX = knownBounds.right - panelW;
+        const minY = knownBounds.top;
+        const maxY = knownBounds.bottom - panelH;
         panelX = Math.max(Math.min(panelX, Math.max(minX, maxX)), Math.min(minX, maxX));
-      }
-      if (Number.isFinite(screenTop)) {
-        const minY = screenTop;
-        const maxY = screenTop + screenHeight - panelH;
         panelY = Math.max(Math.min(panelY, Math.max(minY, maxY)), Math.min(minY, maxY));
       }
 
@@ -8385,7 +8427,10 @@ function App() {
     const expandedState = floatingAvatarWindowRef.current?.expanded;
     const compactLivePosition = await WindowGetPosition().catch(() => null);
     if (!expandedState && Number.isFinite(compactLivePosition?.x) && Number.isFinite(compactLivePosition?.y)) {
-      const compactSafePosition = clampFloatingAvatarScreenPosition(compactLivePosition);
+      const compactSafePosition = compactWindowPositionFromAvatarAnchor({
+        x: Number(compactLivePosition.x) + FLOATING_AVATAR_INSET,
+        y: Number(compactLivePosition.y) + FLOATING_AVATAR_INSET,
+      });
       rememberFloatingAvatarCompactPosition(compactSafePosition);
       floatingAvatarWindowRef.current = {
         ...floatingAvatarWindowRef.current,
@@ -8497,7 +8542,7 @@ function App() {
         if (!Number.isFinite(avatarScreenX) || !Number.isFinite(avatarScreenY)) {
           // compact 模式可由原生 draggable 移動，展開前先同步真實視窗位置。
           const livePosition = await WindowGetPosition().catch(() => null);
-          const origin = clampFloatingAvatarScreenPosition(
+          const origin = roundFloatingAvatarScreenPosition(
             Number.isFinite(livePosition?.x) && Number.isFinite(livePosition?.y)
               ? livePosition
               : ref.compactPosition || {x: 0, y: 0}
@@ -8512,8 +8557,6 @@ function App() {
         // 視窗展開後保留上方回覆泡泡、左側提示、右側迷你框與下方選項，
         // 並讓頭像螢幕位置在展開前後維持不變（不會跳）。
         const TOP_ROOM = 118;
-        const screenLeft = firstFiniteNumber(window.screen?.availLeft, window.screen?.left);
-        const screenTop = firstFiniteNumber(window.screen?.availTop, window.screen?.top);
         const screenWidth = firstFiniteNumber(window.screen?.availWidth, currentScreen?.width, window.innerWidth) || FLOATING_AVATAR_PANEL_W;
         const screenHeight = firstFiniteNumber(window.screen?.availHeight, currentScreen?.height, window.innerHeight) || FLOATING_AVATAR_PANEL_H;
         const expandedW = Math.min(bodyViewport ? FLOATING_AVATAR_BODY_WINDOW_W : FLOATING_AVATAR_PANEL_W, screenWidth);
@@ -8522,14 +8565,14 @@ function App() {
         const preferredLocalY = bodyViewport ? FLOATING_AVATAR_BODY_LOCAL_Y : TOP_ROOM;
         let newX = avatarScreenX - preferredLocalX;
         let newY = avatarScreenY - preferredLocalY;
-        if (Number.isFinite(screenLeft)) {
-          const minX = screenLeft;
-          const maxX = screenLeft + screenWidth - expandedW;
+        const knownBounds = currentFloatingAvatarScreenBounds(expandedW, expandedH);
+        const anchorPoint = {x: avatarScreenX, y: avatarScreenY};
+        if (pointInsideFloatingAvatarScreen(anchorPoint, knownBounds)) {
+          const minX = knownBounds.left;
+          const maxX = knownBounds.right - expandedW;
+          const minY = knownBounds.top;
+          const maxY = knownBounds.bottom - expandedH;
           newX = Math.max(Math.min(newX, Math.max(minX, maxX)), Math.min(minX, maxX));
-        }
-        if (Number.isFinite(screenTop)) {
-          const minY = screenTop;
-          const maxY = screenTop + screenHeight - expandedH;
           newY = Math.max(Math.min(newY, Math.max(minY, maxY)), Math.min(minY, maxY));
         }
         const avatarLocalX = bodyViewport ? FLOATING_AVATAR_BODY_LOCAL_X : avatarScreenX - newX;
@@ -8546,10 +8589,7 @@ function App() {
       } else {
         if (!ref.expanded) return;
         const {avatarScreenX, avatarScreenY} = ref.expanded;
-        const nextCompact = clampFloatingAvatarScreenPosition({
-          x: Math.round(avatarScreenX - FLOATING_AVATAR_INSET),
-          y: Math.round(avatarScreenY - FLOATING_AVATAR_INSET),
-        });
+        const nextCompact = compactWindowPositionFromAvatarAnchor({x: avatarScreenX, y: avatarScreenY});
         WindowSetSize(FLOATING_AVATAR_WINDOW_SIZE, FLOATING_AVATAR_WINDOW_SIZE);
         WindowSetPosition(nextCompact.x, nextCompact.y);
         ref.compactPosition = nextCompact;
@@ -8582,7 +8622,21 @@ function App() {
       floatingAvatarDragFrameRef.current = 0;
     }
     floatingAvatarPendingWindowPositionRef.current = null;
-    floatingAvatarDragWindowRef.current = floatingAvatarWindowRef.current?.compactPosition || null;
+    const ref = floatingAvatarWindowRef.current || {};
+    const avatarLocal = floatingAvatarPositionRef.current || {};
+    if (ref.expanded && Number.isFinite(ref.expanded.avatarScreenX) && Number.isFinite(ref.expanded.avatarScreenY)) {
+      const avatarLocalX = Number.isFinite(avatarLocal.x) ? Number(avatarLocal.x) : FLOATING_AVATAR_INSET;
+      const avatarLocalY = Number.isFinite(avatarLocal.y) ? Number(avatarLocal.y) : FLOATING_AVATAR_INSET;
+      floatingAvatarDragWindowRef.current = {
+        x: Math.round(ref.expanded.avatarScreenX - avatarLocalX),
+        y: Math.round(ref.expanded.avatarScreenY - avatarLocalY),
+        expanded: true,
+        avatarLocalX,
+        avatarLocalY,
+      };
+      return;
+    }
+    floatingAvatarDragWindowRef.current = roundFloatingAvatarScreenPosition(ref.compactPosition || null);
   }
 
   function flushCompactFloatingAvatarDragPosition() {
@@ -8595,15 +8649,41 @@ function App() {
   function moveCompactFloatingAvatarWindow(dx, dy) {
     const start = floatingAvatarDragWindowRef.current;
     if (!start) return;
-    const next = clampFloatingAvatarScreenPosition({
+    const rawWindow = {
       x: Math.round(start.x + dx),
       y: Math.round(start.y + dy),
-    });
-    floatingAvatarWindowRef.current = {
-      ...floatingAvatarWindowRef.current,
-      compactPosition: next,
     };
-    rememberFloatingAvatarCompactPosition(next);
+    let next = rawWindow;
+    if (start.expanded) {
+      const bodyMode = floatingAvatarBodyModeRef.current === 'full';
+      const avatarW = bodyMode ? FLOATING_AVATAR_BODY_W : FLOATING_AVATAR_SIZE;
+      const avatarH = bodyMode ? FLOATING_AVATAR_BODY_H : FLOATING_AVATAR_SIZE;
+      const anchor = clampFloatingAvatarAnchorPosition({
+        x: rawWindow.x + start.avatarLocalX,
+        y: rawWindow.y + start.avatarLocalY,
+      }, avatarW, avatarH);
+      next = {
+        x: Math.round(anchor.x - start.avatarLocalX),
+        y: Math.round(anchor.y - start.avatarLocalY),
+      };
+      floatingAvatarWindowRef.current = {
+        ...floatingAvatarWindowRef.current,
+        expanded: {
+          avatarScreenX: Math.round(next.x + start.avatarLocalX),
+          avatarScreenY: Math.round(next.y + start.avatarLocalY),
+        },
+      };
+    } else {
+      next = compactWindowPositionFromAvatarAnchor({
+        x: rawWindow.x + FLOATING_AVATAR_INSET,
+        y: rawWindow.y + FLOATING_AVATAR_INSET,
+      });
+      floatingAvatarWindowRef.current = {
+        ...floatingAvatarWindowRef.current,
+        compactPosition: next,
+      };
+      rememberFloatingAvatarCompactPosition(next);
+    }
     floatingAvatarPendingWindowPositionRef.current = next;
     if (!floatingAvatarDragFrameRef.current) {
       floatingAvatarDragFrameRef.current = window.requestAnimationFrame(() => {
@@ -8621,11 +8701,25 @@ function App() {
     flushCompactFloatingAvatarDragPosition();
     const livePosition = await WindowGetPosition().catch(() => null);
     if (!Number.isFinite(livePosition?.x) || !Number.isFinite(livePosition?.y)) return;
-    const next = clampFloatingAvatarScreenPosition(livePosition);
-    floatingAvatarWindowRef.current = {
-      ...floatingAvatarWindowRef.current,
-      compactPosition: next,
-    };
+    const ref = floatingAvatarWindowRef.current || {};
+    if (ref.expanded) {
+      const avatarLocal = floatingAvatarPositionRef.current || {};
+      const avatarLocalX = Number.isFinite(avatarLocal.x) ? Number(avatarLocal.x) : FLOATING_AVATAR_INSET;
+      const avatarLocalY = Number.isFinite(avatarLocal.y) ? Number(avatarLocal.y) : FLOATING_AVATAR_INSET;
+      floatingAvatarWindowRef.current = {
+        ...ref,
+        expanded: {
+          avatarScreenX: Math.round(livePosition.x + avatarLocalX),
+          avatarScreenY: Math.round(livePosition.y + avatarLocalY),
+        },
+      };
+      return;
+    }
+    const next = compactWindowPositionFromAvatarAnchor({
+      x: Number(livePosition.x) + FLOATING_AVATAR_INSET,
+      y: Number(livePosition.y) + FLOATING_AVATAR_INSET,
+    });
+    floatingAvatarWindowRef.current = {...ref, compactPosition: next};
     rememberFloatingAvatarCompactPosition(next);
   }
 

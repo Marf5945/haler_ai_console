@@ -227,12 +227,17 @@ export function resolveAvatarMotionManifest(pack, state, fallbackSrc = '') {
     .filter((layer) => layer.src);
 
   const usesStateSequence = Boolean(stateSequence?.frames?.length);
+  const turnRigEnabled = manifest.turnRigEnabled !== false;
+  const poseRigEnabled = manifest.poseRigEnabled !== false;
+  const shyRigEnabled = manifest.shyRigEnabled !== false;
+  const walkRigEnabled = manifest.walkRigEnabled !== false;
   const sharedRigInteractive = stateManifest.interactive !== false
     && !usesStateSequence
+    && turnRigEnabled
     && Boolean(manifest.turnRigContract?.transitionOrder?.length);
-  const interactive = stateManifest.interactive === true
+  const interactive = turnRigEnabled && (stateManifest.interactive === true
     || activeState === 'idle'
-    || sharedRigInteractive;
+    || sharedRigInteractive);
   const turnStates = interactive
     ? TURN_LADDER
       .map((t) => {
@@ -242,14 +247,16 @@ export function resolveAvatarMotionManifest(pack, state, fallbackSrc = '') {
       .filter(Boolean)
     : [];
   const poseStates = interactive
+    && poseRigEnabled
     ? POSE_STATES.map((id) => resolveSubState(entry, id)).filter(Boolean)
     : [];
   const shyStates = interactive
+    && shyRigEnabled
     ? SHY_SEQUENCE.map((id) => resolveSubState(entry, id)).filter(Boolean)
     : [];
-  const walkFrames = interactive ? walkFrameURLs(entry.folder) : [];
-  const walkStartFrames = interactive ? sequenceFrameURLs(entry.folder, 'walk_start') : [];
-  const walkStopFrames = interactive ? sequenceFrameURLs(entry.folder, 'walk_stop') : [];
+  const walkFrames = interactive && walkRigEnabled ? walkFrameURLs(entry.folder) : [];
+  const walkStartFrames = interactive && walkRigEnabled ? sequenceFrameURLs(entry.folder, 'walk_start') : [];
+  const walkStopFrames = interactive && walkRigEnabled ? sequenceFrameURLs(entry.folder, 'walk_stop') : [];
 
   return {
     ...manifest,

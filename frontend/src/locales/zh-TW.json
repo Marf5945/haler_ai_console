@@ -1495,6 +1495,7 @@
     "restoredPending": "已恢復主系統，請優先確認待處理事項。",
     "restoredLatest": "已恢復主系統，定位到最近任務。",
     "shakeTooLong": "住手，快吐了。",
+    "petLove": "我最喜歡主人了！",
     "closeDialogLabel": "後台頭像模式",
     "closeDialogTitle": "關閉前：要進入後台嗎？",
     "closeDialogHintBefore": "選「進入後台」會把主系統縮成可拖曳頭像；若有啟用中的排程，也會保留排程喚醒。",

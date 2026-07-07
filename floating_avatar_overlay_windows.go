@@ -1119,12 +1119,21 @@ func drawAnimatedOverlayAvatar(canvas *image.RGBA, avatar image.Image, base imag
 		drawRoundedRectOutline(canvas, glow, 12, color.RGBA{R: 119, G: 215, B: 208, A: 130})
 		drawRoundedRectOutline(canvas, glow.Inset(2), 10, color.RGBA{R: 255, G: 210, B: 129, A: 95})
 	}
-	if normalizeOverlayMode(mode) == "full" && (dynamicActive || petActive) {
+	if normalizeOverlayMode(mode) == "full" && (dynamicActive || petActive) && allowOverlayRectRig(pack) {
 		if drawRiggedOverlayAvatar(canvas, avatar, dest, pack, motionSeconds, petActive) {
 			return
 		}
 	}
 	drawOverlayImageAt(canvas, dest.Min.X, dest.Min.Y, avatar, avatar.Bounds())
+}
+
+func allowOverlayRectRig(pack string) bool {
+	switch pack {
+	case "uncle", "uncle_bust", "secretary", "police", "touharu":
+		return true
+	default:
+		return false
+	}
 }
 
 func drawRiggedOverlayAvatar(canvas *image.RGBA, avatar image.Image, dest image.Rectangle, pack string, motionSeconds float64, petActive bool) bool {

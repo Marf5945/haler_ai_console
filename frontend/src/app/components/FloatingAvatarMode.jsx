@@ -147,9 +147,9 @@ export default function FloatingAvatarMode({
   const [bubbleDismissed, setBubbleDismissed] = useState(false);
   const [installArmed, setInstallArmed] = useState(false);
   const [scheduleConfirmPending, setScheduleConfirmPending] = useState(false);
-  const [tickleMode, setTickleMode] = useState(false);
   const [pixiReady, setPixiReady] = useState(false);
   const [attentionPaused, setAttentionPaused] = useState(false);
+  const [petLoveVisible, setPetLoveVisible] = useState(false);
   const setBodyMode = onBodyModeChange || (() => {});
   const showBody = bodyMode !== 'head';
   const bodyAvatarSrc = fullBodyAvatarSrc || fullBodyMotionManifest?.baseSrc || '';
@@ -162,13 +162,15 @@ export default function FloatingAvatarMode({
       : dynamicImageEnabled
         ? 'css-motion'
         : 'static';
-  const tickleActive = tickleMode && usePixiAvatar;
+  const tickleActive = usePixiAvatar;
+  const petLoveEnabled = usePixiAvatar && fullBodyMotionManifest?.id === 'yulesaku';
   const avatarFrameWidth = showBody ? fullBodyAvatarWidth : avatarSize;
   const avatarFrameHeight = showBody ? fullBodyAvatarHeight : avatarSize;
   const rootRef = useRef(null);
   const dragRef = useRef(null);
   const clickTimerRef = useRef(null);
   const shakeResetRef = useRef(null);
+  const petLoveTimerRef = useRef(null);
   const previousFrameRef = useRef(null);
   const shakeRef = useRef({startedAt: 0, lastPoint: null, distance: 0, previewFired: false, vomitFired: false});
 
@@ -277,6 +279,7 @@ export default function FloatingAvatarMode({
   useEffect(() => () => {
     if (clickTimerRef.current) window.clearTimeout(clickTimerRef.current);
     if (shakeResetRef.current) window.clearTimeout(shakeResetRef.current);
+    if (petLoveTimerRef.current) window.clearTimeout(petLoveTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -291,11 +294,7 @@ export default function FloatingAvatarMode({
     if (!panelOpen) setScheduleConfirmPending(false);
   }, [panelOpen]);
 
-  // 離開 Pixi 全身動態時自動關閉搔癢模式（靜態頭像沒得搔）。
-  useEffect(() => {
-    if (!usePixiAvatar && tickleMode) setTickleMode(false);
-  }, [usePixiAvatar, tickleMode]);
-
+  // Pixi 舞台重建時先退回 backstop，避免短暫顯示過期姿勢。
   useEffect(() => {
     setPixiReady(false);
   }, [avatarExpression, fullBodyMotionManifest?.id, fullBodyMotionManifest?.state, usePixiAvatar]);
@@ -370,9 +369,10 @@ export default function FloatingAvatarMode({
   const shakeMessage = shakeDialogue || (shakeState === 'speechless' ? t('floatingAvatar.shakeTooLong') : '');
   const attentionBubbleText = attentionPaused ? '主人，今天好嗎？' : '';
   const cleanBubbleText = String(shakeMessage || bubbleText || '').replace(/^Ai[:：]\s*/, '').trim();
-  const displayedBubbleText = attentionBubbleText || cleanBubbleText;
-  const topBubbleVisible = (compactWindowMode || attentionPaused) && displayedBubbleText && (attentionPaused || !bubbleDismissed || shakeMessageVisible);
-  const topBubbleOffset = showBody ? 168 : 92;
+  const petLoveText = petLoveVisible ? t('floatingAvatar.petLove') : '';
+  const displayedBubbleText = petLoveText || attentionBubbleText || cleanBubbleText;
+  const topBubbleVisible = (compactWindowMode || attentionPaused || petLoveVisible) && displayedBubbleText && (petLoveVisible || attentionPaused || !bubbleDismissed || shakeMessageVisible);
+  const topBubbleOffset = showBody ? 88 : 92;
   const topBubbleStyle = {
     left: clamp(clampedPosition.x - 124, edgeGap, Math.max(edgeGap, window.innerWidth - 318)),
     top: clamp(clampedPosition.y - topBubbleOffset, edgeGap, Math.max(edgeGap, window.innerHeight - 92)),
@@ -398,6 +398,17 @@ export default function FloatingAvatarMode({
   function noteAction() {
     if (guideVisible) setGuideVisible(false);
     if (bubbleDismissed === false) setBubbleDismissed(true);
+  }
+
+  function showPetLoveBubble() {
+    if (!petLoveEnabled) return;
+    if (petLoveTimerRef.current) window.clearTimeout(petLoveTimerRef.current);
+    setBubbleDismissed(false);
+    setPetLoveVisible(true);
+    petLoveTimerRef.current = window.setTimeout(() => {
+      setPetLoveVisible(false);
+      petLoveTimerRef.current = null;
+    }, 4200);
   }
 
   function updateDragShake(clientX, clientY) {
@@ -441,7 +452,6 @@ export default function FloatingAvatarMode({
 
   function startDrag(event) {
     if (event.button !== 0) return;
-    if (tickleActive) return; // 搔癢模式下左鍵交給 Pixi 搔癢，不拖曳視窗
     if (guideVisible) setGuideVisible(false);
     onCompactDragStart?.();
     if (shakeResetRef.current) {
@@ -510,7 +520,6 @@ export default function FloatingAvatarMode({
   // 用 220ms 計時器分辨單擊與雙擊，雙擊時取消尚未觸發的單擊動作。
   function performSingleClick() {
     if (dragRef.current?.moved) return;
-    if (tickleActive) return; // 搔癢模式下單擊只搔癢，不開迷你框
     setBubbleDismissed(true);
     setGuideVisible(true);
     setPanelOpen((open) => !open);
@@ -610,18 +619,20 @@ export default function FloatingAvatarMode({
           {showBody ? (
             usePixiAvatar ? (
               <span className="floating-avatar-pixi-shell">
-                <img
-                  className={`floating-avatar-img floating-avatar-pixi-backstop ${pixiReady ? 'floating-avatar-pixi-backstop-ready' : ''}`}
-                  src={bodyAvatarSrc || bodyFallbackSrc || avatarSrc}
-                  alt=""
-                  draggable={false}
-                  onError={(event) => {
-                    const fallback = bodyFallbackSrc || avatarSrc;
-                    if (fallback && event.currentTarget.src !== fallback) {
-                      event.currentTarget.src = fallback;
-                    }
-                  }}
-                />
+                {!pixiReady && (
+                  <img
+                    className="floating-avatar-img floating-avatar-pixi-backstop"
+                    src={bodyAvatarSrc || bodyFallbackSrc || avatarSrc}
+                    alt=""
+                    draggable={false}
+                    onError={(event) => {
+                      const fallback = bodyFallbackSrc || avatarSrc;
+                      if (fallback && event.currentTarget.src !== fallback) {
+                        event.currentTarget.src = fallback;
+                      }
+                    }}
+                  />
+                )}
                 <PixiStageErrorBoundary
                   resetKey={`${fullBodyMotionManifest?.id || ''}|${fullBodyAvatarKey}|${bodyMode}|${avatarExpression}`}
                   fallback={(
@@ -642,6 +653,7 @@ export default function FloatingAvatarMode({
                     tickle={tickleActive}
                     onReady={() => setPixiReady(true)}
                     onAttentionPauseChange={setAttentionPaused}
+                    onPetComplete={showPetLoveBubble}
                   />
                 </PixiStageErrorBoundary>
               </span>
@@ -711,20 +723,6 @@ export default function FloatingAvatarMode({
             >
               {menuCheck(dynamicImageEnabled, t('floatingAvatar.bodyDynamic'))}
             </button>
-            {usePixiAvatar && (
-              <button
-                type="button"
-                className={tickleMode ? 'floating-avatar-body-active-btn' : ''}
-                aria-pressed={tickleMode}
-                onClick={() => {
-                  setTickleMode((on) => !on);
-                  setReminderPickerOpen(false);
-                  setAgentPickerOpen(false);
-                }}
-              >
-                {menuCheck(tickleMode, t('floatingAvatar.tickleInteraction'))}
-              </button>
-            )}
             <button
               type="button"
               onClick={() => {

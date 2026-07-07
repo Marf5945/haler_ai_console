@@ -20,13 +20,17 @@ const TURN_EASE_RATE = 4.2;
 const TURN_FAST_STEP_DELAY_MS = 180;
 const TURN_SLOW_STEP_DELAY_MS = 280;
 const TURN_CENTER_STEP_DELAY_MS = 80;
+const ATTENTION_TURN_STEP_DELAY_MS = 330;
 const POSE_FADE_IN_RATE = 9;
 const POSE_FADE_OUT_RATE = 8;
 const TURN_FADE_IN_RATE = 8;
 const TURN_FADE_OUT_RATE = 10;
 const TURN_FADE_CUTOFF = 0.08;
 const BORED_AFTER_MS = 10000;
-const ATTENTION_RETURN_DELAY_MS = 5000;
+const LOOK_RETURN_DELAY_MS = 5000;
+const ATTENTION_TRIGGER_DELAY_MS = 3500;
+const ATTENTION_TURN_OUT_MS = 3000;
+const ATTENTION_TURN_TOTAL_MS = 6000;
 const ATTENTION_CENTER_WIDTH = 200;
 const TURN_ENTER = [0, 0.06, 0.14, 0.24, 0.36, 0.5, 0.64, 0.78, 0.88, 0.96];
 const TURN_SIDE_STEP = 7;
@@ -35,10 +39,26 @@ const TURN_CURSOR_45PX = 300;
 const TURN_CURSOR_SIDE_PX = 650;
 const TURN_EXIT_GAP = 0.06;
 const ATTENTION_FINISH_COOLDOWN_MS = 3000;
+const PET_LOVE_HOLD_MS = 2000;
+const PET_LOVE_COOLDOWN_MS = 12000;
+const PIXI_IMAGE_SOURCE_WARN = 'ImageSource: Image element passed, converting to canvas. Use CanvasSource instead.';
 
 function numberValue(value, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function installPixiImageSourceWarnFilter() {
+  if (typeof console === 'undefined' || typeof console.warn !== 'function') return () => {};
+  const originalWarn = console.warn;
+  const filteredWarn = (...args) => {
+    if (String(args?.[0] || '').includes(PIXI_IMAGE_SOURCE_WARN)) return;
+    originalWarn(...args);
+  };
+  console.warn = filteredWarn;
+  return () => {
+    if (console.warn === filteredWarn) console.warn = originalWarn;
+  };
 }
 
 function layerMotion(layer, manifestMotion) {
@@ -141,6 +161,12 @@ function applyRigLayout(node, layer) {
   sprite.x = numberValue(layer.offsetPx?.x, 0);
   sprite.y = numberValue(layer.offsetPx?.y, 0);
   sprite.scale.set(scaleX, scaleY);
+  node.__spriteBase = {
+    x: sprite.x,
+    y: sprite.y,
+    scaleX,
+    scaleY,
+  };
 
   const pivot = layerPivot(layer, sprite.texture, visualScale);
   node.pivot.set(pivot.x, pivot.y);
@@ -170,6 +196,7 @@ export default function PixiAvatarStage({
   tickle = false,
   onReady,
   onAttentionPauseChange,
+  onPetComplete,
 }) {
   const hostRef = useRef(null);
   const lookRef = useRef({x: 0, y: 0});
@@ -178,6 +205,7 @@ export default function PixiAvatarStage({
   const [ready, setReady] = useState(false);
   const onReadyRef = useRef(onReady);
   const onAttentionPauseChangeRef = useRef(onAttentionPauseChange);
+  const onPetCompleteRef = useRef(onPetComplete);
   const stateKey = manifest?.state || expression || 'idle';
   const manifestKey = useMemo(() => {
     try {
@@ -195,6 +223,10 @@ export default function PixiAvatarStage({
   useEffect(() => {
     onAttentionPauseChangeRef.current = onAttentionPauseChange;
   }, [onAttentionPauseChange]);
+
+  useEffect(() => {
+    onPetCompleteRef.current = onPetComplete;
+  }, [onPetComplete]);
 
   useEffect(() => {
     tickleModeRef.current = tickle;
@@ -218,10 +250,11 @@ export default function PixiAvatarStage({
     let resizeObserver = null;
     let tickerHandler = null;
     let tmpPointRef = null;
+    const restorePixiWarnFilter = installPixiImageSourceWarnFilter();
 
     const ctl = {
       lastActive: performance.now(),
-      nextBehaviorAt: performance.now() + BORED_AFTER_MS,
+      nextBehaviorAt: performance.now() + (manifest?.id === 'yulesaku' ? 60000 : BORED_AFTER_MS),
       behavior: null,
       behaviorStarted: 0,
       behaviorUntil: 0,
@@ -231,8 +264,10 @@ export default function PixiAvatarStage({
       turnSwitched: 0,
     };
     const pet = {lift: 0, arm: 'right'};
+    const petLove = {start: 0, cooldownUntil: 0};
     const shy = {petStart: 0, active: false, phaseIndex: -1, phaseUntil: 0, threshold: 0, cooldownUntil: 0};
-    const attention = {paused: false, side: null, timer: null, cooldownUntil: 0};
+    const attention = {paused: false, side: null, timer: null, cooldownUntil: 0, startedAt: 0};
+    let nextAttentionFinishBehavior = () => null;
 
     const clearAttentionTimer = () => {
       if (attention.timer) {
@@ -244,15 +279,19 @@ export default function PixiAvatarStage({
     const setAttentionPaused = (paused, now = performance.now(), finishBehavior = null) => {
       if (attention.paused === paused) return;
       attention.paused = paused;
+      attention.startedAt = paused ? now : 0;
       if (paused) {
-        targetLookRef.current = {x: 0, y: 0, turnX: 0};
         ctl.behavior = finishBehavior;
-        ctl.nextBehaviorAt = now + BORED_AFTER_MS;
+        ctl.nextBehaviorAt = now + (manifest?.id === 'yulesaku' ? 60000 : BORED_AFTER_MS);
         if (finishBehavior) {
           ctl.behaviorStarted = now;
-          ctl.behaviorUntil = now + finishBehavior.duration;
+          ctl.behaviorUntil = now + Math.max(
+            numberValue(finishBehavior.duration, 0),
+            ATTENTION_TURN_TOTAL_MS + ATTENTION_TURN_STEP_DELAY_MS * 3,
+          );
         }
       } else {
+        if (ctl.behavior?.source === 'attention') ctl.behavior = null;
         attention.cooldownUntil = now + ATTENTION_FINISH_COOLDOWN_MS;
       }
       onAttentionPauseChangeRef.current?.(paused);
@@ -371,15 +410,15 @@ export default function PixiAvatarStage({
           if (groupDefs.has('pose:working_reaction')) behaviorPlaylist.push({key: 'pose:working_reaction', duration: 2500});
           if (groupDefs.has('pose:front_right30_arms_up')) behaviorPlaylist.push({key: 'pose:front_right30_arms_up', duration: 4500});
         }
-        const nextAttentionFinishBehavior = () => {
+        nextAttentionFinishBehavior = () => {
           if (!attentionFinishPlaylist.length) {
             return groupDefs.has('pose:working_reaction')
-              ? {key: 'pose:working_reaction', duration: 1800, source: 'attention'}
+              ? {key: 'pose:working_reaction', duration: ATTENTION_TURN_TOTAL_MS, source: 'attention'}
               : null;
           }
           const next = attentionFinishPlaylist[ctl.attentionBehaviorIndex % attentionFinishPlaylist.length];
           ctl.attentionBehaviorIndex += 1;
-          return next;
+          return {...next, duration: ATTENTION_TURN_TOTAL_MS};
         };
         const shySteps = (manifest.shyStates || [])
           .map((ps) => `pose:${ps.id}`)
@@ -550,37 +589,51 @@ export default function PixiAvatarStage({
             pointer.speed *= 0.4;
           }
           const speedNorm = clamp(pointer.speed / 1.4, 0, 1);
-          if (!attention.paused && now - ctl.lastActive >= ATTENTION_RETURN_DELAY_MS) {
+          if (!attention.paused && now - ctl.lastActive >= LOOK_RETURN_DELAY_MS) {
             targetLookRef.current = {x: 0, y: 0, turnX: 0};
           }
           if (attention.paused) {
-            targetLookRef.current = {x: 0, y: 0, turnX: 0};
+            const attentionElapsed = now - attention.startedAt;
+            const sideSign = attention.side === 'left' ? -1 : 1;
+            const turnTarget = attentionElapsed < ATTENTION_TURN_OUT_MS
+              ? sideSign * TURN_ENTER[TURN_ENTER.length - 1]
+              : 0;
+            targetLookRef.current = {x: 0, y: 0, turnX: turnTarget};
             ctl.lastActive = now;
-            ctl.nextBehaviorAt = now + BORED_AFTER_MS;
+            ctl.nextBehaviorAt = now + (manifest?.id === 'yulesaku' ? 60000 : BORED_AFTER_MS);
+            if (attentionElapsed >= ATTENTION_TURN_TOTAL_MS && ctl.turnValue === 0) {
+              setAttentionPaused(false, now);
+            }
           }
 
           if (tickleOn && ctl.behavior) {
             ctl.behavior = null;
-            ctl.nextBehaviorAt = now + BORED_AFTER_MS;
+            ctl.nextBehaviorAt = now + (manifest?.id === 'yulesaku' ? 60000 : BORED_AFTER_MS);
           }
           if (turnEnabled) {
             if (ctl.behavior && ctl.behavior.source !== 'attention' && ctl.lastActive > ctl.behaviorStarted) {
               ctl.behavior = null;
-              ctl.nextBehaviorAt = now + BORED_AFTER_MS;
+              ctl.nextBehaviorAt = now + (manifest?.id === 'yulesaku' ? 60000 : BORED_AFTER_MS);
             } else if (ctl.behavior && now > ctl.behaviorUntil) {
               const wasAttentionBehavior = ctl.behavior.source === 'attention';
               ctl.behavior = null;
               if (wasAttentionBehavior && attention.paused) {
                 setAttentionPaused(false, now);
                 ctl.lastActive = now;
-                ctl.nextBehaviorAt = now + BORED_AFTER_MS;
+                ctl.nextBehaviorAt = now + (manifest?.id === 'yulesaku' ? 60000 : BORED_AFTER_MS);
               } else {
-                ctl.nextBehaviorAt = stateKey === 'happy'
+                ctl.nextBehaviorAt = manifest?.id === 'yulesaku'
+                  ? now + 60000
+                  : stateKey === 'happy'
                   ? now + 900 + Math.random() * 1800
                   : now + 6000 + Math.random() * 6000;
               }
             }
-            const behaviorIdleDelay = stateKey === 'happy' ? 1200 : 9500;
+            const behaviorIdleDelay = manifest?.id === 'yulesaku'
+              ? 60000
+              : stateKey === 'happy'
+                ? 1200
+                : 9500;
             if (!tickleOn && !ctl.behavior && behaviorPlaylist.length
               && now - ctl.lastActive > behaviorIdleDelay && now >= ctl.nextBehaviorAt) {
               const next = behaviorPlaylist[Math.floor(Math.random() * behaviorPlaylist.length)];
@@ -605,7 +658,9 @@ export default function PixiAvatarStage({
             desired *= sgn;
             const cur = ctl.turnValue;
             const crossesCenter = cur !== 0 && desired !== 0 && Math.sign(cur) !== Math.sign(desired);
-            const turnDelay = crossesCenter
+            const turnDelay = attention.paused
+              ? ATTENTION_TURN_STEP_DELAY_MS
+              : crossesCenter
               ? TURN_CENTER_STEP_DELAY_MS
               : (speedNorm > 0.45 ? TURN_FAST_STEP_DELAY_MS : TURN_SLOW_STEP_DELAY_MS);
             if (desired !== cur && now - ctl.turnSwitched > turnDelay) {
@@ -642,6 +697,18 @@ export default function PixiAvatarStage({
           }
           pet.lift += (petTarget - pet.lift) * Math.min(1, delta * (petTarget ? 2.4 : 1.1));
           if (pet.lift < 0.004) pet.lift = 0;
+
+          if (pet.lift > 0.5 && now > petLove.cooldownUntil) {
+            if (!petLove.start) {
+              petLove.start = now;
+            } else if (now - petLove.start >= PET_LOVE_HOLD_MS) {
+              petLove.start = 0;
+              petLove.cooldownUntil = now + PET_LOVE_COOLDOWN_MS;
+              onPetCompleteRef.current?.();
+            }
+          } else if (pet.lift < 0.15 && petLove.start) {
+            petLove.start = 0;
+          }
 
           if (shyEnabled) {
             if (!shy.active) {
@@ -764,6 +831,13 @@ export default function PixiAvatarStage({
               const blink = motion.blink || {};
               const mouth = motion.mouth || {};
               const rotate = motion.rotate || {};
+              const spriteBase = node.__spriteBase;
+              if (spriteBase) {
+                node.__sprite.x = spriteBase.x;
+                node.__sprite.y = spriteBase.y;
+                node.__sprite.scale.x = spriteBase.scaleX;
+                node.__sprite.scale.y = spriteBase.scaleY;
+              }
               const breatheWave = Math.sin(time * numberValue(breathe.speed, 1.1) + phase);
               const swayWave = Math.sin(time * numberValue(sway.speed, 0.72) + phase);
               const blinkWindow = Math.sin(time * numberValue(blink.speed, 0.33) + phase) > 0.985;
@@ -771,24 +845,34 @@ export default function PixiAvatarStage({
                 ? Math.max(0, Math.sin(time * numberValue(mouth.speed, 5.4) + phase))
                 : 0;
               const rotateWave = Math.sin(time * numberValue(rotate.speed, 1) + phase);
+              const localOnlyBreathe = breathe.localOnly === true;
 
               node.x = base.x
                 + swayWave * numberValue(sway.x, 0)
                 + look.x * numberValue(lookMotion.x, 0);
               node.y = base.y
-                - breatheWave * numberValue(breathe.y, 0)
+                - (localOnlyBreathe ? 0 : breatheWave * numberValue(breathe.y, 0))
                 + look.y * numberValue(lookMotion.y, 0)
                 - mouthWave * numberValue(mouth.y, 0);
               node.rotation = base.rotation
                 + swayWave * numberValue(sway.rotate, 0)
                 + look.x * numberValue(lookMotion.rotate, 0)
                 + rotateWave * numberValue(rotate.amount, 0);
-              node.scale.x = base.scale * (1 + breatheWave * numberValue(breathe.scaleX, 0));
-              node.scale.y = base.scale * (1 + breatheWave * numberValue(breathe.scaleY, 0));
+              node.scale.x = base.scale * (1 + breatheWave * (localOnlyBreathe ? 0 : numberValue(breathe.scaleX, 0)));
+              node.scale.y = base.scale * (1 + breatheWave * (localOnlyBreathe ? 0 : numberValue(breathe.scaleY, 0)));
+              if (localOnlyBreathe && spriteBase) {
+                node.__sprite.y = spriteBase.y - breatheWave * numberValue(breathe.y, 0);
+                node.__sprite.scale.x = spriteBase.scaleX * (1 + breatheWave * numberValue(breathe.scaleX, 0));
+                node.__sprite.scale.y = spriteBase.scaleY * (1 + breatheWave * numberValue(breathe.scaleY, 0));
+              }
               if (blink.enabled) {
                 node.alpha = blink.mode === 'show'
                   ? (blinkWindow ? base.alpha : numberValue(blink.restAlpha, 0))
                   : (blinkWindow ? numberValue(blink.alpha, 0.18) : base.alpha);
+              } else if (mouth.mode === 'idle') {
+                node.alpha = stateKey === 'working'
+                  ? numberValue(mouth.workingAlpha, 0)
+                  : base.alpha;
               } else if (mouth.mode === 'talk') {
                 node.alpha = stateKey === 'working'
                   ? Math.max(numberValue(mouth.minAlpha, 0), mouthWave * base.alpha)
@@ -913,7 +997,7 @@ export default function PixiAvatarStage({
         attention.timer = window.setTimeout(() => {
           attention.timer = null;
           setAttentionPaused(true, performance.now(), nextAttentionFinishBehavior());
-        }, ATTENTION_RETURN_DELAY_MS);
+        }, ATTENTION_TRIGGER_DELAY_MS);
       }
       return false;
     };
@@ -982,6 +1066,7 @@ export default function PixiAvatarStage({
       } catch (error) {
         console.warn('[PixiAvatarStage] host cleanup failed', error);
       }
+      restorePixiWarnFilter();
     };
   }, [
     alt,

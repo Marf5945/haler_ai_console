@@ -1478,6 +1478,7 @@
     "restoredPending": "Main system restored. Please review the pending confirmation first.",
     "restoredLatest": "Main system restored at the latest task.",
     "shakeTooLong": "หยุดก่อน เวียนหัวแล้ว",
+    "petLove": "ฉันชอบนายท่านที่สุดเลย!",
     "closeDialogLabel": "Background avatar mode",
     "closeDialogTitle": "Before closing: enter background?",
     "closeDialogHintBefore": "Choosing Enter background shrinks the system into a draggable avatar; if active schedules exist, scheduler wake stays enabled. ",

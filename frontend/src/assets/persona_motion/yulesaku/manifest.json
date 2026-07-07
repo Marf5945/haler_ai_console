@@ -8,26 +8,30 @@
   ],
   "renderer": "pixi",
   "renderRig": true,
+  "turnRigEnabled": true,
+  "poseRigEnabled": false,
+  "shyRigEnabled": false,
+  "walkRigEnabled": false,
   "size": {
     "width": 200,
     "height": 360
   },
   "motion": {
     "breathe": {
-      "speed": 1.12,
-      "y": 5.8,
-      "scaleX": 0.009,
-      "scaleY": 0.008
+      "speed": 1.06,
+      "y": 2.2,
+      "scaleX": 0.003,
+      "scaleY": 0.0025
     },
     "sway": {
-      "speed": 0.68,
-      "x": 2.3,
-      "rotate": 0.016
+      "speed": 0.58,
+      "x": 0.8,
+      "rotate": 0.005
     },
     "look": {
-      "x": 7,
-      "y": 4,
-      "rotate": 0.018
+      "x": 5,
+      "y": 2.6,
+      "rotate": 0.012
     },
     "blink": {
       "enabled": false
@@ -182,7 +186,7 @@
     "front": {
       "idle": {
         "core": [
-          "parts/front/idle/head.png",
+          "parts/front/idle/head_face_blank.png",
           "parts/front/idle/neck.png",
           "parts/front/idle/chest.png",
           "parts/front/idle/upper_abdomen.png",
@@ -194,10 +198,10 @@
           "parts/front/idle/right_thigh_hip.png",
           "parts/front/idle/left_shin.png",
           "parts/front/idle/right_shin.png",
-          "parts/front/idle/left_ankle.png",
-          "parts/front/idle/right_ankle.png",
-          "parts/front/idle/left_foot.png",
-          "parts/front/idle/right_foot.png"
+          "parts/front/idle/left_ankle_blend_fixed.png",
+          "parts/front/idle/right_ankle_blend_fixed.png",
+          "parts/front/idle/left_foot_blend_fixed.png",
+          "parts/front/idle/right_foot_blend_fixed.png"
         ],
         "arms": [
           "parts/front/idle/left_upper_arm.png",
@@ -635,7 +639,7 @@
   },
   "states": {
     "idle": {
-      "base": "fullbody/idle.png",
+      "base": "fullbody/idle_fixed.png",
       "layers": [
         {
           "id": "tail_base",
@@ -768,7 +772,7 @@
         },
         {
           "id": "left_thigh",
-          "src": "parts/front/idle/left_thigh_hip.png",
+          "src": "parts/front/idle/left_thigh_hip_fixed.png",
           "positionPx": {
             "x": -26.0,
             "y": 7.5
@@ -811,7 +815,7 @@
         },
         {
           "id": "left_shin",
-          "src": "parts/front/idle/left_shin.png",
+          "src": "parts/front/idle/left_shin_fixed.png",
           "positionPx": {
             "x": -4.5,
             "y": 59.5
@@ -848,7 +852,7 @@
         },
         {
           "id": "left_ankle",
-          "src": "parts/front/idle/left_ankle.png",
+          "src": "parts/front/idle/left_ankle_blend_fixed.png",
           "positionPx": {
             "x": -13.0,
             "y": 29.0
@@ -885,7 +889,7 @@
         },
         {
           "id": "left_foot",
-          "src": "parts/front/idle/left_foot.png",
+          "src": "parts/front/idle/left_foot_blend_fixed.png",
           "positionPx": {
             "x": 0.0,
             "y": 19.5
@@ -922,7 +926,7 @@
         },
         {
           "id": "right_thigh",
-          "src": "parts/front/idle/right_thigh_hip.png",
+          "src": "parts/front/idle/right_thigh_hip_fixed.png",
           "positionPx": {
             "x": 15.0,
             "y": 8.0
@@ -965,7 +969,7 @@
         },
         {
           "id": "right_shin",
-          "src": "parts/front/idle/right_shin.png",
+          "src": "parts/front/idle/right_shin_fixed.png",
           "positionPx": {
             "x": 21.0,
             "y": 58.0
@@ -1002,7 +1006,7 @@
         },
         {
           "id": "right_ankle",
-          "src": "parts/front/idle/right_ankle.png",
+          "src": "parts/front/idle/right_ankle_blend_fixed.png",
           "positionPx": {
             "x": 5.0,
             "y": 29.5
@@ -1039,7 +1043,7 @@
         },
         {
           "id": "right_foot",
-          "src": "parts/front/idle/right_foot.png",
+          "src": "parts/front/idle/right_foot_blend_fixed.png",
           "positionPx": {
             "x": -2.5,
             "y": 25.5
@@ -1093,7 +1097,8 @@
           "phase": 0.0,
           "motion": {
             "breathe": {
-              "y": 0,
+              "speed": 1.04,
+              "y": 0.16,
               "scaleX": 0,
               "scaleY": 0
             },
@@ -1108,13 +1113,13 @@
             },
             "rotate": {
               "speed": 0.5,
-              "amount": 0.028
+              "amount": 0.012
             }
           },
           "parentId": "chest",
           "pivotPx": {
-            "x": 4,
-            "y": 28
+            "x": 8,
+            "y": -30
           }
         },
         {
@@ -1209,7 +1214,8 @@
           "rotation": 0,
           "motion": {
             "breathe": {
-              "y": 0,
+              "speed": 1.04,
+              "y": 0.08,
               "scaleX": 0,
               "scaleY": 0
             },
@@ -1223,8 +1229,8 @@
               "rotate": 0
             },
             "rotate": {
-              "speed": 0.9,
-              "amount": 0.04
+              "speed": 0.8,
+              "amount": 0.016
             }
           },
           "parentId": "left_wrist",
@@ -1253,7 +1259,8 @@
           "phase": 3.1,
           "motion": {
             "breathe": {
-              "y": 0,
+              "speed": 1.04,
+              "y": 0.14,
               "scaleX": 0,
               "scaleY": 0
             },
@@ -1268,7 +1275,7 @@
             },
             "rotate": {
               "speed": 0.5,
-              "amount": 0.032
+              "amount": 0.012
             }
           },
           "parentId": "chest",
@@ -1295,7 +1302,8 @@
           "rotation": 0,
           "motion": {
             "breathe": {
-              "y": 0,
+              "speed": 1.04,
+              "y": 0.08,
               "scaleX": 0,
               "scaleY": 0
             },
@@ -1310,7 +1318,7 @@
             },
             "rotate": {
               "speed": 0.5,
-              "amount": 0.022
+              "amount": 0.008
             }
           },
           "parentId": "right_upper_arm",
@@ -1375,7 +1383,8 @@
           "rotation": 0,
           "motion": {
             "breathe": {
-              "y": 0,
+              "speed": 1.04,
+              "y": 0.06,
               "scaleX": 0,
               "scaleY": 0
             },
@@ -1389,8 +1398,8 @@
               "rotate": 0
             },
             "rotate": {
-              "speed": 0.9,
-              "amount": 0.025
+              "speed": 0.8,
+              "amount": 0.012
             }
           },
           "parentId": "right_wrist",
@@ -1417,9 +1426,11 @@
           },
           "motion": {
             "breathe": {
-              "y": 0,
-              "scaleX": 0,
-              "scaleY": 0
+              "speed": 1.04,
+              "y": 0.42,
+              "scaleX": 0.0038,
+              "scaleY": 0.002,
+              "localOnly": true
             },
             "sway": {
               "x": 0,
@@ -1432,12 +1443,12 @@
             },
             "rotate": {
               "speed": 0.5,
-              "amount": 0.005
+              "amount": 0.0015
             }
           },
           "rotation": 0,
           "parentId": "upper_abdomen",
-          "phase": 2.6
+          "phase": 1.05
         },
         {
           "id": "upper_abdomen",
@@ -1456,9 +1467,11 @@
           },
           "motion": {
             "breathe": {
-              "y": 0,
-              "scaleX": 0,
-              "scaleY": 0
+              "speed": 1.04,
+              "y": 0.75,
+              "scaleX": 0.005,
+              "scaleY": 0.003,
+              "localOnly": true
             },
             "sway": {
               "x": 0,
@@ -1471,12 +1484,12 @@
             },
             "rotate": {
               "speed": 0.5,
-              "amount": 0.006
+              "amount": 0.002
             }
           },
           "rotation": 0,
           "parentId": "chest",
-          "phase": 1.2
+          "phase": 0.55
         },
         {
           "id": "chest",
@@ -1495,20 +1508,18 @@
           },
           "motion": {
             "breathe": {
-              "speed": 1.12,
-              "y": 3.2,
-              "scaleX": 0.0035,
-              "scaleY": 0.0045
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
             },
             "sway": {
-              "speed": 0.68,
-              "x": 1.1,
-              "rotate": 0.0045
+              "x": 0,
+              "rotate": 0
             },
             "look": {
-              "x": 1.0,
-              "y": 0.6,
-              "rotate": 0.002
+              "x": 0,
+              "y": 0,
+              "rotate": 0
             },
             "rotate": {
               "amount": 0
@@ -1571,9 +1582,11 @@
           "rotation": 0,
           "motion": {
             "breathe": {
-              "y": 0,
-              "scaleX": 0,
-              "scaleY": 0
+              "speed": 1.04,
+              "y": 0.12,
+              "scaleX": 0.001,
+              "scaleY": 0.001,
+              "localOnly": true
             },
             "sway": {
               "x": 0,
@@ -1586,7 +1599,7 @@
             },
             "rotate": {
               "speed": 0.45,
-              "amount": 0.006
+              "amount": 0.002
             }
           },
           "parentId": "chest",
@@ -1594,7 +1607,7 @@
         },
         {
           "id": "head",
-          "src": "parts/front/idle/head.png",
+          "src": "parts/front/idle/head_face_blank.png",
           "positionPx": {
             "x": -4.0,
             "y": -47.5
@@ -1615,20 +1628,135 @@
             },
             "sway": {
               "x": 0,
-              "rotate": 0.002
+              "rotate": 0.001
             },
             "look": {
-              "x": 3.5,
-              "y": 2.0,
-              "rotate": 0.01
+              "x": 3.0,
+              "y": 1.2,
+              "rotate": 0.008
             },
             "rotate": {
               "speed": 0.45,
-              "amount": 0.012
+              "amount": 0.006
             }
           },
           "rotation": 0,
           "parentId": "neck"
+        },
+        {
+          "id": "left_eye_open",
+          "src": "parts/front/idle/left_eye_open.png",
+          "positionPx": {
+            "x": -7.5,
+            "y": -2.5
+          },
+          "size": {
+            "width": 42,
+            "height": 33
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "rotate": {
+              "amount": 0
+            }
+          },
+          "rotation": 0,
+          "parentId": "head"
+        },
+        {
+          "id": "right_eye_open",
+          "src": "parts/front/idle/right_eye_open.png",
+          "positionPx": {
+            "x": 15.5,
+            "y": -2.5
+          },
+          "size": {
+            "width": 42,
+            "height": 33
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "rotate": {
+              "amount": 0
+            }
+          },
+          "rotation": 0,
+          "parentId": "head"
+        },
+        {
+          "id": "mouth_smile",
+          "src": "parts/front/idle/mouth_smile.png",
+          "positionPx": {
+            "x": 3.5,
+            "y": 12.5
+          },
+          "size": {
+            "width": 50,
+            "height": 35
+          },
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "motion": {
+            "breathe": {
+              "y": 0,
+              "scaleX": 0,
+              "scaleY": 0
+            },
+            "sway": {
+              "x": 0,
+              "rotate": 0
+            },
+            "look": {
+              "x": 0,
+              "y": 0,
+              "rotate": 0
+            },
+            "rotate": {
+              "amount": 0
+            },
+            "mouth": {
+              "mode": "idle",
+              "workingAlpha": 0
+            }
+          },
+          "rotation": 0,
+          "parentId": "head"
         },
         {
           "id": "left_ear",
@@ -1718,7 +1846,7 @@
         },
         {
           "id": "left_eye_blink",
-          "src": "parts/front/idle/left_eye_half_lid.png",
+          "src": "parts/front/idle/left_eye_half_lid_amber.png",
           "positionPx": {
             "x": -7.5,
             "y": -2.5
@@ -1756,7 +1884,7 @@
         },
         {
           "id": "right_eye_blink",
-          "src": "parts/front/idle/right_eye_half_lid.png",
+          "src": "parts/front/idle/right_eye_half_lid_amber.png",
           "positionPx": {
             "x": 15.5,
             "y": -2.5
@@ -1928,7 +2056,7 @@
       "layers": [
         {
           "id": "viewer_left_thigh",
-          "src": "parts/back/waist/viewer_left_thigh_back.png",
+          "src": "parts/back/waist/viewer_left_thigh_back_fixed.png",
           "positionPx": {
             "x": 70.2,
             "y": 220.7
@@ -1961,7 +2089,7 @@
         },
         {
           "id": "viewer_right_thigh",
-          "src": "parts/back/waist/viewer_right_thigh_back.png",
+          "src": "parts/back/waist/viewer_right_thigh_back_fixed.png",
           "positionPx": {
             "x": 111.9,
             "y": 219.4
@@ -1994,7 +2122,7 @@
         },
         {
           "id": "viewer_left_shin",
-          "src": "parts/back/waist/viewer_left_shin_back.png",
+          "src": "parts/back/waist/viewer_left_shin_back_fixed.png",
           "positionPx": {
             "x": 57.7,
             "y": 283.9
@@ -2027,7 +2155,7 @@
         },
         {
           "id": "viewer_right_shin",
-          "src": "parts/back/waist/viewer_right_shin_back.png",
+          "src": "parts/back/waist/viewer_right_shin_back_fixed.png",
           "positionPx": {
             "x": 122.0,
             "y": 281.9
@@ -2060,7 +2188,7 @@
         },
         {
           "id": "viewer_left_foot",
-          "src": "parts/back/waist/viewer_left_foot_back.png",
+          "src": "parts/back/waist/viewer_left_foot_back_fixed.png",
           "positionPx": {
             "x": 40.8,
             "y": 333.8
@@ -2093,7 +2221,7 @@
         },
         {
           "id": "viewer_right_foot",
-          "src": "parts/back/waist/viewer_right_foot_back.png",
+          "src": "parts/back/waist/viewer_right_foot_back_fixed.png",
           "positionPx": {
             "x": 123.9,
             "y": 331.3
@@ -2740,7 +2868,7 @@
         },
         {
           "id": "eye",
-          "src": "parts/back/waist/eye_sad_side.png",
+          "src": "parts/back/waist/eye_sad_side_amber.png",
           "positionPx": {
             "x": 66.9,
             "y": 27.8
@@ -3027,47 +3155,47 @@
       "layers": []
     },
     "front_left15": {
-      "base": "fullbody/front_left15.png",
+      "base": "fullbody/front_left15_fixed.png",
       "layers": []
     },
     "front_right15": {
-      "base": "fullbody/front_right15.png",
+      "base": "fullbody/front_right15_fixed.png",
       "layers": []
     },
     "front_left60": {
-      "base": "fullbody/front_left60.png",
+      "base": "fullbody/front_left60_fixed.png",
       "layers": []
     },
     "front_right60": {
-      "base": "fullbody/front_right60.png",
+      "base": "fullbody/front_right60_fixed.png",
       "layers": []
     },
     "front_left75": {
-      "base": "fullbody/front_left75.png",
+      "base": "fullbody/front_left75_fixed.png",
       "layers": []
     },
     "front_right75": {
-      "base": "fullbody/front_right75.png",
+      "base": "fullbody/front_right75_fixed.png",
       "layers": []
     },
     "front_left85": {
-      "base": "fullbody/front_left85.png",
+      "base": "fullbody/front_left85_fixed.png",
       "layers": []
     },
     "front_right85": {
-      "base": "fullbody/front_right85.png",
+      "base": "fullbody/front_right85_fixed.png",
       "layers": []
     },
     "back_left60": {
-      "base": "fullbody/back_left60.png",
+      "base": "fullbody/back_left60_fixed.png",
       "layers": []
     },
     "back_right60": {
-      "base": "fullbody/back_right60.png",
+      "base": "fullbody/back_right60_fixed.png",
       "layers": []
     },
     "side_left": {
-      "base": "fullbody/side_left.png",
+      "base": "fullbody/side_left_fixed.png",
       "layers": [
         {
           "id": "tail_base",
@@ -3194,7 +3322,7 @@
         },
         {
           "id": "viewer_left_thigh",
-          "src": "parts/side/left/viewer_left_thigh.png",
+          "src": "parts/side/left/viewer_left_thigh_fixed.png",
           "positionPx": {
             "x": 83.5,
             "y": 234.0
@@ -3227,7 +3355,7 @@
         },
         {
           "id": "viewer_right_thigh",
-          "src": "parts/side/left/viewer_right_thigh.png",
+          "src": "parts/side/left/viewer_right_thigh_fixed.png",
           "positionPx": {
             "x": 67.5,
             "y": 240.0
@@ -3260,7 +3388,7 @@
         },
         {
           "id": "viewer_left_shin",
-          "src": "parts/side/left/viewer_left_shin.png",
+          "src": "parts/side/left/viewer_left_shin_fixed.png",
           "positionPx": {
             "x": 79.0,
             "y": 297.0
@@ -3293,7 +3421,7 @@
         },
         {
           "id": "viewer_right_shin",
-          "src": "parts/side/left/viewer_right_shin.png",
+          "src": "parts/side/left/viewer_right_shin_fixed.png",
           "positionPx": {
             "x": 59.0,
             "y": 297.5
@@ -3326,7 +3454,7 @@
         },
         {
           "id": "viewer_left_foot",
-          "src": "parts/side/left/viewer_left_foot.png",
+          "src": "parts/side/left/viewer_left_foot_fixed.png",
           "positionPx": {
             "x": 68.0,
             "y": 344.0
@@ -3359,7 +3487,7 @@
         },
         {
           "id": "viewer_right_foot",
-          "src": "parts/side/left/viewer_right_foot.png",
+          "src": "parts/side/left/viewer_right_foot_fixed.png",
           "positionPx": {
             "x": 59.5,
             "y": 344.5
@@ -3779,7 +3907,7 @@
         },
         {
           "id": "eyes",
-          "src": "parts/side/left/eyes.png",
+          "src": "parts/side/left/eyes_amber.png",
           "positionPx": {
             "x": 59.5,
             "y": 37.0
@@ -3934,7 +4062,7 @@
       ]
     },
     "side_right": {
-      "base": "fullbody/side_right.png",
+      "base": "fullbody/side_right_fixed.png",
       "layers": [
         {
           "id": "tail_base",
@@ -4061,7 +4189,7 @@
         },
         {
           "id": "viewer_left_thigh",
-          "src": "parts/side/right/viewer_left_thigh.png",
+          "src": "parts/side/right/viewer_left_thigh_fixed.png",
           "positionPx": {
             "x": 127.0,
             "y": 240.0
@@ -4094,7 +4222,7 @@
         },
         {
           "id": "viewer_right_thigh",
-          "src": "parts/side/right/viewer_right_thigh.png",
+          "src": "parts/side/right/viewer_right_thigh_fixed.png",
           "positionPx": {
             "x": 146.0,
             "y": 230.5
@@ -4127,7 +4255,7 @@
         },
         {
           "id": "viewer_left_shin",
-          "src": "parts/side/right/viewer_left_shin.png",
+          "src": "parts/side/right/viewer_left_shin_fixed.png",
           "positionPx": {
             "x": 125.0,
             "y": 296.5
@@ -4160,7 +4288,7 @@
         },
         {
           "id": "viewer_right_shin",
-          "src": "parts/side/right/viewer_right_shin.png",
+          "src": "parts/side/right/viewer_right_shin_fixed.png",
           "positionPx": {
             "x": 143.5,
             "y": 294.5
@@ -4193,7 +4321,7 @@
         },
         {
           "id": "viewer_left_foot",
-          "src": "parts/side/right/viewer_left_foot.png",
+          "src": "parts/side/right/viewer_left_foot_fixed.png",
           "positionPx": {
             "x": 134.5,
             "y": 344.0
@@ -4226,7 +4354,7 @@
         },
         {
           "id": "viewer_right_foot",
-          "src": "parts/side/right/viewer_right_foot.png",
+          "src": "parts/side/right/viewer_right_foot_fixed.png",
           "positionPx": {
             "x": 142.0,
             "y": 346.5
@@ -4646,7 +4774,7 @@
         },
         {
           "id": "eyes",
-          "src": "parts/side/right/eyes.png",
+          "src": "parts/side/right/eyes_amber.png",
           "positionPx": {
             "x": 139.0,
             "y": 37.0
@@ -4801,7 +4929,7 @@
       ]
     },
     "front_left30": {
-      "base": "fullbody/front_left30.png",
+      "base": "fullbody/front_left30_fixed.png",
       "layers": [
         {
           "id": "tail_base",
@@ -4916,7 +5044,7 @@
         },
         {
           "id": "viewer_left_thigh",
-          "src": "parts/front/left30/viewer_left_thigh.png",
+          "src": "parts/front/left30/viewer_left_thigh_fixed.png",
           "positionPx": {
             "x": 64.5,
             "y": 223.0
@@ -4949,7 +5077,7 @@
         },
         {
           "id": "viewer_right_thigh",
-          "src": "parts/front/left30/viewer_right_thigh.png",
+          "src": "parts/front/left30/viewer_right_thigh_fixed.png",
           "positionPx": {
             "x": 122.0,
             "y": 223.0
@@ -4982,7 +5110,7 @@
         },
         {
           "id": "viewer_left_shin",
-          "src": "parts/front/left30/viewer_left_shin.png",
+          "src": "parts/front/left30/viewer_left_shin_fixed.png",
           "positionPx": {
             "x": 62.5,
             "y": 288.0
@@ -5015,7 +5143,7 @@
         },
         {
           "id": "viewer_right_shin",
-          "src": "parts/front/left30/viewer_right_shin.png",
+          "src": "parts/front/left30/viewer_right_shin_fixed.png",
           "positionPx": {
             "x": 121.0,
             "y": 289.0
@@ -5048,7 +5176,7 @@
         },
         {
           "id": "viewer_left_foot",
-          "src": "parts/front/left30/viewer_left_foot.png",
+          "src": "parts/front/left30/viewer_left_foot_fixed.png",
           "positionPx": {
             "x": 59.5,
             "y": 332.0
@@ -5081,7 +5209,7 @@
         },
         {
           "id": "viewer_right_foot",
-          "src": "parts/front/left30/viewer_right_foot.png",
+          "src": "parts/front/left30/viewer_right_foot_fixed.png",
           "positionPx": {
             "x": 115.5,
             "y": 335.0
@@ -5501,7 +5629,7 @@
         },
         {
           "id": "eyes",
-          "src": "parts/front/left30/eyes.png",
+          "src": "parts/front/left30/eyes_amber.png",
           "positionPx": {
             "x": 92.0,
             "y": 45.5
@@ -5656,7 +5784,7 @@
       ]
     },
     "front_right30": {
-      "base": "fullbody/front_right30.png",
+      "base": "fullbody/front_right30_fixed.png",
       "layers": [
         {
           "id": "tail_base",
@@ -5771,7 +5899,7 @@
         },
         {
           "id": "viewer_left_thigh",
-          "src": "parts/front/right30/viewer_left_thigh.png",
+          "src": "parts/front/right30/viewer_left_thigh_fixed.png",
           "positionPx": {
             "x": 78.0,
             "y": 223.0
@@ -5804,7 +5932,7 @@
         },
         {
           "id": "viewer_right_thigh",
-          "src": "parts/front/right30/viewer_right_thigh.png",
+          "src": "parts/front/right30/viewer_right_thigh_fixed.png",
           "positionPx": {
             "x": 135.5,
             "y": 223.0
@@ -5837,7 +5965,7 @@
         },
         {
           "id": "viewer_left_shin",
-          "src": "parts/front/right30/viewer_left_shin.png",
+          "src": "parts/front/right30/viewer_left_shin_fixed.png",
           "positionPx": {
             "x": 79.0,
             "y": 289.0
@@ -5870,7 +5998,7 @@
         },
         {
           "id": "viewer_right_shin",
-          "src": "parts/front/right30/viewer_right_shin.png",
+          "src": "parts/front/right30/viewer_right_shin_fixed.png",
           "positionPx": {
             "x": 137.5,
             "y": 288.0
@@ -5903,7 +6031,7 @@
         },
         {
           "id": "viewer_left_foot",
-          "src": "parts/front/right30/viewer_left_foot.png",
+          "src": "parts/front/right30/viewer_left_foot_fixed.png",
           "positionPx": {
             "x": 84.5,
             "y": 335.0
@@ -5936,7 +6064,7 @@
         },
         {
           "id": "viewer_right_foot",
-          "src": "parts/front/right30/viewer_right_foot.png",
+          "src": "parts/front/right30/viewer_right_foot_fixed.png",
           "positionPx": {
             "x": 140.5,
             "y": 332.0
@@ -6356,7 +6484,7 @@
         },
         {
           "id": "eyes",
-          "src": "parts/front/right30/eyes.png",
+          "src": "parts/front/right30/eyes_amber.png",
           "positionPx": {
             "x": 108.0,
             "y": 45.5
@@ -6626,7 +6754,7 @@
         },
         {
           "id": "viewer_left_thigh",
-          "src": "parts/front/left30/viewer_left_thigh.png",
+          "src": "parts/front/left30/viewer_left_thigh_fixed.png",
           "positionPx": {
             "x": 64.5,
             "y": 223.0
@@ -6659,7 +6787,7 @@
         },
         {
           "id": "viewer_right_thigh",
-          "src": "parts/front/left30/viewer_right_thigh.png",
+          "src": "parts/front/left30/viewer_right_thigh_fixed.png",
           "positionPx": {
             "x": 122.0,
             "y": 223.0
@@ -6692,7 +6820,7 @@
         },
         {
           "id": "viewer_left_shin",
-          "src": "parts/front/left30/viewer_left_shin.png",
+          "src": "parts/front/left30/viewer_left_shin_fixed.png",
           "positionPx": {
             "x": 62.5,
             "y": 288.0
@@ -6725,7 +6853,7 @@
         },
         {
           "id": "viewer_right_shin",
-          "src": "parts/front/left30/viewer_right_shin.png",
+          "src": "parts/front/left30/viewer_right_shin_fixed.png",
           "positionPx": {
             "x": 121.0,
             "y": 289.0
@@ -6758,7 +6886,7 @@
         },
         {
           "id": "viewer_left_foot",
-          "src": "parts/front/left30/viewer_left_foot.png",
+          "src": "parts/front/left30/viewer_left_foot_fixed.png",
           "positionPx": {
             "x": 59.5,
             "y": 332.0
@@ -6791,7 +6919,7 @@
         },
         {
           "id": "viewer_right_foot",
-          "src": "parts/front/left30/viewer_right_foot.png",
+          "src": "parts/front/left30/viewer_right_foot_fixed.png",
           "positionPx": {
             "x": 115.5,
             "y": 335.0
@@ -7211,7 +7339,7 @@
         },
         {
           "id": "eyes",
-          "src": "parts/front/left30/eyes.png",
+          "src": "parts/front/left30/eyes_amber.png",
           "positionPx": {
             "x": 92.0,
             "y": 45.5
@@ -7481,7 +7609,7 @@
         },
         {
           "id": "viewer_left_thigh",
-          "src": "parts/front/right30/viewer_left_thigh.png",
+          "src": "parts/front/right30/viewer_left_thigh_fixed.png",
           "positionPx": {
             "x": 78.0,
             "y": 223.0
@@ -7514,7 +7642,7 @@
         },
         {
           "id": "viewer_right_thigh",
-          "src": "parts/front/right30/viewer_right_thigh.png",
+          "src": "parts/front/right30/viewer_right_thigh_fixed.png",
           "positionPx": {
             "x": 135.5,
             "y": 223.0
@@ -7547,7 +7675,7 @@
         },
         {
           "id": "viewer_left_shin",
-          "src": "parts/front/right30/viewer_left_shin.png",
+          "src": "parts/front/right30/viewer_left_shin_fixed.png",
           "positionPx": {
             "x": 79.0,
             "y": 289.0
@@ -7580,7 +7708,7 @@
         },
         {
           "id": "viewer_right_shin",
-          "src": "parts/front/right30/viewer_right_shin.png",
+          "src": "parts/front/right30/viewer_right_shin_fixed.png",
           "positionPx": {
             "x": 137.5,
             "y": 288.0
@@ -7613,7 +7741,7 @@
         },
         {
           "id": "viewer_left_foot",
-          "src": "parts/front/right30/viewer_left_foot.png",
+          "src": "parts/front/right30/viewer_left_foot_fixed.png",
           "positionPx": {
             "x": 84.5,
             "y": 335.0
@@ -7646,7 +7774,7 @@
         },
         {
           "id": "viewer_right_foot",
-          "src": "parts/front/right30/viewer_right_foot.png",
+          "src": "parts/front/right30/viewer_right_foot_fixed.png",
           "positionPx": {
             "x": 140.5,
             "y": 332.0
@@ -8066,7 +8194,7 @@
         },
         {
           "id": "eyes",
-          "src": "parts/front/right30/eyes.png",
+          "src": "parts/front/right30/eyes_amber.png",
           "positionPx": {
             "x": 108.0,
             "y": 45.5
@@ -8221,7 +8349,7 @@
       ]
     },
     "front_left45": {
-      "base": "fullbody/front_left45.png",
+      "base": "fullbody/front_left45_fixed.png",
       "layers": [
         {
           "id": "tail_base",
@@ -8336,7 +8464,7 @@
         },
         {
           "id": "viewer_left_thigh",
-          "src": "parts/front/left45/viewer_left_thigh.png",
+          "src": "parts/front/left45/viewer_left_thigh_fixed.png",
           "positionPx": {
             "x": 73.0,
             "y": 236.5
@@ -8369,7 +8497,7 @@
         },
         {
           "id": "viewer_left_shin",
-          "src": "parts/front/left45/viewer_left_shin.png",
+          "src": "parts/front/left45/viewer_left_shin_fixed.png",
           "positionPx": {
             "x": 67.0,
             "y": 296.0
@@ -8402,7 +8530,7 @@
         },
         {
           "id": "viewer_left_foot",
-          "src": "parts/front/left45/viewer_left_foot.png",
+          "src": "parts/front/left45/viewer_left_foot_fixed.png",
           "positionPx": {
             "x": 68.0,
             "y": 334.0
@@ -8435,7 +8563,7 @@
         },
         {
           "id": "viewer_right_thigh",
-          "src": "parts/front/left45/viewer_right_thigh.png",
+          "src": "parts/front/left45/viewer_right_thigh_fixed.png",
           "positionPx": {
             "x": 127.0,
             "y": 236.5
@@ -8468,7 +8596,7 @@
         },
         {
           "id": "viewer_right_shin",
-          "src": "parts/front/left45/viewer_right_shin.png",
+          "src": "parts/front/left45/viewer_right_shin_fixed.png",
           "positionPx": {
             "x": 114.5,
             "y": 296.0
@@ -8501,7 +8629,7 @@
         },
         {
           "id": "viewer_right_foot",
-          "src": "parts/front/left45/viewer_right_foot.png",
+          "src": "parts/front/left45/viewer_right_foot_fixed.png",
           "positionPx": {
             "x": 112.0,
             "y": 334.0
@@ -9005,7 +9133,7 @@
         },
         {
           "id": "eyes",
-          "src": "parts/front/left45/eyes.png",
+          "src": "parts/front/left45/eyes_amber.png",
           "positionPx": {
             "x": 82.0,
             "y": 39.0
@@ -9072,7 +9200,7 @@
       ]
     },
     "back_left30": {
-      "base": "fullbody/back_left30.png",
+      "base": "fullbody/back_left30_fixed.png",
       "layers": [
         {
           "id": "tail_base",
@@ -9187,7 +9315,7 @@
         },
         {
           "id": "viewer_left_thigh",
-          "src": "parts/back/left30/viewer_left_thigh.png",
+          "src": "parts/back/left30/viewer_left_thigh_fixed.png",
           "positionPx": {
             "x": 71.0,
             "y": 237.5
@@ -9220,7 +9348,7 @@
         },
         {
           "id": "viewer_left_shin",
-          "src": "parts/back/left30/viewer_left_shin.png",
+          "src": "parts/back/left30/viewer_left_shin_fixed.png",
           "positionPx": {
             "x": 65.0,
             "y": 297.0
@@ -9253,7 +9381,7 @@
         },
         {
           "id": "viewer_left_foot",
-          "src": "parts/back/left30/viewer_left_foot.png",
+          "src": "parts/back/left30/viewer_left_foot_fixed.png",
           "positionPx": {
             "x": 66.0,
             "y": 332.0
@@ -9286,7 +9414,7 @@
         },
         {
           "id": "viewer_right_thigh",
-          "src": "parts/back/left30/viewer_right_thigh.png",
+          "src": "parts/back/left30/viewer_right_thigh_fixed.png",
           "positionPx": {
             "x": 129.0,
             "y": 237.5
@@ -9319,7 +9447,7 @@
         },
         {
           "id": "viewer_right_shin",
-          "src": "parts/back/left30/viewer_right_shin.png",
+          "src": "parts/back/left30/viewer_right_shin_fixed.png",
           "positionPx": {
             "x": 115.0,
             "y": 297.0
@@ -9352,7 +9480,7 @@
         },
         {
           "id": "viewer_right_foot",
-          "src": "parts/back/left30/viewer_right_foot.png",
+          "src": "parts/back/left30/viewer_right_foot_fixed.png",
           "positionPx": {
             "x": 110.0,
             "y": 330.5
@@ -9768,7 +9896,7 @@
         },
         {
           "id": "eyes",
-          "src": "parts/back/left30/eyes.png",
+          "src": "parts/back/left30/eyes_amber.png",
           "positionPx": {
             "x": 76.5,
             "y": 39.0
@@ -9835,7 +9963,7 @@
       ]
     },
     "back_3q": {
-      "base": "fullbody/back_3q.png",
+      "base": "fullbody/back_3q_fixed.png",
       "layers": [
         {
           "id": "tail_base",
@@ -9950,7 +10078,7 @@
         },
         {
           "id": "viewer_left_thigh",
-          "src": "parts/back/3q/viewer_left_thigh.png",
+          "src": "parts/back/3q/viewer_left_thigh_fixed.png",
           "positionPx": {
             "x": 71.0,
             "y": 237.5
@@ -9983,7 +10111,7 @@
         },
         {
           "id": "viewer_left_shin",
-          "src": "parts/back/3q/viewer_left_shin.png",
+          "src": "parts/back/3q/viewer_left_shin_fixed.png",
           "positionPx": {
             "x": 65.5,
             "y": 297.0
@@ -10016,7 +10144,7 @@
         },
         {
           "id": "viewer_left_foot",
-          "src": "parts/back/3q/viewer_left_foot.png",
+          "src": "parts/back/3q/viewer_left_foot_fixed.png",
           "positionPx": {
             "x": 68.0,
             "y": 332.0
@@ -10049,7 +10177,7 @@
         },
         {
           "id": "viewer_right_thigh",
-          "src": "parts/back/3q/viewer_right_thigh.png",
+          "src": "parts/back/3q/viewer_right_thigh_fixed.png",
           "positionPx": {
             "x": 129.0,
             "y": 237.5
@@ -10082,7 +10210,7 @@
         },
         {
           "id": "viewer_right_shin",
-          "src": "parts/back/3q/viewer_right_shin.png",
+          "src": "parts/back/3q/viewer_right_shin_fixed.png",
           "positionPx": {
             "x": 118.0,
             "y": 297.0
@@ -10115,7 +10243,7 @@
         },
         {
           "id": "viewer_right_foot",
-          "src": "parts/back/3q/viewer_right_foot.png",
+          "src": "parts/back/3q/viewer_right_foot_fixed.png",
           "positionPx": {
             "x": 117.5,
             "y": 331.0
@@ -10531,7 +10659,7 @@
         },
         {
           "id": "eyes",
-          "src": "parts/back/3q/eyes.png",
+          "src": "parts/back/3q/eyes_amber.png",
           "positionPx": {
             "x": 78.0,
             "y": 39.0
@@ -10598,7 +10726,7 @@
       ]
     },
     "front_right45": {
-      "base": "fullbody/front_right45.png",
+      "base": "fullbody/front_right45_fixed.png",
       "layers": [
         {
           "id": "tail_base",
@@ -10713,7 +10841,7 @@
         },
         {
           "id": "viewer_left_thigh",
-          "src": "parts/front/right45/viewer_left_thigh.png",
+          "src": "parts/front/right45/viewer_left_thigh_fixed.png",
           "positionPx": {
             "x": 73.0,
             "y": 236.5
@@ -10746,7 +10874,7 @@
         },
         {
           "id": "viewer_left_shin",
-          "src": "parts/front/right45/viewer_left_shin.png",
+          "src": "parts/front/right45/viewer_left_shin_fixed.png",
           "positionPx": {
             "x": 85.5,
             "y": 296.0
@@ -10779,7 +10907,7 @@
         },
         {
           "id": "viewer_left_foot",
-          "src": "parts/front/right45/viewer_left_foot.png",
+          "src": "parts/front/right45/viewer_left_foot_fixed.png",
           "positionPx": {
             "x": 88.0,
             "y": 334.0
@@ -10812,7 +10940,7 @@
         },
         {
           "id": "viewer_right_thigh",
-          "src": "parts/front/right45/viewer_right_thigh.png",
+          "src": "parts/front/right45/viewer_right_thigh_fixed.png",
           "positionPx": {
             "x": 127.0,
             "y": 236.5
@@ -10845,7 +10973,7 @@
         },
         {
           "id": "viewer_right_shin",
-          "src": "parts/front/right45/viewer_right_shin.png",
+          "src": "parts/front/right45/viewer_right_shin_fixed.png",
           "positionPx": {
             "x": 133.0,
             "y": 296.0
@@ -10878,7 +11006,7 @@
         },
         {
           "id": "viewer_right_foot",
-          "src": "parts/front/right45/viewer_right_foot.png",
+          "src": "parts/front/right45/viewer_right_foot_fixed.png",
           "positionPx": {
             "x": 132.0,
             "y": 334.0
@@ -11382,7 +11510,7 @@
         },
         {
           "id": "eyes",
-          "src": "parts/front/right45/eyes.png",
+          "src": "parts/front/right45/eyes_amber.png",
           "positionPx": {
             "x": 108.0,
             "y": 39.0
@@ -11449,7 +11577,7 @@
       ]
     },
     "back_right30": {
-      "base": "fullbody/back_right30.png",
+      "base": "fullbody/back_right30_fixed.png",
       "layers": [
         {
           "id": "tail_base",
@@ -11564,7 +11692,7 @@
         },
         {
           "id": "viewer_left_thigh",
-          "src": "parts/back/right30/viewer_left_thigh.png",
+          "src": "parts/back/right30/viewer_left_thigh_fixed.png",
           "positionPx": {
             "x": 71.0,
             "y": 237.5
@@ -11597,7 +11725,7 @@
         },
         {
           "id": "viewer_right_thigh",
-          "src": "parts/back/right30/viewer_right_thigh.png",
+          "src": "parts/back/right30/viewer_right_thigh_fixed.png",
           "positionPx": {
             "x": 129.0,
             "y": 237.5
@@ -11630,7 +11758,7 @@
         },
         {
           "id": "viewer_left_shin",
-          "src": "parts/back/right30/viewer_left_shin.png",
+          "src": "parts/back/right30/viewer_left_shin_fixed.png",
           "positionPx": {
             "x": 85.0,
             "y": 297.0
@@ -11663,7 +11791,7 @@
         },
         {
           "id": "viewer_right_shin",
-          "src": "parts/back/right30/viewer_right_shin.png",
+          "src": "parts/back/right30/viewer_right_shin_fixed.png",
           "positionPx": {
             "x": 135.0,
             "y": 297.0
@@ -11696,7 +11824,7 @@
         },
         {
           "id": "viewer_left_foot",
-          "src": "parts/back/right30/viewer_left_foot.png",
+          "src": "parts/back/right30/viewer_left_foot_fixed.png",
           "positionPx": {
             "x": 90.0,
             "y": 330.5
@@ -11729,7 +11857,7 @@
         },
         {
           "id": "viewer_right_foot",
-          "src": "parts/back/right30/viewer_right_foot.png",
+          "src": "parts/back/right30/viewer_right_foot_fixed.png",
           "positionPx": {
             "x": 134.0,
             "y": 332.0
@@ -12145,7 +12273,7 @@
         },
         {
           "id": "eyes",
-          "src": "parts/back/right30/eyes.png",
+          "src": "parts/back/right30/eyes_amber.png",
           "positionPx": {
             "x": 123.5,
             "y": 39.0
@@ -12212,7 +12340,7 @@
       ]
     },
     "back_full": {
-      "base": "fullbody/back_full.png",
+      "base": "fullbody/back_full_fixed.png",
       "layers": [
         {
           "id": "tail_base",
@@ -12327,7 +12455,7 @@
         },
         {
           "id": "viewer_left_thigh",
-          "src": "parts/back/full/viewer_left_thigh.png",
+          "src": "parts/back/full/viewer_left_thigh_fixed.png",
           "positionPx": {
             "x": 67.0,
             "y": 225.0
@@ -12360,7 +12488,7 @@
         },
         {
           "id": "viewer_right_thigh",
-          "src": "parts/back/full/viewer_right_thigh.png",
+          "src": "parts/back/full/viewer_right_thigh_fixed.png",
           "positionPx": {
             "x": 127.5,
             "y": 225.0
@@ -12393,7 +12521,7 @@
         },
         {
           "id": "viewer_left_shin",
-          "src": "parts/back/full/viewer_left_shin.png",
+          "src": "parts/back/full/viewer_left_shin_fixed.png",
           "positionPx": {
             "x": 62.5,
             "y": 291.5
@@ -12426,7 +12554,7 @@
         },
         {
           "id": "viewer_right_shin",
-          "src": "parts/back/full/viewer_right_shin.png",
+          "src": "parts/back/full/viewer_right_shin_fixed.png",
           "positionPx": {
             "x": 127.5,
             "y": 291.5
@@ -12459,7 +12587,7 @@
         },
         {
           "id": "viewer_left_foot",
-          "src": "parts/back/full/viewer_left_foot.png",
+          "src": "parts/back/full/viewer_left_foot_fixed.png",
           "positionPx": {
             "x": 53.5,
             "y": 336.0
@@ -12492,7 +12620,7 @@
         },
         {
           "id": "viewer_right_foot",
-          "src": "parts/back/full/viewer_right_foot.png",
+          "src": "parts/back/full/viewer_right_foot_fixed.png",
           "positionPx": {
             "x": 129.0,
             "y": 336.0

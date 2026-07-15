@@ -9,8 +9,14 @@ import "sync"
 // ──────────────────────────────────────────────
 
 const (
-	// SummarizationThreshold 達到此字元數時觸發摘要（預設 10000 字）
-	SummarizationThreshold = 10000
+	// SummarizationThreshold 達到此字元數時觸發摘要（預設 25000 字）。
+	// 原 10000 字對 CJK 對話太敏感、觸發過頻；細節反正落 deep_memory 可展開撈回，
+	// 拉高門檻＋壓狠一點（見 SummarizationTargetRatio）整體較省 token。
+	SummarizationThreshold = 25000
+
+	// SummarizationTargetRatio 摘要壓縮目標比例（摘要字數 / 原文字數）。
+	// 原 0.6 只省 40%，跑一趟大模型折扣太小；deep_memory 保留原文，壓到 0.35 無丟失風險。
+	SummarizationTargetRatio = 0.35
 )
 
 // ──────────────────────────────────────────────

@@ -56,6 +56,7 @@ import {
   PreparePackageInstallPayload,
   PromoteDraftToPending,
   ListExternalLinksByType,
+  ListSharedSourceFiles,
   PreviewExternalLink,
   RegisterExternalLink,
   StartGGUFImport,
@@ -1548,9 +1549,14 @@ const fullBodyAvatarUrls = {
   },
   uncle: {
     idle: new URL('../assets/persona_fullbody/uncle_bust/fullbody_idle.png', import.meta.url).href,
+    thinking: new URL('../assets/persona_fullbody/uncle_bust/fullbody_thinking.png', import.meta.url).href,
+    working: new URL('../assets/persona_fullbody/uncle_bust/fullbody_working.png', import.meta.url).href,
+    happy: new URL('../assets/persona_fullbody/uncle_bust/fullbody_happy.png', import.meta.url).href,
     sleepy: new URL('../assets/persona_fullbody/uncle_bust/fullbody_idle_madao_sleepy_akimbo.png', import.meta.url).href,
     warning: new URL('../assets/persona_fullbody/uncle_bust/fullbody_warning_madao_swimbrief_nearly_rip_step.png', import.meta.url).href,
-    blocked: new URL('../assets/persona_fullbody/uncle_bust/fullbody_warning_madao_swimbrief_nearly_rip_step.png', import.meta.url).href,
+    blocked: new URL('../assets/persona_fullbody/uncle_bust/fullbody_blocked.png', import.meta.url).href,
+    sad: new URL('../assets/persona_fullbody/uncle_bust/fullbody_sad.png', import.meta.url).href,
+    speechless: new URL('../assets/persona_fullbody/uncle_bust/fullbody_speechless.png', import.meta.url).href,
   },
   secretary: {
     idle: new URL('../assets/persona_fullbody/secretary/fullbody_idle.png', import.meta.url).href,
@@ -1919,6 +1925,8 @@ function App() {
   const [extAdapterLinks, setExtAdapterLinks] = useState([]);
   const [extDocLinks, setExtDocLinks] = useState([]);
   const [extSharedLinks, setExtSharedLinks] = useState([]);
+  // 共用資料夾第一層檔案清單（key = 資料夾路徑；只讀該層，不遞迴）
+  const [sharedSourceListings, setSharedSourceListings] = useState([]);
   // I-5: PreviewExternalLink 預覽結果，用戶確認後才 Register
   const [linkPreview, setLinkPreview] = useState(null);
   const [linkPreviewError, setLinkPreviewError] = useState('');
@@ -2348,6 +2356,13 @@ function App() {
   const [floatingAvatarSurfaceOnly, setFloatingAvatarSurfaceOnly] = useState(false);
   const [floatingAvatarBodyMode, setFloatingAvatarBodyMode] = useState('head');
   const [floatingAvatarDynamicImage, setFloatingAvatarDynamicImage] = useState(false);
+  const [floatingAvatarMotionMode, setFloatingAvatarMotionMode] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem('floating_avatar_motion_mode');
+      if (saved === 'frames' || saved === 'rig') return saved;
+    } catch {}
+    return 'rig';
+  });
   const [floatingAvatarChatMode, setFloatingAvatarChatMode] = useState(false);
   const [floatingAvatarPanelOpenSignal, setFloatingAvatarPanelOpenSignal] = useState(0);
   const [floatingAvatarReplyBubble, setFloatingAvatarReplyBubble] = useState('');
@@ -4392,6 +4407,19 @@ function App() {
         const result = await callWails(() => ImportSubHandler(exportDir));
         setInstallCandidate(null);
         setSubImportResult(result || null);
+        // v3.1.8：索引快取驗證發現竄改/損毀 → 明確提醒使用者（報告已回寫進該 sub）。
+        const integ = result?.memory_integrity;
+        if (integ && (integ.dropped > 0 || integ.terms_dropped > 0)) {
+          const parts = [];
+          if (integ.dropped > 0) parts.push(`${integ.dropped} 筆索引對不上記憶內容，已丟棄`);
+          if (integ.terms_dropped > 0) parts.push(`${integ.terms_dropped} 個關鍵詞接地失敗，已剔除`);
+          setToolResult({
+            toolId: 'subagent',
+            ok: false,
+            message: `匯入的 sub 索引快取有問題（疑似篡改或損毀）：${parts.join('；')}。` +
+              `詳細報告已寫入該 sub。建議切到此 sub 用「整理」重新建立摘要與索引。`,
+          });
+        }
         await refreshAvailableAdapters();
         return;
       }
@@ -7598,6 +7626,9 @@ function App() {
     callWails(() => ListExternalLinksByType('shared_source'))
       .then((links) => setExtSharedLinks(links || []))
       .catch(() => {});
+    callWails(ListSharedSourceFiles)
+      .then((listings) => setSharedSourceListings(listings || []))
+      .catch(() => {});
   }
 
   async function refreshLinkPreviewSuggestions(shouldSuggest) {
@@ -7994,13 +8025,35 @@ function App() {
     return event.returnValue;
   }
 
-  // v3.6: 學習模式切換 — 對接後端 LearningService
-  async function toggleLearning() {
+  // v3.7: 學習按鈕 = 純生態系整理模式（不再啟動螢幕錄製）。
+  // 開啟後閒置 20 分鐘會觸發 PrepareLearningDigest 整理 CLI token、sub 流程與 skill。
+  // 螢幕操作錄製請用「示範」按鈕（Draft Sandbox）或 VL 面板的 toggleVisualLearningRecording。
+  function toggleLearning() {
     const conversationId = activeConversationIdRef.current || 'main';
-    const backendActive = await callWails(IsLearningModeActive).catch(() => learningEnabled);
-    const wasEnabled = learningEnabled || !!backendActive;
-    if (wasEnabled) {
-      // 關閉學習模式
+    if (learningEnabled) {
+      setLearningEnabled(false);
+      setLearningDigestReady(false);
+      learningDigestReadyRef.current = false;
+      try { window.localStorage.removeItem(learningDigestStorageKey); } catch { /* */ }
+      setConversationMessages(conversationId, (prev) => [
+        ...prev,
+        '[系統] 學習模式關閉，生態系閒置整理已停止。',
+      ]);
+    } else {
+      setLearningEnabled(true);
+      setConversationMessages(conversationId, (prev) => [
+        ...prev,
+        `[系統] 學習模式開啟。閒置 ${Math.round(learningIdleDelayMs / 60000)} 分鐘後會自動整理生態系（CLI token、sub 流程與 skill），結果會出現在 Review Panel。`,
+      ]);
+    }
+  }
+
+  // v3.7: VL 面板的示範錄製切換（原 v3.6 toggleLearning 的錄製部分，已與學習模式脫鉤）
+  async function toggleVisualLearningRecording() {
+    const conversationId = activeConversationIdRef.current || 'main';
+    const backendActive = await callWails(IsLearningModeActive).catch(() => vlLearningActive);
+    if (vlLearningActive || backendActive) {
+      // 停止示範錄製
       try {
         if (backendActive) {
           const traceId = makeDebugTraceID('learning-metadata');
@@ -8020,14 +8073,10 @@ function App() {
           ]);
         }
       }
-      setLearningEnabled(false);
       setVlLearningActive(false);
       setVlActiveLearningRun(null);
-      setLearningDigestReady(false);
-      learningDigestReadyRef.current = false;
-      try { window.localStorage.removeItem(learningDigestStorageKey); } catch { /* */ }
     } else {
-      // 開啟學習模式（需要 activeWindowHash，目前用 session ID）
+      // 開啟示範錄製（需要 activeWindowHash，目前用 session ID）
       try {
         const permissionStatus = await callWails(RequestVisualLearningPermissions).catch(() => null);
         if (permissionStatus?.missing?.length) {
@@ -8052,7 +8101,6 @@ function App() {
         if (activeRun) {
           setVlActiveLearningRun(activeRun);
           setVlLearningActive(true);
-          setLearningEnabled(true);
           setConversationMessages(conversationId, (prev) => [
             ...prev,
             `[系統] 已接回仍在進行中的示範。${activeRun?.id ? `Run: ${activeRun.id}。` : ''}再按一次可停止記錄。`,
@@ -8064,7 +8112,6 @@ function App() {
           `[系統] 示範開始，但後端記錄沒有啟動。${detail ? ` ${detail}` : ''}`,
         ]);
       }
-      setLearningEnabled(true);
     }
   }
 
@@ -8938,6 +8985,13 @@ function App() {
         });
         // 視窗尺寸變更後重套一次透明置頂參數（幂等），避免 WKWebView 合成殘留。
         await callWails(() => EnterFloatingAvatarNative()).catch(() => {});
+        // WindowSetSize 與 WKWebView 重建 backing store 有時間差，
+        // 立即重套可能落在 resize 完成前；晚一拍再重套一次（同樣幂等）。
+        window.setTimeout(() => {
+          if (floatingAvatarModeRef.current) {
+            callWails(() => EnterFloatingAvatarNative()).catch(() => {});
+          }
+        }, 180);
       }
     }
     if (!ENABLE_NATIVE_FLOATING_AVATAR_WINDOW && floatingAvatarModeRef.current) {
@@ -8958,6 +9012,12 @@ function App() {
     if (next && ENABLE_NATIVE_FLOATING_AVATAR_WINDOW && floatingAvatarModeRef.current) {
       await callWails(() => EnterFloatingAvatarNative()).catch(() => {});
     }
+  }
+
+  function changeFloatingAvatarMotionMode(mode) {
+    const next = mode === 'frames' ? 'frames' : 'rig';
+    setFloatingAvatarMotionMode(next);
+    try { window.localStorage.setItem('floating_avatar_motion_mode', next); } catch {}
   }
 
   async function switchFloatingAvatarAgent(personaId) {
@@ -9010,7 +9070,8 @@ function App() {
     || state.statusRail?.text
     || state.greeting
     || '';
-  const floatingLatestText = messages[messages.length - 1] || state.greeting || '';
+  // 後台迷你框顯示前先剝 composer pending 內部標記（\u2063pending:traceId），避免 traceId 亂碼外洩。
+  const floatingLatestText = stripComposerPendingMarker(messages[messages.length - 1] || state.greeting || '');
   // 只在「需要主動提醒」時才浮出上方泡泡（待確認/排程確認）。
   // 進後台、一般狀態、問候語都不浮泡泡，維持乾淨頭像；人格名稱/回覆改由點開迷你框顯示。
   // 全身像來源：persona 自填的 fullBodyAvatarUrl 優先，否則依角色 pack/state 取內建立繪。
@@ -9138,9 +9199,11 @@ function App() {
         panelOpenSignal={floatingAvatarPanelOpenSignal}
         bodyMode={floatingAvatarBodyMode}
         dynamicImageEnabled={floatingAvatarDynamicImage}
+        motionMode={floatingAvatarMotionMode}
         chatMode={floatingAvatarChatMode}
         onBodyModeChange={changeFloatingAvatarBodyMode}
         onDynamicImageChange={changeFloatingAvatarDynamicImage}
+        onMotionModeChange={changeFloatingAvatarMotionMode}
         onChatModeChange={(enabled) => setFloatingAvatarChatModeEnabled(enabled, {clearHistory: !enabled})}
         onChatModeToggle={toggleFloatingAvatarChatMode}
         onCompactDragStart={beginCompactFloatingAvatarDrag}
@@ -9757,6 +9820,7 @@ function App() {
           referenceFiles={referenceFiles}
           activeCodeFileName={codeArtifactModal?.meta?.file_name || ''}
           sharedLinks={extSharedLinks}
+          sharedListings={sharedSourceListings}
           isLearningEnabled={learningEnabled}
           isRecordingEnabled={recordingEnabled}
           learningDigestReady={learningDigestReady}
@@ -9811,7 +9875,7 @@ function App() {
       {typeof document !== 'undefined' && vlMonitorOpen && createPortal(
 	        <VisualLearningPanel
 	          learningActive={vlLearningActive}
-	          onLearningToggle={toggleLearning}
+	          onLearningToggle={toggleVisualLearningRecording}
 	          pendingCount={vlPendingCount}
 	          hasBlocking={vlHasBlocking}
 	          recentEvents={vlRecentLearningEvents}
@@ -15161,6 +15225,7 @@ function RightRail({
   referenceFiles,
   activeCodeFileName = '',
   sharedLinks = [],
+  sharedListings = [],
   onLearningToggle,
   onRecordingToggle,
   onReferenceFileDrop,
@@ -15180,6 +15245,11 @@ function RightRail({
   const draggedReferenceKeyRef = useRef('');
   const [draggedSharedSourceKey, setDraggedSharedSourceKey] = useState('');
   const draggedSharedSourceKeyRef = useRef('');
+  // 共用資料夾 → 第一層檔案清單（後端只讀該層，不遞迴）
+  const listingByPath = {};
+  (Array.isArray(sharedListings) ? sharedListings : []).forEach((listing) => {
+    if (listing?.path) listingByPath[listing.path] = listing;
+  });
 
   function handleReferenceDragStart(event, file) {
     const fileKey = referenceFileKey(file);
@@ -15365,21 +15435,45 @@ function RightRail({
             const label = link?.label || link?.Label || fileBaseName(sourcePath) || t('rightRail.sharedLink');
             const sourceKey = sharedSourceKey(link) || `${sourcePath}-${index}`;
             const isDragging = draggedSharedSourceKey === sourceKey;
+            const listing = listingByPath[sourcePath];
+            const listingFiles = listing?.is_dir ? (listing.files || []) : [];
+            const showListing = Boolean(listing && (listing.is_dir || listing.error));
             return (
-              <div
-                className={`shared-source-name${isDragging ? ' shared-source-dragging' : ''}`}
-                data-draggable="true"
-                draggable
-                key={sourceKey}
-                title={sourcePath}
-                onDragStart={(event) => handleSharedSourceDragStart(event, link)}
-                onDragEnd={(event) => finishSharedSourceDrag(event, link)}
-              >
-                <span className="reference-file-title">
-                  {twoLineFileName(label, t('rightRail.sharedLink')).map((line, lineIndex) => <span key={lineIndex}>{line}</span>)}
-                </span>
-                {sourcePath && <small className="reference-file-detail">{sourcePath}</small>}
-              </div>
+              <React.Fragment key={sourceKey}>
+                <div
+                  className={`shared-source-name${isDragging ? ' shared-source-dragging' : ''}`}
+                  data-draggable="true"
+                  draggable
+                  title={sourcePath}
+                  onDragStart={(event) => handleSharedSourceDragStart(event, link)}
+                  onDragEnd={(event) => finishSharedSourceDrag(event, link)}
+                >
+                  <span className="reference-file-title">
+                    {twoLineFileName(label, t('rightRail.sharedLink')).map((line, lineIndex) => <span key={lineIndex}>{line}</span>)}
+                  </span>
+                  {sourcePath && <small className="reference-file-detail">{sourcePath}</small>}
+                </div>
+                {showListing && (
+                  <div className="shared-source-files" aria-label={`${label} - ${t('rightRail.sharedFolderTopOnly')}`}>
+                    {listing.is_dir && <small className="shared-source-scope-hint">{t('rightRail.sharedFolderTopOnly')}</small>}
+                    {listing.error ? (
+                      <small className="shared-source-file-empty">{t('rightRail.sharedFolderUnreadable')}</small>
+                    ) : listingFiles.length === 0 ? (
+                      <small className="shared-source-file-empty">{t('rightRail.sharedFolderEmpty')}</small>
+                    ) : (
+                      listingFiles.map((file) => (
+                        <div className="shared-source-file-row" key={file.path} title={file.path}>
+                          <span className="shared-source-file-name">{file.name}</span>
+                          {file.ext && <span className="reference-file-ext-badge">{file.ext}</span>}
+                        </div>
+                      ))
+                    )}
+                    {listing.truncated && (
+                      <small className="shared-source-file-empty">{t('rightRail.sharedFolderMore', {count: listingFiles.length})}</small>
+                    )}
+                  </div>
+                )}
+              </React.Fragment>
             );
           })}
         </div>

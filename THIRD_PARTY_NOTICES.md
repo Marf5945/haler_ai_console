@@ -59,6 +59,7 @@ All listed licenses are permissive (MIT / BSD / Apache-2.0 / ISC) except
 
 | Dependency | License |
 |---|---|
+| inochi-avatar 1.0.1 / Inox2D runtime | BSD-2-Clause |
 | react | MIT |
 | react-dom | MIT |
 | zustand | MIT |

@@ -5,8 +5,23 @@ const manifestModules = import.meta.glob('../assets/persona_motion/*/manifest.js
 
 const motionAssetUrls = import.meta.glob([
   '../assets/persona_motion/**/*.png',
-  '!../assets/persona_motion/**/_source/*.png',
+  '!../assets/persona_motion/**/_source/**/*.png',
+  '!../assets/persona_motion/**/old/**/*.png',
+  '!../assets/persona_motion/**/generated/**/*.png',
   '!../assets/persona_motion/**/tmp/**/*.png',
+  '!../assets/persona_motion/**/audit/**/*.png',
+], {
+  eager: true,
+  query: '?url',
+  import: 'default',
+});
+
+const motionModelUrls = import.meta.glob([
+  '../assets/persona_motion/**/*.inp',
+  '!../assets/persona_motion/**/_source/**/*.inp',
+  '!../assets/persona_motion/**/old/**/*.inp',
+  '!../assets/persona_motion/**/generated/**/*.inp',
+  '!../assets/persona_motion/**/tmp/**/*.inp',
 ], {
   eager: true,
   query: '?url',
@@ -22,15 +37,55 @@ function folderFromManifestPath(path) {
   return match?.[1] || '';
 }
 
+const YULESAKU_EXPRESSION_FULLBODY_FILES = new Set([
+  'blocked.png',
+  'happy.png',
+  'idle.png',
+  'idle_fixed.png',
+  'sad.png',
+  'sleepy.png',
+  'speechless.png',
+  'thinking.png',
+  'warning.png',
+  'working.png',
+]);
+
+function motionAssetPathCandidates(folder, relativePath) {
+  const value = String(relativePath || '').trim();
+  const candidates = [value];
+  if (folder !== 'yulesaku' || !value.startsWith('fullbody/')) return candidates;
+
+  const filename = value.slice('fullbody/'.length);
+  if (filename.startsWith('turn_left_')) {
+    candidates.push(`fullbody/turnleft/${filename}`);
+  } else if (filename.startsWith('turn_right_')) {
+    candidates.push(`fullbody/turnright/${filename}`);
+  } else if (YULESAKU_EXPRESSION_FULLBODY_FILES.has(filename)) {
+    candidates.push(`fullbody/Expressions/${filename}`);
+  }
+  return [...new Set(candidates)];
+}
+
 function assetURL(folder, relativePath) {
   if (!folder || !relativePath) return '';
   if (isUnsafeMotionAssetPath(relativePath)) return '';
-  return motionAssetUrls[`../assets/persona_motion/${folder}/${relativePath}`] || '';
+  for (const candidatePath of motionAssetPathCandidates(folder, relativePath)) {
+    const url = motionAssetUrls[`../assets/persona_motion/${folder}/${candidatePath}`];
+    if (url) return url;
+  }
+  return '';
+}
+
+function modelURL(folder, relativePath) {
+  if (!folder || !relativePath) return '';
+  if (isUnsafeMotionAssetPath(relativePath)) return '';
+  const url = motionModelUrls[`../assets/persona_motion/${folder}/${relativePath}`];
+  return url || '';
 }
 
 function isUnsafeMotionAssetPath(relativePath) {
   const value = String(relativePath || '').toLowerCase();
-  return /(^|\/)(?:_source|tmp)\//.test(value)
+  return /(^|\/)(?:_source|tmp|old|generated|audit)\//.test(value)
     || /(?:contact[_-]?sheet|source[_-]?boxes|sprite[_-]?sheet|regen(?:erated)?|_green)(?:[./_-]|$)/.test(value);
 }
 
@@ -140,29 +195,41 @@ function proceduralManifest(pack, state, fallbackSrc) {
   };
 }
 
-// Cursor turn steps, ordered from back-left through back-right.
+// Cursor turn steps, ordered from the left turn arc through the right turn arc.
 const TURN_LADDER = [
-  {id: 'back_left30', value: -9},
-  {id: 'back_left60', value: -8},
-  {id: 'side_left', value: -7},
-  {id: 'front_left85', value: -6},
-  {id: 'front_left75', value: -5},
-  {id: 'front_left60', value: -4},
-  {id: 'front_left45', value: -3},
-  {id: 'front_left30', value: -2},
-  {id: 'front_left15', value: -1},
-  {id: 'front_right15', value: 1},
-  {id: 'front_right30', value: 2},
-  {id: 'front_right45', value: 3},
-  {id: 'front_right60', value: 4},
-  {id: 'front_right75', value: 5},
-  {id: 'front_right85', value: 6},
-  {id: 'side_right', value: 7},
-  {id: 'back_right60', value: 8},
-  {id: 'back_right30', value: 9},
+  {id: 'turn_left_010', value: -1},
+  {id: 'turn_left_020', value: -2},
+  {id: 'turn_left_030', value: -3},
+  {id: 'turn_left_040', value: -4},
+  {id: 'turn_left_050', value: -5},
+  {id: 'turn_left_060', value: -6},
+  {id: 'turn_left_070', value: -7},
+  {id: 'turn_left_080', value: -8},
+  {id: 'turn_left_090', value: -9},
+  {id: 'turn_left_105', value: -10},
+  {id: 'turn_left_120', value: -11},
+  {id: 'turn_left_135', value: -12},
+  {id: 'turn_left_150', value: -13},
+  {id: 'turn_left_165', value: -14},
+  {id: 'turn_left_180', value: -15},
+  {id: 'turn_right_010', value: 1},
+  {id: 'turn_right_020', value: 2},
+  {id: 'turn_right_030', value: 3},
+  {id: 'turn_right_040', value: 4},
+  {id: 'turn_right_050', value: 5},
+  {id: 'turn_right_060', value: 6},
+  {id: 'turn_right_070', value: 7},
+  {id: 'turn_right_080', value: 8},
+  {id: 'turn_right_090', value: 9},
+  {id: 'turn_right_105', value: 10},
+  {id: 'turn_right_120', value: 11},
+  {id: 'turn_right_135', value: 12},
+  {id: 'turn_right_150', value: 13},
+  {id: 'turn_right_165', value: 14},
+  {id: 'turn_right_180', value: 15},
 ];
 
-const POSE_STATES = ['front_left30_arms_up', 'front_right30_arms_up', 'back_waist', 'working_reaction', 'happy_tail_wag_front'];
+const POSE_STATES = ['happy_tail_wag_front'];
 const SHY_SEQUENCE = ['back_full', 'back_3q'];
 const FLAT_POSE_STATES = new Set(['back_waist']);
 
@@ -207,6 +274,38 @@ function sequenceFrameURLs(folder, sequenceName) {
     .map((key) => motionAssetUrls[key]);
 }
 
+function resolveInochi2DConfig(entry, stateManifest = {}) {
+  const source = {
+    ...(entry.manifest?.inochi2d || {}),
+    ...(stateManifest.inochi2d || {}),
+  };
+  if (!source.enabled) return null;
+  const anchors = Object.entries(source.anchors || {}).reduce((map, [anchorName, anchor]) => {
+    const modelSrc = modelURL(entry.folder, anchor.model);
+    map[anchorName] = {
+      ...anchor,
+      modelSrc,
+    };
+    return map;
+  }, {});
+  const transitions = Object.entries(source.transitions || {}).reduce((map, [name, frames]) => {
+    map[name] = (frames || [])
+      .map((frame) => {
+        const src = assetURL(entry.folder, typeof frame === 'string' ? frame : frame?.src);
+        if (!src) return null;
+        return typeof frame === 'string' ? src : {...frame, src};
+      })
+      .filter(Boolean);
+    return map;
+  }, {});
+  return {
+    ...source,
+    runtimeUrl: source.runtimeUrl || '/inochi2d-runtime/inochi_fox_demo.js',
+    anchors,
+    transitions,
+  };
+}
+
 export function resolveAvatarMotionManifest(pack, state, fallbackSrc = '') {
   const entry = manifestByAlias.get(normalizeID(pack));
   if (!entry?.manifest) return proceduralManifest(pack, state, fallbackSrc);
@@ -216,6 +315,8 @@ export function resolveAvatarMotionManifest(pack, state, fallbackSrc = '') {
   const stateManifest = manifest.states?.[activeState] || manifest.states?.idle || {};
   const stateBaseSrc = assetURL(entry.folder, stateManifest.base);
   const stateSequence = hydrateSequence(entry.folder, stateManifest.sequence);
+  const inochi2d = resolveInochi2DConfig(entry, stateManifest);
+  const hasInochi2DModel = Boolean(inochi2d && Object.values(inochi2d.anchors || {}).some((anchor) => anchor.modelSrc));
   const inheritedLayers = inheritedLayerDefs(manifest, stateManifest);
   const sourceLayers = inheritedLayers?.length
     ? inheritedLayers
@@ -257,10 +358,40 @@ export function resolveAvatarMotionManifest(pack, state, fallbackSrc = '') {
   const walkFrames = interactive && walkRigEnabled ? walkFrameURLs(entry.folder) : [];
   const walkStartFrames = interactive && walkRigEnabled ? sequenceFrameURLs(entry.folder, 'walk_start') : [];
   const walkStopFrames = interactive && walkRigEnabled ? sequenceFrameURLs(entry.folder, 'walk_stop') : [];
+  const turnTransitions = Object.entries(manifest.turnTransitions || {}).reduce((map, [id, transition]) => {
+    const sequence = hydrateSequence(entry.folder, transition);
+    if (sequence?.frames?.length) {
+      map[id] = {
+        ...transition,
+        ...sequence,
+        from: transition.from,
+        to: transition.to,
+      };
+    }
+    return map;
+  }, {});
+
+  // 逐格圖序列（供「PNG 逐格」動作模式使用）。key = sequence 資料夾名，
+  // 另加 randomAnimation/表情用的別名（walk -> walk_forward）。
+  const frameSequences = {};
+  for (const [name, seq] of Object.entries(manifest.sequences || {})) {
+    const urls = sequenceFrameURLs(entry.folder, name);
+    if (!urls.length) continue;
+    frameSequences[name] = {
+      frames: urls,
+      fps: Number(seq?.fps) > 0 ? Number(seq.fps) : 8,
+      loop: seq?.loop !== false,
+    };
+  }
+  if (frameSequences.walk_forward && !frameSequences.walk) {
+    frameSequences.walk = frameSequences.walk_forward;
+  }
 
   return {
     ...manifest,
     state: activeState,
+    renderer: hasInochi2DModel ? 'inochi2d' : manifest.renderer,
+    inochi2d,
     interactive,
     folder: entry.folder,
     baseSrc: stateBaseSrc || stateSequence?.frames?.[0] || fallbackSrc || '',
@@ -272,6 +403,8 @@ export function resolveAvatarMotionManifest(pack, state, fallbackSrc = '') {
     walkFrames,
     walkStartFrames,
     walkStopFrames,
+    turnTransitions,
+    frameSequences,
     motion: {
       ...(manifest.motion || {}),
       ...(stateManifest.motion || {}),

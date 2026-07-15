@@ -206,9 +206,42 @@ func (a *App) SaveMainAsSub(subName string) (string, error) {
 	}
 
 	// 複製 summaries.md（若存在）
-	srcSummary := filepath.Join(projectRoot, "memory", "summaries.md")
+	srcSummary := filepath.Join(projectRoot, "memory", memory.FileSummaries)
 	if data, err := os.ReadFile(srcSummary); err == nil && len(data) > 0 {
-		os.WriteFile(filepath.Join(subMemDir, "summaries.md"), data, 0o600)
+		os.WriteFile(filepath.Join(subMemDir, memory.FileSummaries), data, 0o600)
+	}
+
+	// v3.1.8 分家：deep_memory 細節＋index 快取一起搬給 sub（嫁妝跟人走）。
+	// main 保留歷代索引：無主條目（SubID 空）改標新 subID，之後 main 展開可循此跨庫深入；
+	// main 端的細節檔清空——main 只做索引與調度，不當全家的倉庫。
+	mainPipe := memory.NewPipeline(projectRoot)
+	subPipe := memory.NewPipeline(subDir)
+	if deepRaw, derr := mainPipe.ReadDeepMemoryRaw(); derr == nil && strings.TrimSpace(deepRaw) != "" {
+		if werr := subPipe.WriteDeepMemoryRaw(deepRaw); werr == nil {
+			if cerr := mainPipe.WriteDeepMemoryRaw(""); cerr != nil {
+				log.Printf("session_close: 清空 main deep_memory 失敗: %v", cerr)
+			}
+		} else {
+			log.Printf("session_close: 搬遷 deep_memory 到 sub 失敗（細節保留在 main）: %v", werr)
+		}
+	}
+	mainEntries := mainPipe.LoadIndexEntries()
+	var subCache []memory.MemoryIndexEntry
+	for i := range mainEntries {
+		if mainEntries[i].SubID != "" {
+			continue // 歷代索引（已屬其他 sub），不動
+		}
+		cached := mainEntries[i] // sub 自帶的快取不標 SubID（在自己家裡）
+		subCache = append(subCache, cached)
+		mainEntries[i].SubID = subID
+	}
+	if len(subCache) > 0 {
+		if err := subPipe.SaveIndexEntries(subCache); err != nil {
+			log.Printf("session_close: 寫入 sub 索引快取失敗: %v", err)
+		}
+		if err := mainPipe.SaveIndexEntries(mainEntries); err != nil {
+			log.Printf("session_close: 更新 main 歷代索引失敗: %v", err)
+		}
 	}
 
 	// 帶入 main 累積的 skill 使用紀錄（tool_history.jsonl）：
@@ -388,6 +421,29 @@ func (a *App) ClearMainTalk() error {
 	// 非致命：清理失敗不擋清對話，但記 log 以便觀測 / 重試。
 	if err := a.PurgeConversationMarks("main"); err != nil {
 		log.Printf("session_close: purge conversation marks failed: %v", err)
+	}
+
+	// v3.1.8：未存檔 session 不留骨灰——summaries、deep_memory 清空，
+	// 無主索引（SubID 空）移除；有 SubID 的是歷代索引（指向已分家的 sub），保留。
+	// 已分家的 session 其細節先前已搬走，這裡清到的只會是使用者選「不存」的殘留。
+	pipe := memory.NewPipeline(projectRoot)
+	if err := pipe.WriteDeepMemoryRaw(""); err != nil {
+		log.Printf("session_close: 清空 main deep_memory 失敗: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "memory", memory.FileSummaries), []byte(""), 0o600); err != nil && !os.IsNotExist(err) {
+		log.Printf("session_close: 清空 main summaries 失敗: %v", err)
+	}
+	entries := pipe.LoadIndexEntries()
+	kept := make([]memory.MemoryIndexEntry, 0, len(entries))
+	for _, e := range entries {
+		if e.SubID != "" {
+			kept = append(kept, e)
+		}
+	}
+	if len(kept) != len(entries) {
+		if err := pipe.SaveIndexEntries(kept); err != nil {
+			log.Printf("session_close: 清理 main 無主索引失敗: %v", err)
+		}
 	}
 
 	log.Printf("session_close: main talk_full cleared")

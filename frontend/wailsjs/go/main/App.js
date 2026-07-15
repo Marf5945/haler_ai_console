@@ -950,6 +950,10 @@ export function ListScheduledJobs() {
   return window['go']['main']['App']['ListScheduledJobs']();
 }
 
+export function ListSharedSourceFiles() {
+  return window['go']['main']['App']['ListSharedSourceFiles']();
+}
+
 export function ListSystemMarks(arg1) {
   return window['go']['main']['App']['ListSystemMarks'](arg1);
 }

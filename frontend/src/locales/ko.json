@@ -1158,7 +1158,11 @@
     "refStatusAdded": "추가됨",
     "sharedLink": "Shared Link",
     "sharedLinkHint": "Includes shared spaces and shared docs",
-    "sharedLinkCount": "{count} sources"
+    "sharedLinkCount": "{count} sources",
+    "sharedFolderTopOnly": "이 폴더의 최상위 항목만 읽습니다",
+    "sharedFolderEmpty": "이 위치에 검색 가능한 문서가 없습니다",
+    "sharedFolderMore": "처음 {count}개만 표시",
+    "sharedFolderUnreadable": "경로를 읽을 수 없습니다"
   },
   "scheduler": {
     "dialogLabel": "예약 시간",
@@ -1426,6 +1430,8 @@
     "bodyFull": "Full body",
     "bodySwitchLabel": "Show",
     "bodyDynamic": "Dynamic image",
+    "motionFrames": "프레임 모션",
+    "motionFramesHint": "걷기/작업을 PNG 프레임으로 재생 (끄면 리그 스웨이)",
     "tickleInteraction": "Interaction",
     "installTitle": "Install this?",
     "installStep1": "Check the source and permissions, then press Confirm below",

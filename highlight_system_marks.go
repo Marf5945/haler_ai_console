@@ -31,7 +31,10 @@ import (
 
 const systemMarksFilename = "system_marks.json"
 const systemMarksPendingFilename = "system_marks_pending.json"
-const systemMarkMaxPerMessage = 12 // 資源耗盡防護：每則訊息最多抽幾個暗標
+const systemMarkMaxPerMessage = 12               // 資源耗盡防護：每則訊息最多抽幾個暗標
+const systemMarkMinBatch = 5                     // 佇列不足此數不啟動整理（省本地模型呼叫）
+const systemMarkMaxPendingAge = 30 * time.Minute // 但最舊項超過此時限就照跑，避免久積不整理
+const systemMarkBatchSize = 8                    // 一次本地模型呼叫最多合併幾則訊息
 
 // ───────────────────────── 路徑 ─────────────────────────
 
@@ -185,15 +188,25 @@ func (a *App) OrganizeSystemMarks(agentID string) (int, error) {
 		highlightMu.Unlock()
 		return 0, nil
 	}
+	// 佇列太短就先不跑（除非最舊項已放太久）：整理是重活，攢一批再做才划算。
+	if len(q.Items) < systemMarkMinBatch {
+		oldest, err := time.Parse(time.RFC3339, q.Items[0].CreatedAt)
+		if err != nil || time.Since(oldest) < systemMarkMaxPendingAge {
+			highlightMu.Unlock()
+			return 0, nil
+		}
+	}
 	snapshot := make([]SystemMarkPending, len(q.Items))
 	copy(snapshot, q.Items)
 	userStore, _ := loadHighlightStore(agentID)
 	highlightMu.Unlock()
 
 	// 2) 模型抽取（lock-free，讓位給前景使用者操作）。
+	// 批次合併呼叫本地模型：N 則訊息一槍，而非一則一槍。
+	termsByItem := extractKeyTermsBatch(snapshot)
 	var candidates []Highlight
-	for _, item := range snapshot {
-		terms := extractKeyTerms(item.Text) // 模型優先，無模型退化
+	for idx, item := range snapshot {
+		terms := termsByItem[idx]
 		seen := map[string]bool{}
 		n := 0
 		for _, term := range terms {
@@ -271,7 +284,67 @@ func (a *App) OrganizeSystemMarks(agentID string) (int, error) {
 	return added, nil
 }
 
-// extractKeyTerms：本地模型抽重點字（回 JSON 字串陣列）；不可用時退化成高頻 token。
+// extractKeyTermsBatch：多則訊息合併成一個 prompt 呼叫本地模型（每 systemMarkBatchSize 則一塊），
+// 回傳與 items 對齊的關鍵詞切片。模型不可用或解析失敗時，該塊退化成高頻 token（純 CPU，零呼叫）。
+func extractKeyTermsBatch(items []SystemMarkPending) [][]string {
+	out := make([][]string, len(items))
+	for start := 0; start < len(items); start += systemMarkBatchSize {
+		end := start + systemMarkBatchSize
+		if end > len(items) {
+			end = len(items)
+		}
+		chunk := items[start:end]
+		var b strings.Builder
+		b.WriteString("針對下面每則編號文字，各挑出最多 8 個重點詞（名詞 / 關鍵概念），")
+		b.WriteString("必須是該則原文出現過的逐字片段，不要改寫、不要含個資。")
+		b.WriteString("只輸出 JSON 物件，key 為編號字串，value 為字串陣列，例如 {\"1\":[\"詞\"],\"2\":[]}：\n")
+		for i, it := range chunk {
+			fmt.Fprintf(&b, "\n[%d] %s\n", i+1, it.Text)
+		}
+		parsed := map[int][]string{}
+		if raw, err := callLocalModel(b.String(), 8*time.Second); err == nil && raw != "" {
+			parsed = parseIndexedStringArrays(raw)
+		}
+		for i, it := range chunk {
+			if terms, ok := parsed[i+1]; ok && len(terms) > 0 {
+				out[start+i] = terms
+			} else {
+				out[start+i] = topTerms([]string{it.Text}, 6) // 退化：高頻 token（grounding 仍會再過濾）
+			}
+		}
+	}
+	return out
+}
+
+// parseIndexedStringArrays 解析 {"1":["a"],"2":["b"]} 形式輸出；容忍前後雜訊。
+func parseIndexedStringArrays(s string) map[int][]string {
+	start := strings.Index(s, "{")
+	end := strings.LastIndex(s, "}")
+	if start < 0 || end <= start {
+		return nil
+	}
+	var raw map[string][]string
+	if err := json.Unmarshal([]byte(s[start:end+1]), &raw); err != nil {
+		return nil
+	}
+	out := map[int][]string{}
+	for k, arr := range raw {
+		var idx int
+		if _, err := fmt.Sscanf(strings.TrimSpace(k), "%d", &idx); err != nil || idx <= 0 {
+			continue
+		}
+		cleaned := make([]string, 0, len(arr))
+		for _, t := range arr {
+			if t = strings.TrimSpace(t); t != "" {
+				cleaned = append(cleaned, t)
+			}
+		}
+		out[idx] = cleaned
+	}
+	return out
+}
+
+// extractKeyTerms：單則版（保留給其他呼叫端）；模型優先，無模型退化成高頻 token。
 func extractKeyTerms(redactedText string) []string {
 	prompt := "從下面文字挑出最多 8 個重點詞（名詞 / 關鍵概念），" +
 		"必須是原文出現過的逐字片段，不要改寫、不要含個資。只輸出 JSON 字串陣列：\n" + redactedText

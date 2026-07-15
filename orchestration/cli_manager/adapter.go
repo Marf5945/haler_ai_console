@@ -154,10 +154,10 @@ func (a *SidecarCLIAdapter) SetEventBus(bus *eventbus.Bus) {
 	a.eventBus = bus
 }
 
-// DismissSummarization 使用者點「稍後」— 啟動 5000 字 cooldown。
+// DismissSummarization 使用者點「稍後」— 啟動 cooldown（門檻的一半）。
 func (a *SidecarCLIAdapter) DismissSummarization() {
 	a.summaryDismissedAt = a.getContinuity("default").counter.Count()
-	a.summaryCooldownChars = a.summaryDismissedAt + 5000
+	a.summaryCooldownChars = a.summaryDismissedAt + conversation.SummarizationThreshold/2
 	a.summaryTriggered = false
 }
 
@@ -279,7 +279,7 @@ func (a *SidecarCLIAdapter) RunSummarizationNow(adapterID, cliPath, model string
 		ids = append(ids, sent.ID)
 	}
 	origChars := len([]rune(content.String()))
-	target := origChars * 6 / 10 // 壓縮目標 ~60%
+	target := int(float64(origChars) * conversation.SummarizationTargetRatio) // 壓縮目標（見 conversation.SummarizationTargetRatio）
 	if target < 200 {
 		target = 200
 	}

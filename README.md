@@ -76,7 +76,7 @@ HaLer for AI Console 是一個本機優先的 AI 工作台，將多種 LLM 介�
 - **Visual Learning**：包含螢幕/影像元素偵測、OCR、按鈕候選、元素字典、動作候選與 dry-run 信心計算；YOLOX 模型為選配，缺少時會回退到 OpenCV shape/text 偵測。
 - **紀念照與相冊**：可由對話或手動按鈕觸發「拍照」確認卡，使用本機 ComfyUI 或相容雲端產圖服務生成角色紀念照，並保存到本機相冊供檢視、改標題與刪除。
 - **彈出式子對話視窗**：可將子對話釘選成獨立 OS 視窗，保留 persona、adapter、model 設定，適合一邊主控台工作一邊追蹤特定代理對話。
-- **Persona Motion Pack**：內建 `frontend/src/assets/persona_motion` 的 Pixi 分層角色動態素材，支援多角度、逐格 sequence、表情/嘴型切換與浮動 avatar 動作。
+- **Persona Motion Pack / 浮動角色動作**：內建 `frontend/src/assets/persona_motion` 的 Pixi 分層角色動態素材，支援全身像、多角度轉向、逐格 sequence、表情/嘴型切換、走路與尾巴動作；runtime 只載入正式 motion pack 資產，來源圖、暫存圖、contact sheet 與重生中間圖不會進入角色資產 registry。
 - **Casebook 與短期檢查記憶**：可將任務節點的成功/失敗案例沉澱為本機案例庫，輔助後續路由、復盤與工作流判斷。
 - **影像標籤輔助工具**：附帶 WD14/ONNXRuntime 相容的離線影像 caption/tagger 工具流程，可用於整理本機圖像素材與角色資料。
 - **Remote Bridge**：可設定 Telegram、Discord、LINE、Teams、QQ 或 custom webhook channel，支援遠端送出、審核回覆、分段 dispatch 與 audit。
@@ -114,7 +114,7 @@ HaLer for AI Console is a local-first AI workbench that brings LLM adapters, doc
 - **Visual Learning**: provides screen/image element detection, OCR, button candidates, an element dictionary, action candidates, and dry-run confidence scoring; the optional YOLOX model falls back to OpenCV shape/text detection when unavailable.
 - **Keepsake photos and album**: offers a confirmation-gated photo flow from chat or manual controls, generates persona keepsake images through local ComfyUI or a compatible cloud image service, and stores them in a local album for viewing, captioning, and deletion.
 - **Pop-out sub chats**: pins a sub conversation into a separate OS window while keeping its persona, adapter, and model settings available.
-- **Persona motion packs**: ships Pixi layered motion assets under `frontend/src/assets/persona_motion`, including multi-angle poses, frame sequences, expression layers, mouth shapes, and floating-avatar motion states.
+- **Persona motion packs / floating avatar motion**: ships Pixi layered motion assets under `frontend/src/assets/persona_motion`, including full-body avatars, multi-angle poses, frame sequences, expression layers, mouth shapes, cursor turning, walk cycles, tail motion, and floating-avatar motion states. Runtime asset loading is limited to curated motion-pack files; source images, temporary renders, contact sheets, and regeneration scratch assets are excluded from the avatar registry.
 - **Casebook and short-term inspection memory**: stores task-node success and failure cases locally to support later routing, review, and workflow decisions.
 - **Image tagging helper**: includes an offline WD14/ONNXRuntime-compatible caption/tagger helper flow for organizing local image assets and persona material.
 - **Remote Bridge**: configures Telegram, Discord, LINE, Teams, QQ, or custom webhook channels for remote submission, review replies, segmented dispatch, and audit trails.

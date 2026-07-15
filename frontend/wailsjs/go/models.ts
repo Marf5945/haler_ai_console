@@ -16,7 +16,6 @@ export namespace browser_pref {
 	}
 
 }
-
 export namespace controlseal {
 
 	export class Settings {
@@ -1281,9 +1280,36 @@ export namespace main {
 	        this.incomplete_count = source["incomplete_count"];
 	    }
 	}
+	export class SubIndexIntegrity {
+	    sub_id: string;
+	    checked_at: string;
+	    merged: number;
+	    dropped: number;
+	    terms_dropped: number;
+	    dropped_tags?: string[];
+	    rebuild_required: boolean;
+	    note?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new SubIndexIntegrity(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sub_id = source["sub_id"];
+	        this.checked_at = source["checked_at"];
+	        this.merged = source["merged"];
+	        this.dropped = source["dropped"];
+	        this.terms_dropped = source["terms_dropped"];
+	        this.dropped_tags = source["dropped_tags"];
+	        this.rebuild_required = source["rebuild_required"];
+	        this.note = source["note"];
+	    }
+	}
 	export class ImportSubResult {
 	    new_system_code: string;
 	    sub_dir: string;
+	    memory_integrity?: SubIndexIntegrity;
 	    tool_conflicts: subexport.ToolConflict[];
 	    installed_tools: string[];
 
@@ -1295,6 +1321,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.new_system_code = source["new_system_code"];
 	        this.sub_dir = source["sub_dir"];
+	        this.memory_integrity = this.convertValues(source["memory_integrity"], SubIndexIntegrity);
 	        this.tool_conflicts = this.convertValues(source["tool_conflicts"], subexport.ToolConflict);
 	        this.installed_tools = source["installed_tools"];
 	    }
@@ -1853,6 +1880,68 @@ export namespace main {
 	        this.agent_id = source["agent_id"];
 	    }
 	}
+	export class SharedSourceFile {
+	    name: string;
+	    path: string;
+	    ext: string;
+	    mod_time: string;
+	    size: number;
+
+	    static createFrom(source: any = {}) {
+	        return new SharedSourceFile(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.ext = source["ext"];
+	        this.mod_time = source["mod_time"];
+	        this.size = source["size"];
+	    }
+	}
+	export class SharedSourceListing {
+	    link_id: string;
+	    label: string;
+	    path: string;
+	    is_dir: boolean;
+	    files: SharedSourceFile[];
+	    truncated?: boolean;
+	    error?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new SharedSourceListing(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.link_id = source["link_id"];
+	        this.label = source["label"];
+	        this.path = source["path"];
+	        this.is_dir = source["is_dir"];
+	        this.files = this.convertValues(source["files"], SharedSourceFile);
+	        this.truncated = source["truncated"];
+	        this.error = source["error"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class SkillExecutionDecision {
 	    decision: string;
 	    resolve_id: string;
@@ -1919,6 +2008,7 @@ export namespace main {
 	        this.message = source["message"];
 	    }
 	}
+
 	export class SubPackagePreview {
 	    export_dir: string;
 	    display_name: string;

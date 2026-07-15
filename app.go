@@ -830,7 +830,11 @@ func (a *App) RunSummarizationNow(adapterID string) (string, error) {
 		return "", err
 	}
 	// Rule 15：寫 summaries.md（非 talk_full）；Rule 8：AppendSummary 內部做 redaction。
-	root := storage.ProjectRoot(appDataRoot(), "default")
+	// v3.1.8 per-agent：在 sub 分頁對話就落該 sub 的 memory；main 對話落 main（暫存工作台）。
+	root, rerr := conversationRootForAgent(a.activeAgentID)
+	if rerr != nil {
+		root = storage.ProjectRoot(appDataRoot(), "default")
+	}
 	pipeline := memory.NewPipeline(root)
 	if _, err := pipeline.AppendSummary(sum.Tag, sum.Content); err != nil {
 		return "", fmt.Errorf("寫入 summaries.md 失敗: %w", err)
@@ -840,10 +844,14 @@ func (a *App) RunSummarizationNow(adapterID string) (string, error) {
 	if strings.TrimSpace(sum.OriginalContent) != "" {
 		deepTag := "D-" + strings.TrimPrefix(sum.Tag, "S-")
 		if _, derr := pipeline.AppendDeepMemory(deepTag, sum.OriginalContent); derr == nil {
+			// 錨點關鍵詞：本地模型（無模型退化高頻 token）抽自 redacted 原文，
+			// 供 展開ㄌ關鍵字ㄌ 在 index 層補命中；不花大模型 token。
+			keyTerms := extractKeyTerms(redactPII(sum.OriginalContent, "user_text"))
 			_ = pipeline.AppendIndexEntry(memory.MemoryIndexEntry{
 				SummaryTag:  sum.Tag,
 				DeepTag:     deepTag,
 				SentenceIDs: sum.SentenceIDs,
+				KeyTerms:    keyTerms,
 				CreatedAt:   time.Now().Format(time.RFC3339),
 			})
 		} else {

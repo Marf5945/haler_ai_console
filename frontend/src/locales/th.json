@@ -1155,7 +1155,11 @@
     "refStatusAdded": "เพิ่มแล้ว",
     "sharedLink": "Shared Link",
     "sharedLinkHint": "Includes shared spaces and shared docs",
-    "sharedLinkCount": "{count} sources"
+    "sharedLinkCount": "{count} sources",
+    "sharedFolderTopOnly": "อ่านเฉพาะชั้นบนสุดของโฟลเดอร์นี้",
+    "sharedFolderEmpty": "ไม่มีเอกสารที่ค้นหาได้ในชั้นนี้",
+    "sharedFolderMore": "แสดงเพียง {count} รายการแรก",
+    "sharedFolderUnreadable": "ไม่สามารถอ่านเส้นทางได้"
   },
   "scheduler": {
     "dialogLabel": "เวลาที่กำหนด",
@@ -1423,6 +1427,8 @@
     "bodyFull": "Full body",
     "bodySwitchLabel": "Show",
     "bodyDynamic": "Dynamic image",
+    "motionFrames": "โมชันแบบเฟรม",
+    "motionFramesHint": "เล่นเดิน/ทำงานด้วยเฟรม PNG (ปิด = ริกโยก)",
     "tickleInteraction": "Interaction",
     "installTitle": "Install this?",
     "installStep1": "Check the source and permissions, then press Confirm below",

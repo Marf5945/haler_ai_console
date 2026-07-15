@@ -2,7 +2,8 @@
 //
 // ┌─────────────────────────────────────────────────────────────┐
 // │ RunSummarization 呼叫指定 LLM 產出摘要，                     │
-// │ 寫入 summaries.md（壓縮 ~60%）和 deep_memory.md（~40%）。    │
+// │ 寫入 summaries.md（壓縮至 SummarizationTargetRatio）＋       │
+// │ deep_memory.md 保留原文細節（可用 展開 撈回）。              │
 // │                                                             │
 // │ 規則：                                                      │
 // │  • talk_full.md 不動（原始對話完整保留）                    │
@@ -67,9 +68,9 @@ func RunSummarization(sentences []Sentence, modelID string, llm SummarizationLLM
 		content += fmt.Sprintf("[%s] %s: %s\n", s.ID, s.Role, s.Content)
 	}
 
-	// 呼叫 LLM 產出摘要（目標壓縮至 60%）
+	// 呼叫 LLM 產出摘要（目標壓縮比見 SummarizationTargetRatio）
 	originalChars := len([]rune(content))
-	targetChars := int(float64(originalChars) * 0.6)
+	targetChars := int(float64(originalChars) * SummarizationTargetRatio)
 
 	summary, err := llm.Summarize(content, targetChars)
 	if err != nil {

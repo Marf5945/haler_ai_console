@@ -1,5 +1,6 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import AnimatedFullBodyAvatar from './AnimatedFullBodyAvatar.jsx';
+import InochiAvatarStage from './InochiAvatarStage.jsx';
 import PixiAvatarStage from './PixiAvatarStage.jsx';
 
 // Pixi 動態舞台的最後防線：掛載/渲染期任何例外都不往上冒——
@@ -104,8 +105,10 @@ export default function FloatingAvatarMode({
   panelOpenSignal = 0,
   bodyMode = 'head',
   dynamicImageEnabled = false,
+  motionMode = 'rig',
   onBodyModeChange,
   onDynamicImageChange,
+  onMotionModeChange,
   onCompactDragStart,
   onCompactDrag,
   onCompactDragEnd,
@@ -154,16 +157,23 @@ export default function FloatingAvatarMode({
   const showBody = bodyMode !== 'head';
   const bodyAvatarSrc = fullBodyAvatarSrc || fullBodyMotionManifest?.baseSrc || '';
   const bodyFallbackSrc = fullBodyMotionManifest?.baseSrc || fullBodyAvatarSrc || '';
+  const useInochiAvatar = showBody
+    && dynamicImageEnabled
+    && fullBodyMotionManifest?.renderer === 'inochi2d'
+    && Object.values(fullBodyMotionManifest?.inochi2d?.anchors || {}).some((anchor) => anchor?.modelSrc);
   const usePixiAvatar = showBody && dynamicImageEnabled && fullBodyMotionManifest?.renderer === 'pixi';
+  const useRuntimeAvatar = usePixiAvatar || useInochiAvatar;
   const avatarRenderMode = !showBody
     ? 'head'
+    : useInochiAvatar
+      ? 'inochi2d'
     : usePixiAvatar
       ? 'pixi'
       : dynamicImageEnabled
         ? 'css-motion'
         : 'static';
-  const tickleActive = usePixiAvatar;
-  const petLoveEnabled = usePixiAvatar && fullBodyMotionManifest?.id === 'yulesaku';
+  const tickleActive = useRuntimeAvatar;
+  const petLoveEnabled = useRuntimeAvatar && fullBodyMotionManifest?.id === 'yulesaku';
   const avatarFrameWidth = showBody ? fullBodyAvatarWidth : avatarSize;
   const avatarFrameHeight = showBody ? fullBodyAvatarHeight : avatarSize;
   const rootRef = useRef(null);
@@ -294,14 +304,16 @@ export default function FloatingAvatarMode({
     if (!panelOpen) setScheduleConfirmPending(false);
   }, [panelOpen]);
 
-  // Pixi 舞台重建時先退回 backstop，避免短暫顯示過期姿勢。
+  // Renderer/model 真正重建時才退回 backstop。表情或狀態變化只是改參數，
+  // Inochi/Pixi stage 不會重新觸發 onReady；若在這裡把 ready 清掉，
+  // 靜態全身 backstop 就會永久留在 canvas 後面。
   useEffect(() => {
     setPixiReady(false);
-  }, [avatarExpression, fullBodyMotionManifest?.id, fullBodyMotionManifest?.state, usePixiAvatar]);
+  }, [bodyMode, fullBodyAvatarKey, fullBodyMotionManifest?.id, useInochiAvatar, usePixiAvatar]);
 
   useEffect(() => {
-    if (!active || !usePixiAvatar) setAttentionPaused(false);
-  }, [active, usePixiAvatar]);
+    if (!active || !useRuntimeAvatar) setAttentionPaused(false);
+  }, [active, useRuntimeAvatar]);
 
   useEffect(() => {
     if (!active || !panelOpenSignal) return;
@@ -315,9 +327,15 @@ export default function FloatingAvatarMode({
 
   const selectedSet = new Set(selectedCandidateIDs || []);
   const visibleCandidates = (candidates || []).slice(0, 5);
-  const panelLeft = clampedPosition.x < window.innerWidth - 390
-    ? clampedPosition.x + avatarFrameWidth + 14
-    : clampedPosition.x - 342;
+  // 迷你面板貼著角色側邊：右側放得下就貼右邊，否則貼左邊，永遠不蓋住角色框。
+  const panelGap = 14;
+  const panelSpaceRight = Math.max(0, window.innerWidth - edgeGap - (clampedPosition.x + avatarFrameWidth + panelGap));
+  const panelSpaceLeft = Math.max(0, clampedPosition.x - panelGap - edgeGap);
+  const panelOnRight = panelSpaceRight >= 220 || panelSpaceRight >= panelSpaceLeft;
+  const panelWidth = Math.min(328, Math.max(200, panelOnRight ? panelSpaceRight : panelSpaceLeft));
+  const panelLeft = panelOnRight
+    ? clampedPosition.x + avatarFrameWidth + panelGap
+    : Math.max(edgeGap, clampedPosition.x - panelGap - panelWidth);
   const panelTop = clamp(clampedPosition.y - 18, edgeGap, Math.max(edgeGap, window.innerHeight - 410));
   const stackLeft = clamp(clampedPosition.x - 44, edgeGap, Math.max(edgeGap, window.innerWidth - 240));
   const stackTop = clamp(clampedPosition.y + avatarFrameHeight + 10, edgeGap, Math.max(edgeGap, window.innerHeight - 230));
@@ -325,11 +343,19 @@ export default function FloatingAvatarMode({
   const rightTipLeft = clampedPosition.x < window.innerWidth - 360 ? clampedPosition.x + avatarFrameWidth + 16 : clampedPosition.x - 304;
   // compact 浮窗模式：面板要落在放大後的視窗內（非整個螢幕座標）。
   const compactPanelTop = clamp(clampedPosition.y - 10, edgeGap, Math.max(edgeGap, window.innerHeight - 430));
-  const compactPanelLeft = clamp(clampedPosition.x + avatarFrameWidth + 18, edgeGap, Math.max(edgeGap, window.innerWidth - 340));
+  // compact 模式同樣貼著角色側邊：右側空間不足時改貼左側，不再 clamp 蓋到角色身上。
+  const compactPanelGap = 18;
+  const compactSpaceRight = Math.max(0, window.innerWidth - edgeGap - (clampedPosition.x + avatarFrameWidth + compactPanelGap));
+  const compactSpaceLeft = Math.max(0, clampedPosition.x - compactPanelGap - edgeGap);
+  const compactPanelOnRight = compactSpaceRight >= 220 || compactSpaceRight >= compactSpaceLeft;
+  const compactPanelWidth = Math.min(328, Math.max(180, compactPanelOnRight ? compactSpaceRight : compactSpaceLeft));
+  const compactPanelLeft = compactPanelOnRight
+    ? clampedPosition.x + avatarFrameWidth + compactPanelGap
+    : Math.max(edgeGap, clampedPosition.x - compactPanelGap - compactPanelWidth);
   const compactPanelStyle = {
     left: compactPanelLeft,
     top: compactPanelTop,
-    width: Math.min(328, Math.max(220, window.innerWidth - compactPanelLeft - edgeGap)),
+    width: compactPanelWidth,
     maxHeight: Math.max(180, window.innerHeight - compactPanelTop - edgeGap),
   };
   const compactStackTop = clampedPosition.y + avatarFrameHeight + 12;
@@ -365,10 +391,12 @@ export default function FloatingAvatarMode({
   const displayStatus = pendingConfirm?.title || statusTitle || t('floatingAvatar.statusIdle');
   const displayLatest = pendingConfirm?.reason || latestText || statusText || t('floatingAvatar.latestIdle');
   const speakerName = persona?.name || t('floatingAvatar.agentFallback');
-  const cleanLatest = String(displayLatest || '').replace(/^Ai[:：]\s*/, '');
+  // \u2063（不可見分隔符）之後是 composer pending 的內部 traceId 標記，顯示前一律剝掉。
+  const stripInternalMarker = (value) => String(value || '').split('\u2063')[0];
+  const cleanLatest = stripInternalMarker(displayLatest).replace(/^Ai[:：]\s*/, '');
   const shakeMessage = shakeDialogue || (shakeState === 'speechless' ? t('floatingAvatar.shakeTooLong') : '');
   const attentionBubbleText = attentionPaused ? '主人，今天好嗎？' : '';
-  const cleanBubbleText = String(shakeMessage || bubbleText || '').replace(/^Ai[:：]\s*/, '').trim();
+  const cleanBubbleText = stripInternalMarker(shakeMessage || bubbleText).replace(/^Ai[:：]\s*/, '').trim();
   const petLoveText = petLoveVisible ? t('floatingAvatar.petLove') : '';
   const displayedBubbleText = petLoveText || attentionBubbleText || cleanBubbleText;
   const topBubbleVisible = (compactWindowMode || attentionPaused || petLoveVisible) && displayedBubbleText && (petLoveVisible || attentionPaused || !bubbleDismissed || shakeMessageVisible);
@@ -617,7 +645,7 @@ export default function FloatingAvatarMode({
           onDrop={handleDrop}
         >
           {showBody ? (
-            usePixiAvatar ? (
+            useRuntimeAvatar ? (
               <span className="floating-avatar-pixi-shell">
                 {!pixiReady && (
                   <img
@@ -634,7 +662,7 @@ export default function FloatingAvatarMode({
                   />
                 )}
                 <PixiStageErrorBoundary
-                  resetKey={`${fullBodyMotionManifest?.id || ''}|${fullBodyAvatarKey}|${bodyMode}|${avatarExpression}`}
+                  resetKey={`${fullBodyMotionManifest?.id || ''}|${fullBodyAvatarKey}|${bodyMode}|${avatarExpression}|${avatarRenderMode}`}
                   fallback={(
                     <AnimatedFullBodyAvatar
                       src={bodyAvatarSrc}
@@ -644,17 +672,32 @@ export default function FloatingAvatarMode({
                     />
                   )}
                 >
-                  <PixiAvatarStage
-                    manifest={fullBodyMotionManifest}
-                    fallbackSrc={bodyAvatarSrc}
-                    expression={avatarExpression}
-                    width={avatarFrameWidth}
-                    height={avatarFrameHeight}
-                    tickle={tickleActive}
-                    onReady={() => setPixiReady(true)}
-                    onAttentionPauseChange={setAttentionPaused}
-                    onPetComplete={showPetLoveBubble}
-                  />
+                  {useInochiAvatar ? (
+                    <InochiAvatarStage
+                      config={fullBodyMotionManifest?.inochi2d}
+                      fallbackSrc={bodyAvatarSrc}
+                      width={avatarFrameWidth}
+                      height={avatarFrameHeight}
+                      expression={avatarExpression}
+                      tickle={tickleActive}
+                      motionMode={motionMode}
+                      frameSequences={fullBodyMotionManifest?.frameSequences}
+                      onReady={() => setPixiReady(true)}
+                      onPetComplete={showPetLoveBubble}
+                    />
+                  ) : (
+                    <PixiAvatarStage
+                      manifest={fullBodyMotionManifest}
+                      fallbackSrc={bodyAvatarSrc}
+                      expression={avatarExpression}
+                      width={avatarFrameWidth}
+                      height={avatarFrameHeight}
+                      tickle={tickleActive}
+                      onReady={() => setPixiReady(true)}
+                      onAttentionPauseChange={setAttentionPaused}
+                      onPetComplete={showPetLoveBubble}
+                    />
+                  )}
                 </PixiStageErrorBoundary>
               </span>
             ) : (
@@ -723,6 +766,17 @@ export default function FloatingAvatarMode({
             >
               {menuCheck(dynamicImageEnabled, t('floatingAvatar.bodyDynamic'))}
             </button>
+            {useInochiAvatar && (
+              <button
+                type="button"
+                className={motionMode === 'frames' ? 'floating-avatar-body-active-btn' : ''}
+                aria-pressed={motionMode === 'frames'}
+                onClick={() => onMotionModeChange?.(motionMode === 'frames' ? 'rig' : 'frames')}
+                title={t('floatingAvatar.motionFramesHint')}
+              >
+                {menuCheck(motionMode === 'frames', t('floatingAvatar.motionFrames'))}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
@@ -860,28 +914,32 @@ export default function FloatingAvatarMode({
       )}
 
       {panelOpen && (
-        <section className="floating-avatar-mini-panel" style={compactWindowMode ? compactPanelStyle : {left: panelLeft, top: panelTop}} aria-label={t('floatingAvatar.panelLabel')}>
+        <section className="floating-avatar-mini-panel" style={compactWindowMode ? compactPanelStyle : {left: panelLeft, top: panelTop, width: panelWidth}} aria-label={t('floatingAvatar.panelLabel')}>
           <header>
             <div>
               <span>{chatMode ? t('floatingAvatar.chatPanelKicker') : t('floatingAvatar.panelKicker')}</span>
               <strong>{persona?.name || t('floatingAvatar.agentFallback')}</strong>
             </div>
             <div className="floating-avatar-panel-header-actions">
-              <button
-                type="button"
-                className={`floating-avatar-chat-toggle ${chatMode ? 'floating-avatar-chat-toggle-on' : ''}`}
-                aria-pressed={chatMode}
-                onClick={() => {
-                  noteAction();
-                  if (onChatModeToggle) {
-                    onChatModeToggle(!chatMode);
-                  } else {
-                    onChatModeChange?.(!chatMode);
-                  }
-                }}
-              >
-                {menuCheck(chatMode, t('floatingAvatar.chatToggle'))}
-              </button>
+              {/* 閒聊切換鈕只在已勾選閒聊模式時顯示；未勾時面板維持正式任務的乾淨版面，
+                  要開閒聊請走頭像右鍵選單的「閒聊模式」勾選。 */}
+              {chatMode && (
+                <button
+                  type="button"
+                  className="floating-avatar-chat-toggle floating-avatar-chat-toggle-on"
+                  aria-pressed={chatMode}
+                  onClick={() => {
+                    noteAction();
+                    if (onChatModeToggle) {
+                      onChatModeToggle(!chatMode);
+                    } else {
+                      onChatModeChange?.(!chatMode);
+                    }
+                  }}
+                >
+                  {menuCheck(chatMode, t('floatingAvatar.chatToggle'))}
+                </button>
+              )}
               <button type="button" onClick={() => setPanelOpen(false)} aria-label={t('common.close')}>×</button>
             </div>
           </header>

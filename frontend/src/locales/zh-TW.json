@@ -1166,7 +1166,11 @@
     "refStatusChecking": "檢查中",
     "refStatusReady": "已載入",
     "refStatusError": "失敗",
-    "refStatusAdded": "已加入"
+    "refStatusAdded": "已加入",
+    "sharedFolderTopOnly": "只讀取此資料夾第一層",
+    "sharedFolderEmpty": "此層沒有可搜尋的文件",
+    "sharedFolderMore": "僅顯示前 {count} 筆",
+    "sharedFolderUnreadable": "路徑無法讀取"
   },
   "scheduler": {
     "dialogLabel": "排程時間",
@@ -1439,6 +1443,8 @@
     "bodyFull": "全身像",
     "bodySwitchLabel": "顯示",
     "bodyDynamic": "動態圖像",
+    "motionFrames": "逐格動作",
+    "motionFramesHint": "用你畫的逐格圖播放走路/工作動作（關閉則用立體骨架擺動）",
     "tickleInteraction": "互動",
     "installTitle": "要安裝這個嗎？",
     "installStep1": "確認來源與權限後，按下方「確認加入」",

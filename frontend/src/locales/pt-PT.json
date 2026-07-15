@@ -1160,7 +1160,11 @@
     "refStatusAdded": "Adicionado",
     "sharedLink": "Shared Link",
     "sharedLinkHint": "Includes shared spaces and shared docs",
-    "sharedLinkCount": "{count} sources"
+    "sharedLinkCount": "{count} sources",
+    "sharedFolderTopOnly": "Lê apenas o primeiro nível desta pasta",
+    "sharedFolderEmpty": "Sem documentos pesquisáveis neste nível",
+    "sharedFolderMore": "A mostrar os primeiros {count} itens",
+    "sharedFolderUnreadable": "Não é possível ler o caminho"
   },
   "scheduler": {
     "dialogLabel": "Hora da Agenda",
@@ -1428,6 +1432,8 @@
     "bodyFull": "Full body",
     "bodySwitchLabel": "Show",
     "bodyDynamic": "Dynamic image",
+    "motionFrames": "Animação por frames",
+    "motionFramesHint": "Andar/trabalhar com os teus PNG (desligado = rig 3D)",
     "tickleInteraction": "Interaction",
     "installTitle": "Install this?",
     "installStep1": "Check the source and permissions, then press Confirm below",

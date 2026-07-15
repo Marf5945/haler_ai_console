@@ -498,6 +498,8 @@ export function ListReviewArchive():Promise<Array<review.ArchivedCard>>;
 
 export function ListScheduledJobs():Promise<Array<scheduler.Job>>;
 
+export function ListSharedSourceFiles():Promise<Array<main.SharedSourceListing>>;
+
 export function ListSystemMarks(arg1:string):Promise<string>;
 
 export function ListThreatRecords():Promise<any>;

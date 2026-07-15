@@ -2,11 +2,15 @@
 
 這個資料夾是 PixiJS 角色動圖素材包。`manifest.json` 是唯一入口，圖片可分狀態放在多個子資料夾：
 
-- `fullbody/*.png`：每個狀態的整體 fallback 圖。
+- `fullbody/Expressions/*.png`：idle、working 與各表情狀態的整體 fallback 圖。
+- `fullbody/turnleft/turn_left_*.png`：向左轉的整體 fallback 影格。
+- `fullbody/turnright/turn_right_*.png`：向右轉的整體 fallback 影格。
 - `parts/<angle>/<state>/*.png`：可選的分層部件，例如 `front/idle/head.png`、`front/idle/pelvis_vcut.png`、`front/idle/mouth_open_talk.png`。
 - `sequences/<action>/frame_000.png`：可選的逐格動作序列。
 
 目前 manifest 先宣告狀態、動畫參數與 `partCatalog`；如果 active layer 還沒有啟用，系統會回退到既有全身圖。
+
+runtime 只應連到正式資產路徑。`_source/`、`tmp/`、contact sheet、source box、sprite sheet、regenerated 或 `_green` 類中間圖都不能放進 `manifest.json`，也會被 motion registry 過濾，避免把裁切碎片或暫存大圖顯示在角色身上。
 
 ## Front Idle v1
 
@@ -39,7 +43,7 @@
 
 ## Front Happy Tail Wag v1
 
-已補上正面開心大幅左右搖尾巴素材，放在 `sequences/tail_wag_happy_front/frame_000.png` 到 `frame_007.png`。這 8 格是透明 200x360 對位尾巴 overlay，不是整張全身替換圖；裁切後的尾巴素材另放在 `parts/front/idle/happy_tail_wag/tail_frame_000.png` 到 `tail_frame_007.png`。
+已補上正面開心大幅左右搖尾巴素材，放在 `sequences/tail_wag_happy_front/frame_000.png` 到 `frame_007.png`。這 8 格是透明 200x360 對位影格；人物 alpha 高度需維持約 350px 並貼近同一個腳底基準，避免切換到搖尾巴時角色突然縮小或跳位。裁切後的尾巴素材另放在 `parts/front/idle/happy_tail_wag/tail_frame_000.png` 到 `tail_frame_007.png`。
 
 尾巴 overlay 依 200x360 畫布對位，並遮掉前景手、身體與腿，避免把右手一起甩進尾巴素材。
 
@@ -100,7 +104,7 @@
 
 比例暫時不要調整。所有新增角度維持 `manifest.size` 的 200x360 設計畫布與目前身高、頭身、胸腹、骨盆位置，只做同畫布內的透明切件與對位；等所有角度都能接起來再評估比例細修。
 
-每個新增或重生角度都拆同一套 Pixi 可動槽位：
+已拆分的轉身角度維持同一套 Pixi 可動槽位；fallback bridge 角度先只保證 200x360 對位與 fullbody base 存在，等需要長時間停留或局部表情時再拆件：
 
 - 核心：頭、胸腹、骨盆。
 - 手臂：觀眾視角左/右上臂、前臂、手。
@@ -110,4 +114,4 @@
 
 `manifest.json` 的 `turnRigContract` 是這份規格的機器可讀入口。完成的角度都已升成 state，且 layer id 維持 canonical slot，不會因為檔名有 `_back`、`_left45` 就改掉 Pixi 的骨架名稱。背面完整圖沒有可見臉部，因此 `back_full` 的吻部、嘴、眼是透明 placeholder，保留槽位給 Pixi runtime。
 
-公開包只保留 runtime 需要的 manifest、全身 fallback、分層 parts 與 sequence frame；切圖來源與暫存素材不放進倉庫。
+公開包只保留 runtime 需要的 manifest、fullbody/Expressions、fullbody/turnleft、fullbody/turnright、分層 parts 與 sequence frame；切圖來源與暫存素材不放進倉庫。

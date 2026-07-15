@@ -20,7 +20,7 @@ async function bindings() {
 }
 
 const FINALIZE_DEBOUNCE_MS = 3000;  // 最後一則訊息靜止幾秒視為定稿
-const IDLE_ORGANIZE_MS = 120000;    // 無操作 2 分鐘 → 觸發整理
+const IDLE_ORGANIZE_MS = 300000;    // 無操作 5 分鐘 → 觸發整理（後端另有佇列門檻，攢一批才真的跑）
 const BATTERY_THRESHOLD = 0.4;      // 電量 > 門檻才跑重整理
 
 function sourceOf(msg) {

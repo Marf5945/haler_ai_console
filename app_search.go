@@ -359,7 +359,8 @@ func (a *App) localSearchRoots() []localsearch.Root {
 			if _, err := os.Stat(path); err != nil {
 				continue
 			}
-			roots = append(roots, localsearch.Root{Path: path, Source: "document"})
+			// 連結的共用資料夾：只搜第一層，不深入子資料夾（使用者明確要求不讀其他層）。
+			roots = append(roots, localsearch.Root{Path: path, Source: "document", TopLevelOnly: true})
 		}
 	}
 	return roots

@@ -85,6 +85,9 @@ type SearchResult struct {
 type Root struct {
 	Path   string
 	Source string
+	// TopLevelOnly 只索引根目錄第一層的檔案，不深入任何子資料夾。
+	// 供「連結特定資料夾」的 shared_source 使用，避免掃到其他層。
+	TopLevelOnly bool
 }
 
 type Item struct {
@@ -201,7 +204,7 @@ func (s *Service) searchRoots(ctx context.Context, query string, auxTerms []stri
 		if !scopeAllows(scope, source) && !scopeMayAllowFileCategory(scope) {
 			continue
 		}
-		index, err := s.indexRoot(ctx, cleanRoot, source)
+		index, err := s.indexRoot(ctx, cleanRoot, source, root.TopLevelOnly)
 		if err != nil {
 			return SearchOutcome{}, err
 		}
@@ -237,8 +240,8 @@ type cachedRootIndex struct {
 	bytesScanned int64
 }
 
-func (s *Service) indexRoot(ctx context.Context, cleanRoot, source string) (cachedRootIndex, error) {
-	key := fmt.Sprintf("%s|%s|%d|%d|%d", cleanRoot, source, s.maxFileSize, s.maxFiles, s.maxBytesScanned)
+func (s *Service) indexRoot(ctx context.Context, cleanRoot, source string, topLevelOnly bool) (cachedRootIndex, error) {
+	key := fmt.Sprintf("%s|%s|%d|%d|%d|%t", cleanRoot, source, s.maxFileSize, s.maxFiles, s.maxBytesScanned, topLevelOnly)
 	now := time.Now()
 	rootIndexCache.Lock()
 	if cached, ok := rootIndexCache.entries[key]; ok && now.Before(cached.expiresAt) {
@@ -258,7 +261,11 @@ func (s *Service) indexRoot(ctx context.Context, cleanRoot, source string) (cach
 			return errStopSearch
 		}
 		if entry.IsDir() {
-			if shouldSkipDir(entry.Name()) && path != cleanRoot {
+			if path == cleanRoot {
+				return nil
+			}
+			// TopLevelOnly：只讀連結資料夾這一層，任何子資料夾一律跳過。
+			if topLevelOnly || shouldSkipDir(entry.Name()) {
 				return filepath.SkipDir
 			}
 			return nil

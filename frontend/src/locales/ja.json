@@ -1164,7 +1164,11 @@
     "refStatusAdded": "追加済み",
     "sharedLink": "Shared Link",
     "sharedLinkHint": "Includes shared spaces and shared docs",
-    "sharedLinkCount": "{count} sources"
+    "sharedLinkCount": "{count} sources",
+    "sharedFolderTopOnly": "このフォルダの直下のみ読み取ります",
+    "sharedFolderEmpty": "この階層に検索可能な文書はありません",
+    "sharedFolderMore": "先頭 {count} 件のみ表示",
+    "sharedFolderUnreadable": "パスを読み取れません"
   },
   "scheduler": {
     "dialogLabel": "スケジュール時刻",
@@ -1432,6 +1436,8 @@
     "bodyFull": "Full body",
     "bodySwitchLabel": "Show",
     "bodyDynamic": "Dynamic image",
+    "motionFrames": "コマ送り動作",
+    "motionFramesHint": "歩行/作業をPNGコマで再生（オフ=リグ揺れ）",
     "tickleInteraction": "Interaction",
     "installTitle": "Install this?",
     "installStep1": "Check the source and permissions, then press Confirm below",

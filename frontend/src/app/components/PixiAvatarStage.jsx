@@ -16,11 +16,11 @@ const TICKLE_POKE_SCALE = 0.58;
 const TICKLE_MAX_POWER = 0.72;
 const WALK_SPEED_SCALE = 5 / 8;
 const LOOK_EASE_RATE = 8;
-const TURN_EASE_RATE = 4.2;
-const TURN_FAST_STEP_DELAY_MS = 180;
-const TURN_SLOW_STEP_DELAY_MS = 280;
-const TURN_CENTER_STEP_DELAY_MS = 80;
-const ATTENTION_TURN_STEP_DELAY_MS = 330;
+const TURN_EASE_RATE = 9.5;
+const TURN_FAST_STEP_DELAY_MS = 42;
+const TURN_SLOW_STEP_DELAY_MS = 68;
+const TURN_CENTER_STEP_DELAY_MS = 32;
+const ATTENTION_TURN_STEP_DELAY_MS = 72;
 const POSE_FADE_IN_RATE = 9;
 const POSE_FADE_OUT_RATE = 8;
 const TURN_FADE_IN_RATE = 8;
@@ -32,11 +32,11 @@ const ATTENTION_TRIGGER_DELAY_MS = 3500;
 const ATTENTION_TURN_OUT_MS = 3000;
 const ATTENTION_TURN_TOTAL_MS = 6000;
 const ATTENTION_CENTER_WIDTH = 200;
-const TURN_ENTER = [0, 0.06, 0.14, 0.24, 0.36, 0.5, 0.64, 0.78, 0.88, 0.96];
-const TURN_SIDE_STEP = 7;
-const TURN_CURSOR_START_STEP = 3;
-const TURN_CURSOR_45PX = 300;
-const TURN_CURSOR_SIDE_PX = 650;
+const TURN_ENTER = [0, 0.035, 0.075, 0.12, 0.17, 0.225, 0.285, 0.35, 0.42, 0.5, 0.58, 0.66, 0.74, 0.82, 0.9, 0.97];
+const TURN_SIDE_STEP = 9;
+const TURN_CURSOR_START_STEP = 2;
+const TURN_CURSOR_45PX = 92;
+const TURN_CURSOR_SIDE_PX = 292;
 const TURN_EXIT_GAP = 0.06;
 const ATTENTION_FINISH_COOLDOWN_MS = 3000;
 const PET_LOVE_HOLD_MS = 2000;
@@ -262,6 +262,8 @@ export default function PixiAvatarStage({
       attentionBehaviorIndex: 0,
       turnValue: 0,
       turnSwitched: 0,
+      turnTransitionKey: '',
+      turnTransitionUntil: 0,
     };
     const pet = {lift: 0, arm: 'right'};
     const petLove = {start: 0, cooldownUntil: 0};
@@ -281,6 +283,7 @@ export default function PixiAvatarStage({
       attention.paused = paused;
       attention.startedAt = paused ? now : 0;
       if (paused) {
+        targetLookRef.current = {x: 0, y: 0, turnX: 0};
         ctl.behavior = finishBehavior;
         ctl.nextBehaviorAt = now + (manifest?.id === 'yulesaku' ? 60000 : BORED_AFTER_MS);
         if (finishBehavior) {
@@ -353,6 +356,17 @@ export default function PixiAvatarStage({
         if (turnEnabled) {
           manifest.turnStates.forEach((ts) => {
             groupDefs.set(`turn:${ts.value}`, {layers: ts.layers || [], baseSrc: ts.baseSrc, motion: ts.motion || {}});
+          });
+          Object.entries(manifest.turnTransitions || {}).forEach(([id, transition]) => {
+            const from = numberValue(transition?.from, NaN);
+            const to = numberValue(transition?.to, NaN);
+            if (!Number.isFinite(from) || !Number.isFinite(to) || !transition?.frames?.length) return;
+            groupDefs.set(`turn-transition:${from}:${to}`, {
+              baseSrc: transition.frames[0],
+              sequence: transition,
+              motion: manifest.motion || {},
+              transitionId: id,
+            });
           });
           (manifest.poseStates || []).forEach((ps) => {
             groupDefs.set(`pose:${ps.id}`, {layers: ps.layers || [], baseSrc: ps.baseSrc, sequence: ps.sequence || null, motion: ps.motion || {}});
@@ -672,6 +686,15 @@ export default function PixiAvatarStage({
                 : TURN_ENTER[Math.abs(cur)] - TURN_EXIT_GAP;
               const ok = target === 0 || (growing ? mag >= need : mag < need);
               if (ok && groupDefs.has(`turn:${target}`)) {
+                const transitionKey = `turn-transition:${cur}:${target}`;
+                const transitionDef = groupDefs.get(transitionKey);
+                if (transitionDef?.sequence?.frames?.length) {
+                  ctl.turnTransitionKey = transitionKey;
+                  ctl.turnTransitionUntil = now + frameSequenceDurationMs(transitionDef.sequence);
+                } else {
+                  ctl.turnTransitionKey = '';
+                  ctl.turnTransitionUntil = 0;
+                }
                 ctl.turnValue = target;
                 ctl.turnSwitched = now;
               }
@@ -799,7 +822,10 @@ export default function PixiAvatarStage({
             if (group.kind === 'flat') {
               if (group.__flatTextures?.length > 1) {
                 const sequenceFps = Math.max(1, numberValue(group.__flatSequence?.fps, 8));
-                const rawFrame = Math.floor(time * sequenceFps);
+                const elapsed = Math.max(0, (now - (group.__playStartedAt || now)) / 1000);
+                const rawFrame = group.__flatSequence?.loop === false
+                  ? Math.floor(elapsed * sequenceFps)
+                  : Math.floor(time * sequenceFps);
                 const frame = group.__flatSequence?.loop === false
                   ? Math.min(group.__flatTextures.length - 1, rawFrame)
                   : rawFrame % group.__flatTextures.length;
@@ -994,9 +1020,9 @@ export default function PixiAvatarStage({
       if (attention.side !== side) {
         clearAttentionTimer();
         attention.side = side;
-        attention.timer = window.setTimeout(() => {
-          attention.timer = null;
-          setAttentionPaused(true, performance.now(), nextAttentionFinishBehavior());
+          attention.timer = window.setTimeout(() => {
+            attention.timer = null;
+            setAttentionPaused(true, performance.now(), nextAttentionFinishBehavior());
         }, ATTENTION_TRIGGER_DELAY_MS);
       }
       return false;

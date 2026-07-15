@@ -1162,7 +1162,11 @@
     "refStatusChecking": "Checking",
     "refStatusReady": "Loaded",
     "refStatusError": "Failed",
-    "refStatusAdded": "Added"
+    "refStatusAdded": "Added",
+    "sharedFolderTopOnly": "Reads only the top level of this folder",
+    "sharedFolderEmpty": "No searchable documents at this level",
+    "sharedFolderMore": "Showing first {count} items",
+    "sharedFolderUnreadable": "Path is not readable"
   },
   "scheduler": {
     "dialogLabel": "Schedule Time",
@@ -1435,6 +1439,8 @@
     "bodyFull": "Full body",
     "bodySwitchLabel": "Show",
     "bodyDynamic": "Dynamic image",
+    "motionFrames": "Frame motion",
+    "motionFramesHint": "Play walk/work actions with your PNG frames (off = 3D rig sway)",
     "tickleInteraction": "Interaction",
     "installTitle": "Install this?",
     "installStep1": "Check the source and permissions, then press Confirm below",

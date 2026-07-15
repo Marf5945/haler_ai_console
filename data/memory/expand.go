@@ -21,7 +21,60 @@ type MemoryIndexEntry struct {
 	SummaryTag  string   `json:"summary_tag"`            // 例 "S-12345"
 	DeepTag     string   `json:"deep_tag"`               // 例 "D-12345"
 	SentenceIDs []string `json:"sentence_ids,omitempty"` // 被摘要的原始句子 ID
+	KeyTerms    []string `json:"key_terms,omitempty"`    // 該段的錨點關鍵詞（標注系統供給，輔助展開搜尋）
+	SubID       string   `json:"sub_id,omitempty"`       // 分家後細節所在的 sub（main 歷代索引用；sub 自帶的快取留空）
 	CreatedAt   string   `json:"created_at"`
+}
+
+// LoadIndexEntries 回傳 index.json 全部條目（無檔或壞檔回空）。
+func (p *Pipeline) LoadIndexEntries() []MemoryIndexEntry {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.loadIndex()
+}
+
+// SaveIndexEntries 以原子寫入整檔覆寫 index.json。
+func (p *Pipeline) SaveIndexEntries(entries []MemoryIndexEntry) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	data, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(p.rootDir, FileMemoryIndex)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// ReadDeepMemoryRaw 讀 deep_memory.md 全文（無檔回空字串，不算錯）。
+func (p *Pipeline) ReadDeepMemoryRaw() (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	data, err := os.ReadFile(filepath.Join(p.rootDir, FileDeepMemory))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return string(data), nil
+}
+
+// WriteDeepMemoryRaw 整檔覆寫 deep_memory.md（0600）。
+// 僅供「分家搬遷」與「session 清理」：內容必須是既有檔案（已過 RedactBeforeWrite）原樣搬動或清空，
+// 不得用來寫入未經 redaction 的新文字。
+func (p *Pipeline) WriteDeepMemoryRaw(content string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return os.WriteFile(filepath.Join(p.rootDir, FileDeepMemory), []byte(content), 0o600)
+}
+
+// TruncateBytesRuneSafe 對外版 rune-safe 截斷（main 跨庫展開時截斷 sub 段落用）。
+func TruncateBytesRuneSafe(s string, maxBytes int) string {
+	return truncateBytesRuneSafe(s, maxBytes)
 }
 
 // AppendDeepMemory 將摘要前的原文細節追加到 deep_memory.md（同 AppendSummary 格式）。
@@ -133,7 +186,47 @@ func (p *Pipeline) SearchDeepMemory(query string, maxHits, maxBytes int) ([]stri
 			hits = append(hits, truncateBytesRuneSafe("## "+section, maxBytes))
 		}
 	}
+	// 索引輔助：內文沒掃滿時，用 index 的錨點關鍵詞（標注系統供給）補命中。
+	if len(hits) < maxHits {
+		if entries := p.loadIndex(); entries != nil {
+			seen := map[string]bool{}
+			for _, h := range hits {
+				seen[firstLineOf(h)] = true
+			}
+			for i := len(entries) - 1; i >= 0 && len(hits) < maxHits; i-- {
+				e := entries[i]
+				if e.DeepTag == "" || len(e.KeyTerms) == 0 {
+					continue
+				}
+				joined := strings.ToLower(strings.Join(e.KeyTerms, " "))
+				matched := true
+				for _, term := range terms {
+					if !strings.Contains(joined, term) {
+						matched = false
+						break
+					}
+				}
+				if !matched {
+					continue
+				}
+				section, serr := p.readSection(FileDeepMemory, e.DeepTag)
+				if serr != nil || seen[firstLineOf(section)] {
+					continue
+				}
+				seen[firstLineOf(section)] = true
+				hits = append(hits, truncateBytesRuneSafe(section, maxBytes))
+			}
+		}
+	}
 	return hits, nil
+}
+
+// firstLineOf 取段落首行（"## <tag> — ts"）當去重 key。
+func firstLineOf(s string) string {
+	if i := strings.Index(s, "\n"); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 func (p *Pipeline) loadIndex() []MemoryIndexEntry {

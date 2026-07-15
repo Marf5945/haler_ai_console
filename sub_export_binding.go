@@ -98,6 +98,13 @@ func (a *App) ExportSubHandler(subID, displayName, mode, destDir, toolsJSON stri
 		if err := mgr.Remove(subID); err != nil {
 			log.Printf("[EXPORT] 移除 tab order 失敗: %v", err)
 		}
+		// v3.1.8：sub 自帶索引快取離開，main 端該 sub 的歷代索引剪除，不留斷鏈。
+		// 之後裝回任何機台，ImportSubHandler 會驗證快取並還給 main。
+		if pruned, perr := pruneMainIndexForSub(projectRoot, subID); perr != nil {
+			log.Printf("[EXPORT] 剪除 main 歷代索引失敗: %v", perr)
+		} else if pruned > 0 {
+			log.Printf("[EXPORT] 剪除 %d 筆 sub=%s 的 main 歷代索引", pruned, subID)
+		}
 	}
 
 	log.Printf("[EXPORT] 匯出完成: mode=%s sub=%s new_code=%s", mode, subID, result.NewSystemCode)
@@ -110,10 +117,11 @@ func (a *App) ExportSubHandler(subID, displayName, mode, destDir, toolsJSON stri
 
 // ImportSubResult 匯入結果（前端用）。
 type ImportSubResult struct {
-	NewSystemCode  string                   `json:"new_system_code"`
-	SubDir         string                   `json:"sub_dir"`
-	ToolConflicts  []subexport.ToolConflict `json:"tool_conflicts"`
-	InstalledTools []string                 `json:"installed_tools"`
+	NewSystemCode   string                   `json:"new_system_code"`
+	SubDir          string                   `json:"sub_dir"`
+	MemoryIntegrity *SubIndexIntegrity       `json:"memory_integrity,omitempty"`
+	ToolConflicts   []subexport.ToolConflict `json:"tool_conflicts"`
+	InstalledTools  []string                 `json:"installed_tools"`
 }
 
 type SubPackagePreview struct {
@@ -369,6 +377,19 @@ func (a *App) ImportSubHandler(exportDir string) (*ImportSubResult, error) {
 		log.Printf("[IMPORT] read imported talk_full for system mark revalidation failed: %v", readErr)
 	}
 
+	// v3.1.8：吸收 sub 自帶的索引快取——驗證後併入 main 歷代索引，main 免重建。
+	// 防篡改：不信快取本身，逐條掃 sub 的 deep_memory 內容反驗證（同暗標 Revalidate 精神）。
+	// 驗出問題時：報告回寫進 sub（memory/index_integrity.json）＋隨匯入結果帶給前端提醒使用者。
+	var integrity *SubIndexIntegrity
+	if integ, aerr := a.absorbSubIndexCache(result.NewSystemCode, result.SubDir); aerr != nil {
+		log.Printf("[IMPORT] 索引快取併入失敗: %v", aerr)
+	} else if integ != nil {
+		log.Printf("[IMPORT] 索引快取驗證: 併入=%d 丟棄=%d 詞丟棄=%d", integ.Merged, integ.Dropped, integ.TermsDropped)
+		if integ.Dropped > 0 || integ.TermsDropped > 0 {
+			integrity = integ
+		}
+	}
+
 	// 新增到 tab order
 	mgr := a.getTabOrderManager()
 	if err := mgr.Append(result.NewSystemCode); err != nil {
@@ -379,11 +400,143 @@ func (a *App) ImportSubHandler(exportDir string) (*ImportSubResult, error) {
 		result.NewSystemCode, len(result.ToolConflicts), len(result.InstalledTools))
 
 	return &ImportSubResult{
-		NewSystemCode:  result.NewSystemCode,
-		SubDir:         result.SubDir,
-		ToolConflicts:  result.ToolConflicts,
-		InstalledTools: result.InstalledTools,
+		NewSystemCode:   result.NewSystemCode,
+		SubDir:          result.SubDir,
+		MemoryIntegrity: integrity,
+		ToolConflicts:   result.ToolConflicts,
+		InstalledTools:  result.InstalledTools,
 	}, nil
+}
+
+// pruneMainIndexForSub 移除 main 歷代索引中屬於指定 sub 的條目，回傳剪除數。
+func pruneMainIndexForSub(projectRoot, subID string) (int, error) {
+	mainPipe := memory.NewPipeline(projectRoot)
+	entries := mainPipe.LoadIndexEntries()
+	kept := make([]memory.MemoryIndexEntry, 0, len(entries))
+	for _, e := range entries {
+		if e.SubID != subID {
+			kept = append(kept, e)
+		}
+	}
+	pruned := len(entries) - len(kept)
+	if pruned == 0 {
+		return 0, nil
+	}
+	return pruned, mainPipe.SaveIndexEntries(kept)
+}
+
+// subIndexCacheMaxEntries：單一 sub 快取條目上限（資源耗盡防護，超過取最新）。
+const subIndexCacheMaxEntries = 500
+
+// subIndexIntegrityFilename：驗證報告回寫檔（放 sub 的 memory/，跟著 sub 走）。
+const subIndexIntegrityFilename = "index_integrity.json"
+
+// subIndexIntegrityMaxTags：報告內最多列幾個問題 tag（避免報告本身被灌爆）。
+const subIndexIntegrityMaxTags = 20
+
+// SubIndexIntegrity 是索引快取驗證報告。
+// Dropped>0 表示快取有條目對不上 deep_memory 內容（疑似篡改或損毀），
+// 已丟棄不併入 main；報告回寫進 sub 供使用者與後續重建流程查看。
+type SubIndexIntegrity struct {
+	SubID           string   `json:"sub_id"`
+	CheckedAt       string   `json:"checked_at"`
+	Merged          int      `json:"merged"`        // 驗證通過、併入 main 的條數
+	Dropped         int      `json:"dropped"`       // 段落對不上而整條丟棄的條數
+	TermsDropped    int      `json:"terms_dropped"` // 接地失敗被丟棄的關鍵詞數
+	DroppedTags     []string `json:"dropped_tags,omitempty"`
+	RebuildRequired bool     `json:"rebuild_required"` // 建議使用者重新建立索引與摘要
+	Note            string   `json:"note,omitempty"`
+}
+
+// absorbSubIndexCache 驗證匯入 sub 的 index 快取並併入 main 歷代索引（標 SubID）。
+// 驗證規則（逐條，程式驗證不靠快取自律）：
+//  1. DeepTag 必須是合法 D-tag，且該段落真的存在於 sub 的 deep_memory.md——查無段落視為篡改，整條丟。
+//  2. KeyTerms 逐字對回段落原文（大小寫不敏感接地），對不上的詞丟棄。
+//  3. 已存在同 sub 同 D-tag 的 main 條目不重複併入。
+//
+// 回傳實際併入條數。
+func (a *App) absorbSubIndexCache(subID, subDir string) (*SubIndexIntegrity, error) {
+	subPipe := memory.NewPipeline(subDir)
+	cache := subPipe.LoadIndexEntries()
+	if len(cache) == 0 {
+		return nil, nil
+	}
+	report := &SubIndexIntegrity{
+		SubID:     subID,
+		CheckedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if len(cache) > subIndexCacheMaxEntries {
+		cache = cache[len(cache)-subIndexCacheMaxEntries:]
+	}
+	mainPipe := memory.NewPipeline(storage.ProjectRoot(appDataRoot(), "default"))
+	entries := mainPipe.LoadIndexEntries()
+	exists := map[string]bool{}
+	for _, e := range entries {
+		exists[e.SubID+"|"+e.DeepTag] = true
+	}
+	added := 0
+	recordDrop := func(tag string) {
+		report.Dropped++
+		if len(report.DroppedTags) < subIndexIntegrityMaxTags {
+			report.DroppedTags = append(report.DroppedTags, tag)
+		}
+	}
+	for _, c := range cache {
+		tag := memory.NormalizeMemoryTag(c.DeepTag)
+		if tag == "" || !strings.HasPrefix(tag, "D-") {
+			recordDrop(strings.TrimSpace(c.DeepTag))
+			continue
+		}
+		section, err := subPipe.LookupByTag(tag)
+		if err != nil {
+			recordDrop(tag) // 快取指向不存在的段落 → 疑似篡改／殘缺，丟
+			continue
+		}
+		lowerSection := strings.ToLower(section)
+		grounded := make([]string, 0, len(c.KeyTerms))
+		for _, t := range c.KeyTerms {
+			t = strings.TrimSpace(t)
+			if t != "" && strings.Contains(lowerSection, strings.ToLower(t)) {
+				grounded = append(grounded, t)
+			} else if t != "" {
+				report.TermsDropped++
+			}
+		}
+		if exists[subID+"|"+tag] {
+			continue
+		}
+		exists[subID+"|"+tag] = true
+		entries = append(entries, memory.MemoryIndexEntry{
+			SummaryTag:  memory.NormalizeMemoryTag(c.SummaryTag),
+			DeepTag:     tag,
+			SentenceIDs: c.SentenceIDs,
+			KeyTerms:    grounded,
+			SubID:       subID,
+			CreatedAt:   c.CreatedAt,
+		})
+		added++
+	}
+	report.Merged = added
+	report.RebuildRequired = report.Dropped > 0
+	if report.RebuildRequired {
+		report.Note = "索引快取部分條目對不上 deep_memory 內容（疑似篡改或損毀），已丟棄。" +
+			"建議切到此 sub 以「整理」重新建立摘要與索引。"
+	}
+	// 報告回寫進 sub：有問題留檔提醒；乾淨則清掉舊報告（別讓警報器一直響）。
+	integrityPath := filepath.Join(subDir, "memory", subIndexIntegrityFilename)
+	if report.Dropped > 0 || report.TermsDropped > 0 {
+		if data, jerr := json.MarshalIndent(report, "", "  "); jerr == nil {
+			if werr := os.WriteFile(integrityPath, data, 0o600); werr != nil {
+				log.Printf("[IMPORT] 回寫 index_integrity 失敗: %v", werr)
+			}
+		}
+	} else {
+		_ = os.Remove(integrityPath)
+	}
+	if added == 0 {
+		return report, nil
+	}
+	return report, mainPipe.SaveIndexEntries(entries)
 }
 
 func normalizePackageDropPath(path string) string {

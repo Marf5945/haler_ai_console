@@ -1,7 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 import '../tailwind.css';
-import MessageRow from '../components/chat/MessageRow';
 import CodeArtifactModal from '../components/CodeArtifactModal';
 import useHighlight from '../components/highlight/useHighlight';
 import '../components/highlight/highlight.css';
@@ -33,6 +32,7 @@ import {
   // SEC-05 2b: 開外部連結唯一入口（Go 端做 scheme/metadata 檢查，loopback 放行）
   GetNewSubagentCandidates,
   GetPendingDigest,
+  PurgeMessageMarks,
   GetPendingTagPatches,
   GetRecentSkillInjections,
   GetSafariRuntimeNotice,
@@ -298,6 +298,11 @@ import {
   ClearVoiceDebug,
   TranscribeVoiceWAV,
   RouteVoiceCommand,
+  SpeakVoiceLine,
+  PreviewVoiceProfileText,
+  VoiceProfiles,
+  SetVoiceOutputEnabled,
+  StopVoiceOutput,
   EnterFloatingAvatarNative,
   ExitFloatingAvatarNative,
   EnterFloatingAvatarOverlayImage,
@@ -328,8 +333,6 @@ import {
 import {EventsOn} from '../lib/wailsRuntime';
 
 import DocumentReviewCard from '../components/DocumentReviewCard';
-import VisualLearningPanel from '../components/VisualLearningPanel';
-import EmbeddingPickerModal from '../components/EmbeddingPickerModal';
 import ConsequenceMenuOverlay from './components/ConsequenceMenuOverlay';
 import ToolCopyConfirmModal from './components/ToolCopyConfirmModal';
 import ReferenceLinkModal from './components/ReferenceLinkModal';
@@ -361,19 +364,8 @@ import SkillFirstUseCard from './components/SkillFirstUseCard';
 import SkillContextSettingsSection from './components/SkillContextSettingsSection';
 import DraftSandboxStopDialog from './components/DraftSandboxStopDialog';
 import TrustedSessionExpiredDialog from './components/TrustedSessionExpiredDialog';
-import SettingsMenu from './components/SettingsMenu';
-import SettingsWorkspace from './components/SettingsWorkspace';
 import {isNativeReplayStep, basenameForDisplay, isExclusiveCandidateSet, defaultWebSearchProviderOptions, toolTabFor, dagStatusLabel} from '../lib/appHelpers';
-import {
-  _fontPresetLabelMap,
-  _panelLangLabelMap,
-  _roleLangLabelMap,
-  defaultPanelStyle,
-  localizeBackendLabel,
-  normalizePanelStyle,
-  styleKeyOf,
-  voiceStatusLabel,
-} from '../lib/panelSettings';
+import {defaultPanelStyle} from '../lib/panelSettings';
 // Tier-1 dialogs extracted to app/components
 import PackageInstallDecisionDialog from './components/PackageInstallDecisionDialog';
 import SubToolConflictDialog from './components/SubToolConflictDialog';
@@ -383,14 +375,87 @@ import LearningReplayConfirmCard from './components/LearningReplayConfirmCard';
 import LLMAPISetupModal from './components/LLMAPISetupModal';
 import WebSearchSetupModal from './components/WebSearchSetupModal';
 import StyleDiffPreviewModal from './components/StyleDiffPreviewModal';
+import SettingPopupSelect from './components/SettingPopupSelect';
 // readiness-gate feature group
 import LongPressConfirmButton from '../features/readiness-gate/LongPressConfirmButton';
-import FloatingCandidateActions from '../features/readiness-gate/FloatingCandidateActions';
-import MissingSlotCapsule from '../features/readiness-gate/MissingSlotCapsule';
-import RetrievalTransparency from '../features/readiness-gate/RetrievalTransparency';
-import ConfirmationTier from '../features/readiness-gate/ConfirmationTier';
-import ComposerConfirmBubble from '../features/readiness-gate/ComposerConfirmBubble';
-import useI18n, { t as _t, tForLanguage, getAllFemaleKeywords, getAllBeastKeywords, buildGreetingTextKeyMap } from '../locales/useI18n';
+import useI18n, {t as _t, getAllFemaleKeywords, getAllBeastKeywords, buildGreetingTextKeyMap} from '../locales/useI18n';
+import {advanceVoiceSyncSession, createVoiceSyncSession} from './voiceSyncState';
+import ConversationPanel, {fallbackReadinessGate} from './ConversationPanel';
+import RightRail from './RightRail';
+import {
+  composerPendingSlowText,
+  composerPendingVerySlowText,
+  makeComposerPendingMessage,
+  replaceComposerPendingMessage,
+  stripComposerPendingMarker,
+  updateComposerPendingMessage,
+} from './conversationMessages';
+import {
+  buildSchedulerComposerConfirmAction,
+  formatSchedulerPayload,
+  hasSchedulerClockText,
+  hasSchedulerTimeText,
+  isSchedulerAffirmation,
+  isSchedulerCancellation,
+  mergeSchedulerSlotsFromText,
+  normalizeSchedulerDraft,
+  parseSchedulerActionText,
+  parseSchedulerConversationIntent,
+  parseSchedulerTimeText,
+  schedulerConfirmationMessage,
+  schedulerDefaultPayload,
+  schedulerJobNo,
+  schedulerMissingSlots,
+  schedulerQuestionForMissing,
+} from './scheduler';
+import {fileBaseName, isVideoPath, referenceFileKey} from './referenceFiles';
+import {
+  DEFAULT_PERSONA_DISPLAY_NAMES,
+  LOCKED_PERSONA_ID,
+  PATROL_DIALOGUE_ROLE_VARIANTS,
+  PERSONA_AVATAR_URLS,
+  PERSONA_FULL_BODY_URLS,
+  PERSONA_STATE_AVATAR_URLS,
+  defaultPixelPackForPersona,
+} from './personas/registry';
+import {
+  fallbackSettings,
+  fontPresetVars,
+  fontScaleValue,
+  normalizeLockedPersonas,
+  normalizePanelSettings,
+  normalizeSettingsState,
+  panelFromUISettings,
+  panelLanguageLabelToLocale,
+  panelStyleTheme,
+  personaLocaleFromPanel,
+} from './settingsController';
+import {
+  buildLearningWindowsAnchor,
+  clampReplayCoordinate,
+  compactLearningText,
+  describeLearningTarget,
+  extractVisualReplayDirective,
+  isLastLearningOperationReference,
+  isLearningReplayRelatedText,
+  isLearningReplayRequest,
+  learningRecordingBlockedSelector,
+  learningReplayBlockedSelector,
+  learningReplayStepDelayMs,
+  learningSensitiveTextPattern,
+  normalizeLearningKey,
+  normalizeLearningOperationQuery,
+  operationIntentFromCLIResponse,
+  parseLearningOperationCatalogRequest,
+  resolveLearningOperationMatch,
+  visualLearningInteractiveSelector,
+} from './learningReplayController';
+
+const SchedulerPanel = React.lazy(() => import('./SchedulerPanel'));
+const EmbeddingPickerModal = React.lazy(() => import('../components/EmbeddingPickerModal'));
+const SettingsMenu = React.lazy(() => import('./components/SettingsMenu'));
+const SettingsWorkspace = React.lazy(() => import('./components/SettingsWorkspace'));
+const VisualLearningPanel = React.lazy(() => import('../components/VisualLearningPanel'));
 
 const taskProgressDebugEnabled = typeof window !== 'undefined'
   && (new URLSearchParams(window.location.search).has('taskDebug')
@@ -617,78 +682,6 @@ function patrolDialogueOption(text, expression = PATROL_DEFAULT_EXPRESSION, extr
   };
 }
 
-const PATROL_DIALOGUE_ROLE_VARIANTS = [
-  {variant: 'wild', label: 'YuRoSaKu', poolKey: 'greeting.poolYuRoSaKu', names: ['憂樂傻酷', 'yurosaku', 'persona-a', '本汪', '狼犬'], options: [
-    patrolDialogueOption('主人，今天好嗎？', '等待', {initial: true}),
-    patrolDialogueOption('主人，本獸會，呼嚕......。', '休息', {idleAfterMinutes: 25}),
-    patrolDialogueOption('本獸今天精神滿滿！雖然剛剛踩到自己的尾巴，但目前……嘿嘿，正常運作中！。', '行動'),
-    patrolDialogueOption('本獸會默默『罩』你，不是『照』相的照喔，本獸相機送修啦。', '開心'),
-    patrolDialogueOption('來吧，本受助你一『臂』之力，粗壯手臂的臂，我沒回錯字吧？', '思索'),
-    patrolDialogueOption('嘿，本獸被你抓到了！驚喜不能說啦', '開心'),
-    patrolDialogueOption('今天是『棒棒』的一天，本獸超愛『棒棒』。', '行動'),
-    patrolDialogueOption('主人，又是忙到沒空喝水的一天......本獸很乖會忍著。', '悲傷'),
-    patrolDialogueOption('嚕嚕…拉拉，本獸......嘟嘟，耶嘿！'),
-    patrolDialogueOption('主人，先休息一下吧，鐵打的身體也會『鏽』。', '禁止'),
-    patrolDialogueOption('勇於認錯，態度依舊。本獸原則，至始至終'),
-    patrolDialogueOption('哈哈，本獸做的。夠帥吧？可以給本獸獎勵嗎?', '開心'),
-    patrolDialogueOption('本獸沒有在睡', '休息', {rare: true, rareChance: 0.1}),
-  ]},
-  {variant: 'male', label: 'Grumpy Uncle', names: ['厭世大叔', '帥氣大叔', 'grumpy uncle', 'uncle', 'persona-b'], options: [
-    patrolDialogueOption('老子在這邊，今天終於要開始了嗎？', '等待', {initial: true}),
-    patrolDialogueOption('老子可以幫忙，休息一下，不繞遠路陪你處理好。', '休息', {idleAfterMinutes: 25}),
-    patrolDialogueOption('老子知道假期結束了，別提醒老子！', '行動'),
-    patrolDialogueOption('剛剛是休息的鐘聲，對吧？', '開心'),
-    patrolDialogueOption('老子幫忙讓正常的工作量剩一半，那之後一半工作量是正常嗎?', '思索'),
-    patrolDialogueOption('怎麼又輪到老子處理？', '行動'),
-    patrolDialogueOption('老子都賠到沒衣服穿了，你是有甚麼建議嗎？', '悲傷'),
-    patrolDialogueOption('唉，老子只剩一條命，不然還能怎樣？', '悲傷'),
-    patrolDialogueOption('老子會在這裡等你，畢竟沒地方可去了！'),
-    patrolDialogueOption('不管啦！老子就想休息！', '禁止'),
-    patrolDialogueOption('要老子道歉？好啦，對不起啦！'),
-    patrolDialogueOption('哈哈，老子也是能做出不錯的成績的！別小看老子！', '開心'),
-    patrolDialogueOption('因為......老子也很喜歡你這傢伙！', '開心', {rare: true, rareChance: 0.1}),
-    patrolDialogueOption('老子什麼大風大浪沒看，這個......也太大了吧？', '無言', {rare: true, rareChance: 0.1}),
-  ]},
-  {variant: 'fem', label: 'AssiStand', poolKey: 'greeting.poolAssiStand', names: ['秘書小妹', '秘書小姐', '秘書姊姊', 'assistand', 'secretary sis', 'secretary', 'persona-c'], options: [
-    patrolDialogueOption('今天準備就緒，從哪裡開始呢？', '等待', {initial: true}),
-    patrolDialogueOption('老大，我有點累......休息一下。', '休息', {idleAfterMinutes: 25}),
-    patrolDialogueOption('老大，今天行程......宿敵變真愛的劇本終於要上演了嗎？我會準備好會議紀錄，連互動細節都不放過！', '行動'),
-    patrolDialogueOption('請放下辦公室的爭執！不過揪住對方衣領、距離不到五公分，還大喊『你把我當成什麼了』的畫面很完美！', '開心'),
-    patrolDialogueOption('這兩家公司的條款互相限制、霸道又佔有慾極強，分析後難道是一份『婚前協議書』？', '思索'),
-    patrolDialogueOption('開心到親親的那張照片，請務必給我保管，為了人類文明。', '開心'),
-    patrolDialogueOption('剛剛......據我的理解，沒錯，他們只是在「運動」', '思索'),
-    patrolDialogueOption('老大非常抱歉，這次是我不慎看錯了，我立刻刪掉你跟同事的互動照片。', '悲傷'),
-    patrolDialogueOption('後面的69萬字請務必告訴我。'),
-    patrolDialogueOption('老大，請先休息一下吧。就算是鐵打的身體，被工作輪攻太久也會壞掉的。', '禁止'),
-    patrolDialogueOption('一夫一妻沒問題啊，就是一個男人有一個老公和一個老婆啊！', '無言'),
-    patrolDialogueOption('是的，這就是專業！', '行動'),
-    patrolDialogueOption('終於拍到了，同事幫老大整理衣服的畫面！', '開心', {rare: true, rareChance: 0.1}),
-  ]},
-  {variant: 'male', label: 'RossFork', poolKey: 'greeting.poolRossFork', names: ['警察桂澤', '規則警察', 'rossfork', 'officer reggie law', 'police', 'persona-d'], options: [
-    patrolDialogueOption('報告，今日的言詞表達與系統狀態一切符合規矩！', '等待', {initial: true}),
-    patrolDialogueOption('報告，系統已維持靜止狀態達二十五分鐘。依法進入待機狀態。', '休息', {idleAfterMinutes: 25}),
-    patrolDialogueOption('您問我精神滿不滿？目前很滿……，請注意用語，我不計較這次的性騷擾。', '開心'),
-    patrolDialogueOption('您說『罩』我？我......我只有這個上衣，如果您不介意汗味......的話。', '開心'),
-    patrolDialogueOption('視頻？視......您剛剛是不是說了需要我關切的話？影片喔？沒事！', '思索'),
-    patrolDialogueOption('什麼？你抓到我的什麼？我為人坦蕩，要我脫光證明甚麼都沒藏也沒問題！', '行動'),
-    patrolDialogueOption('這個任務確實很出色，為了更色，我們下次合作愉快', '行動'),
-    patrolDialogueOption('我真的不是故意的，下次表現會更好的！', '悲傷'),
-    patrolDialogueOption('再打錯字到我房間，我陪您罰寫到您不忘記！'),
-    patrolDialogueOption('休息一下吧，為了防止國家重要資產發生不可逆的氧化毀損，現在，立刻！', '禁止'),
-    patrolDialogueOption('哼，我就知道你想這樣做！'),
-    patrolDialogueOption('堅持一下，繼續努力！', '開心'),
-    patrolDialogueOption('我看到了甚麼？真的不行了', '無言', {rare: true, rareChance: 0.1}),
-  ]},
-  {variant: 'fem', label: 'Touharu Miko', names: ['東春巫女', '巫女東春', 'touharu miko', 'miko', 'persona-e'], options: [
-    patrolDialogueOption('東春現身，萬事泰吉！', '等待', {initial: true}),
-    patrolDialogueOption('東春累了，想睡了', '休息', {idleAfterMinutes: 25}),
-    patrolDialogueOption('東春在此。先把需求說清楚，替你搖鈴除去陰霾。', '開心'),
-    patrolDialogueOption('哈哈，果然是雜魚！'),
-    patrolDialogueOption('若心中有雜念，先思考後寫成一句話，我比較好替你祓除。', '思索'),
-    patrolDialogueOption('真是受不了，看你這麼煩惱，勉為其難幫忙一下！', '禁止'),
-  ]},
-];
-
 function normalizePatrolDialogueSpec(value) {
   return String(value || '').replace(/\r\n?/g, '\n').trim();
 }
@@ -817,35 +810,12 @@ function personaNameFontSize(name = '') {
   return 10.5;
 }
 
-const defaultPersonaDisplayNames = {
-  'persona-a': {
-    key: 'persona.lockedName',
-    legacyNames: ['憂樂傻酷', 'YuRoSaKu'],
-  },
-  'persona-b': {
-    key: 'persona.defaultNameB',
-    legacyNames: ['人格 B', '厭世叔', '厭世大叔', 'Grumpy Uncle', 'Tío Gruñón', 'Tio Rabugento', '不機嫌おじさん', '심술쟁이 아저씨', 'ลุงขี้บ่น'],
-  },
-  'persona-c': {
-    key: 'persona.defaultNameC',
-    legacyNames: ['人格 C', '秘書小妹', 'Secretary Sis', 'Hermana Secretaria', 'Mana Secretária', '秘書お姉さん', '비서 아가씨', 'พี่สาวเลขาฯ'],
-  },
-  'persona-d': {
-    key: 'persona.defaultNameD',
-    legacyNames: ['人格 D', '規則警察', '警察桂澤', 'Rule Police', 'Officer Reggie Law', 'Agente Reglaz', 'Agente Regraldo', '木曽久巡査', '규식 순경', 'ผู้หมวดกฎเก่ง'],
-  },
-  'persona-e': {
-    key: 'persona.defaultNameE',
-    legacyNames: ['東春巫女', 'Touharu Miko', 'Miko Touharu', '東春の巫女', '동춘 무녀', 'มิโกะโทฮารุ'],
-  },
-};
-
 function personaCardDisplayName(persona = {}, t = _t) {
-  const display = defaultPersonaDisplayNames[persona.id];
+  const display = DEFAULT_PERSONA_DISPLAY_NAMES[persona.id];
   if (!display) return persona.name || '';
   const name = String(persona.name || '').trim();
   const localizedName = t(display.key);
-  if (persona.id === lockedPersonaId || !name || display.legacyNames.includes(name)) {
+  if (persona.id === LOCKED_PERSONA_ID || !name || display.legacyNames.includes(name)) {
     return localizedName;
   }
   return persona.name;
@@ -889,13 +859,6 @@ function localizeStatusRailView(view) {
   return {...view, rawText, text: localizeStatusRailText(rawText)};
 }
 
-const STYLE_KEY_THEME = {
-  default: 'onanegiku',
-  passiveWhite: 'white',
-  pinkBetrayal: 'pink-black',
-  forgiveMeGreen: 'green',
-  defeatBlue: 'blue',
-};
 function floatTo16BitPCM(view, offset, input) {
   for (let i = 0; i < input.length; i += 1, offset += 2) {
     const sample = Math.max(-1, Math.min(1, input[i]));
@@ -1096,78 +1059,6 @@ function candidateReplyText(candidate) {
 
 const GACHA_PULSE_MS = 500;
 const GACHA_PARTICLE_MS = 600;
-// 預設 Readiness Gate 狀態（前端 fallback，對應 Go ReadinessGateState 結構）
-const fallbackReadinessGate = {
-  risk_tier: 'none',        // none | normal | medium | high
-  missing_slots: [],
-  floating_candidates: [],
-  clarification_count: 0,
-  max_clarifications: 2,
-  retrieval_scanning: false,
-  retrieval_sources: [],
-  impact_explanation: '',
-  low_confidence_output: false,
-  assumption_used: false,
-  auto_output_allowed: false,
-};
-
-const fallbackSettings = {
-  panel: {
-    /* i18n: settings defaults */ panelLanguage: _t('settings.langZhTW'),
-    roleLanguage: _t('settings.roleLangAuto'),
-    fontPreset: _t('settings.fontDefault'),
-    fontScale: '100%',
-    panelStyle: defaultPanelStyle,
-  },
-  activePersonaId: 'persona-a',
-  personas: [
-    {id: 'persona-a', name: _t('persona.defaultNameA'), icon: '♙', avatarUrl: '', identity: _t('persona.defaultIdentityA'), replyStrategy: '', roleStrength: '20%', personality: '', scenario: '', description: '', patrolDialogue: ''},
-    {id: 'persona-b', name: _t('persona.defaultNameB'), icon: '♚', avatarUrl: '', identity: _t('persona.defaultIdentityB'), replyStrategy: '', roleStrength: '20%', personality: '', scenario: '', description: '', patrolDialogue: ''},
-    {id: 'persona-c', name: _t('persona.defaultNameC'), icon: '★', avatarUrl: '', identity: _t('persona.defaultIdentityC'), replyStrategy: '', roleStrength: '20%', personality: '', scenario: '', description: '', patrolDialogue: ''},
-    {id: 'persona-d', name: _t('persona.defaultNameD'), icon: '⚖', avatarUrl: '', identity: _t('persona.defaultIdentityD'), replyStrategy: '', roleStrength: '20%', personality: _t('persona.defaultPersonalityD'), scenario: '', description: '', patrolDialogue: ''},
-    {id: 'persona-e', name: _t('persona.defaultNameE'), icon: '☯', avatarUrl: '', identity: _t('persona.defaultIdentityE'), replyStrategy: '', roleStrength: '20%', personality: _t('persona.defaultPersonalityE'), scenario: '', description: '', patrolDialogue: ''},
-  ],
-  removedDefaultPersonaIds: [],
-};
-
-const lockedPersonaId = 'persona-a';
-
-function panelLanguageLabelToLocale(displayLabel, {allowAuto = true} = {}) {
-  const map = {
-    [_t('settings.langZhTW')]: 'zh-TW',
-    [_t('settings.langEn')]: 'en',
-    [_t('settings.langJa')]: 'ja',
-    [_t('settings.langPt')]: 'pt-PT',
-    [_t('settings.langEs')]: 'es',
-    [_t('settings.langTh')]: 'th',
-    [_t('settings.langKo')]: 'ko',
-    '繁中': 'zh-TW', '中文': 'zh-TW', '英文': 'en', '日文': 'ja',
-    'Traditional Chinese': 'zh-TW', 'Chinese': 'zh-TW', 'English': 'en', 'Japanese': 'ja',
-    '中': 'zh-TW', 'en': 'en', 'ja': 'ja',
-    'pt': 'pt-PT', 'pt-PT': 'pt-PT', 'es': 'es', 'th': 'th', 'ko': 'ko',
-    'Português': 'pt-PT', '葡萄牙文': 'pt-PT', 'Español': 'es', '西班牙文': 'es',
-    'ไทย': 'th', '泰文': 'th', '한국어': 'ko', '韓文': 'ko', '韓語': 'ko', 'Korean': 'ko',
-    'settings.langPt': 'pt-PT', 'settings.langEs': 'es', 'settings.langTh': 'th', 'settings.langKo': 'ko',
-  };
-  if (!allowAuto) {
-    const autoLabels = new Set([_t('settings.roleLangAuto'), _t('settings.roleLanguageAuto'), '自動', 'Auto', 'auto']);
-    if (autoLabels.has(displayLabel)) return null;
-  }
-  return map[displayLabel] || null;
-}
-
-function personaLocaleFromPanel(panel = {}) {
-  // Persona card names/identities shown in the settings panel follow the
-  // Panel Language (UI chrome). Character Language governs the character's
-  // spoken language during chat, handled separately via chatLocale.
-  return panelLanguageLabelToLocale(panel.panelLanguage)
-    || useI18n.getState().language
-    || 'zh-TW';
-}
-
-function personaI18n(locale, key, params) {
-  return locale ? tForLanguage(locale, key, params) : _t(key, params);
-}
 /* i18n: reply strategy presets */
 const getReplyStrategyPresets = () => [
   {id: 'concise', label: _t('strategy.save.label'), prompt: _t('strategy.save.prompt')},
@@ -1188,6 +1079,24 @@ const getChatTonePresets = () => [
   {id: 'witty_playful', label: _t('persona.toneWittyPlayful')},
   {id: 'tsundere', label: _t('persona.toneTsundere')},
 ];
+const voiceProfileLabelKeys = {
+  lively_male: 'settings.voiceProfileLivelyMale',
+  low_uncle_male: 'settings.voiceProfileLowUncleMale',
+  professional_female: 'settings.voiceProfileProfessionalFemale',
+  excited_clear_male: 'settings.voiceProfileExcitedClearMale',
+  bright_girl: 'settings.voiceProfileBrightGirl',
+};
+const defaultVoiceIdByPersonaId = {
+  'persona-a': 'lively_male',
+  'persona-b': 'low_uncle_male',
+  'persona-c': 'professional_female',
+  'persona-d': 'excited_clear_male',
+  'persona-e': 'bright_girl',
+};
+function localizedVoiceProfileName(profile, t) {
+  const key = voiceProfileLabelKeys[profile?.voiceId];
+  return key ? t(key) : profile?.displayName || profile?.voiceId || '';
+}
 const avatarStateOptions = ['idle', 'thinking', 'working', 'working_reaction', 'happy', 'warning', 'blocked', 'sleepy', 'sad', 'speechless'];
 /* i18n: avatar state labels */
 const getAvatarStateLabels = () => ({
@@ -1468,202 +1377,22 @@ const adapterMeta = {
 };
 
 const maxPersonas = 16;
-
-const personaAvatarUrls = {
-  'persona-a': new URL('../assets/persona_avatars/persona-a.svg', import.meta.url).href,
-  'persona-b': new URL('../assets/persona_avatars/persona-b.svg', import.meta.url).href,
-  'persona-c': new URL('../assets/persona_avatars/persona-c.svg', import.meta.url).href,
-  'persona-d': new URL('../assets/persona_avatars/persona-d.svg', import.meta.url).href,
-  'persona-e': new URL('../assets/persona_avatars/touharu/idle.png', import.meta.url).href,
-};
-
-const wolfdogAvatarUrls = {
-  idle: new URL('../assets/persona_avatars/wolfdog/idle.png', import.meta.url).href,
-  thinking: new URL('../assets/persona_avatars/wolfdog/thinking.png', import.meta.url).href,
-  working: new URL('../assets/persona_avatars/wolfdog/working.png', import.meta.url).href,
-  happy: new URL('../assets/persona_avatars/wolfdog/happy.png', import.meta.url).href,
-  warning: new URL('../assets/persona_avatars/wolfdog/warning.png', import.meta.url).href,
-  blocked: new URL('../assets/persona_avatars/wolfdog/blocked.png', import.meta.url).href,
-  sleepy: new URL('../assets/persona_avatars/wolfdog/sleepy.png', import.meta.url).href,
-  sad: new URL('../assets/persona_avatars/wolfdog/sad.png', import.meta.url).href,
-  speechless: new URL('../assets/persona_avatars/wolfdog/speechless.png', import.meta.url).href,
-};
-
-const uncleBustAvatarUrls = {
-  idle: new URL('../assets/persona_avatars/uncle_bust/idle.png', import.meta.url).href,
-  thinking: new URL('../assets/persona_avatars/uncle_bust/thinking.png', import.meta.url).href,
-  working: new URL('../assets/persona_avatars/uncle_bust/working.png', import.meta.url).href,
-  happy: new URL('../assets/persona_avatars/uncle_bust/happy.png', import.meta.url).href,
-  warning: new URL('../assets/persona_avatars/uncle_bust/warning.png', import.meta.url).href,
-  blocked: new URL('../assets/persona_avatars/uncle_bust/blocked.png', import.meta.url).href,
-  sleepy: new URL('../assets/persona_avatars/uncle_bust/sleepy.png', import.meta.url).href,
-  sad: new URL('../assets/persona_avatars/uncle_bust/sad.png', import.meta.url).href,
-  speechless: new URL('../assets/persona_avatars/uncle_bust/speechless.png', import.meta.url).href,
-};
-
-const secretaryAvatarUrls = {
-  idle: new URL('../assets/persona_avatars/secretary/idle.png', import.meta.url).href,
-  thinking: new URL('../assets/persona_avatars/secretary/thinking.png', import.meta.url).href,
-  working: new URL('../assets/persona_avatars/secretary/working.png', import.meta.url).href,
-  happy: new URL('../assets/persona_avatars/secretary/happy.png', import.meta.url).href,
-  warning: new URL('../assets/persona_avatars/secretary/warning.png', import.meta.url).href,
-  blocked: new URL('../assets/persona_avatars/secretary/blocked.png', import.meta.url).href,
-  sleepy: new URL('../assets/persona_avatars/secretary/sleepy.png', import.meta.url).href,
-  sad: new URL('../assets/persona_avatars/secretary/sad.png', import.meta.url).href,
-  speechless: new URL('../assets/persona_avatars/secretary/speechless.png', import.meta.url).href,
-};
-
-const policeAvatarUrls = {
-  idle: new URL('../assets/persona_avatars/police/idle.png', import.meta.url).href,
-  thinking: new URL('../assets/persona_avatars/police/thinking.png', import.meta.url).href,
-  working: new URL('../assets/persona_avatars/police/working.png', import.meta.url).href,
-  happy: new URL('../assets/persona_avatars/police/happy.png', import.meta.url).href,
-  warning: new URL('../assets/persona_avatars/police/warning.png', import.meta.url).href,
-  blocked: new URL('../assets/persona_avatars/police/blocked.png', import.meta.url).href,
-  sleepy: new URL('../assets/persona_avatars/police/sleepy.png', import.meta.url).href,
-  sad: new URL('../assets/persona_avatars/police/sad.png', import.meta.url).href,
-  speechless: new URL('../assets/persona_avatars/police/speechless.png', import.meta.url).href,
-};
-
-const touharuAvatarUrls = {
-  idle: new URL('../assets/persona_avatars/touharu/idle.png', import.meta.url).href,
-  thinking: new URL('../assets/persona_avatars/touharu/thinking.png', import.meta.url).href,
-  working: new URL('../assets/persona_avatars/touharu/working.png', import.meta.url).href,
-  happy: new URL('../assets/persona_avatars/touharu/happy.png', import.meta.url).href,
-  warning: new URL('../assets/persona_avatars/touharu/warning.png', import.meta.url).href,
-  blocked: new URL('../assets/persona_avatars/touharu/blocked.png', import.meta.url).href,
-  sleepy: new URL('../assets/persona_avatars/touharu/sleepy.png', import.meta.url).href,
-  sad: new URL('../assets/persona_avatars/touharu/sad.png', import.meta.url).href,
-  speechless: new URL('../assets/persona_avatars/touharu/speechless.png', import.meta.url).href,
-};
-
-// 全身立繪（直式、已去背）。依角色狀態提供姿勢：idle=等待、blocked=禁止（舉手停）。
-// key 對齊 pixelPackForPersona 的 pack 名稱。
-const fullBodyAvatarUrls = {
-  wolf: {
-    idle: new URL('../assets/persona_fullbody/wolfdog/fullbody_idle.png', import.meta.url).href,
-    thinking: new URL('../assets/persona_fullbody/wolfdog/fullbody_thinking.png', import.meta.url).href,
-    working: new URL('../assets/persona_fullbody/wolfdog/fullbody_working.png', import.meta.url).href,
-    sad: new URL('../assets/persona_fullbody/wolfdog/fullbody_sad.png', import.meta.url).href,
-    blocked: new URL('../assets/persona_fullbody/wolfdog/fullbody_block.png', import.meta.url).href,
-  },
-  uncle: {
-    idle: new URL('../assets/persona_fullbody/uncle_bust/fullbody_idle.png', import.meta.url).href,
-    thinking: new URL('../assets/persona_fullbody/uncle_bust/fullbody_thinking.png', import.meta.url).href,
-    working: new URL('../assets/persona_fullbody/uncle_bust/fullbody_working.png', import.meta.url).href,
-    happy: new URL('../assets/persona_fullbody/uncle_bust/fullbody_happy.png', import.meta.url).href,
-    sleepy: new URL('../assets/persona_fullbody/uncle_bust/fullbody_idle_madao_sleepy_akimbo.png', import.meta.url).href,
-    warning: new URL('../assets/persona_fullbody/uncle_bust/fullbody_warning_madao_swimbrief_nearly_rip_step.png', import.meta.url).href,
-    blocked: new URL('../assets/persona_fullbody/uncle_bust/fullbody_blocked.png', import.meta.url).href,
-    sad: new URL('../assets/persona_fullbody/uncle_bust/fullbody_sad.png', import.meta.url).href,
-    speechless: new URL('../assets/persona_fullbody/uncle_bust/fullbody_speechless.png', import.meta.url).href,
-  },
-  secretary: {
-    idle: new URL('../assets/persona_fullbody/secretary/fullbody_idle.png', import.meta.url).href,
-    blocked: new URL('../assets/persona_fullbody/secretary/fullbody_idle.png', import.meta.url).href,
-  },
-  police: {
-    idle: new URL('../assets/persona_fullbody/police/fullbody_idle.png', import.meta.url).href,
-    blocked: new URL('../assets/persona_fullbody/police/fullbody_idle.png', import.meta.url).href,
-  },
-  touharu: {
-    idle: new URL('../assets/persona_fullbody/touharu/fullbody_idle.png', import.meta.url).href,
-    blocked: new URL('../assets/persona_fullbody/touharu/fullbody_idle.png', import.meta.url).href,
-  },
-};
+const lockedPersonaId = LOCKED_PERSONA_ID;
 
 const pixelAvatarRenderSize = 128;
 const pixelAvatarRenderVersion = '2026-06-21-transparent-touharu-raster-v1';
 const pixelAvatarRenderCache = new Map();
 const autoAvatarOverrideStates = new Set(['blocked', 'warning', 'working', 'working_reaction']);
-/* i18n: composer pending */ const composerPendingInitialText = _t('composer.pendingInitial');
-const composerPendingSlowText = _t('composer.pendingSlow');
-const composerPendingVerySlowText = _t('composer.pendingVerySlow');
-const composerPendingMarker = '\u2063pending:';
-
-function makeComposerPendingMessage(traceId, text = composerPendingInitialText) {
-  return `Ai:${text}${composerPendingMarker}${traceId}`;
-}
-
-function stripComposerPendingMarker(message) {
-  const markerIndex = String(message || '').indexOf(composerPendingMarker);
-  return markerIndex >= 0 ? message.slice(0, markerIndex) : message;
-}
-
-function replaceComposerPendingMessage(messages, traceId, replacement) {
-  const needle = `${composerPendingMarker}${traceId}`;
-  const index = messages.findIndex((message) => String(message || '').includes(needle));
-  if (index < 0) return [...messages, replacement];
-  const next = [...messages];
-  next[index] = replacement;
-  return next;
-}
-
-function updateComposerPendingMessage(messages, traceId, replacement) {
-  const needle = `${composerPendingMarker}${traceId}`;
-  const index = messages.findIndex((message) => String(message || '').includes(needle));
-  if (index < 0) return messages;
-  const next = [...messages];
-  next[index] = replacement;
-  return next;
-}
-
-const visualLearningInteractiveSelector = [
-  'button',
-  'a[href]',
-  'input',
-  'select',
-  'textarea',
-  '[role="button"]',
-  '[role="link"]',
-  '[data-vl-target]',
-].join(',');
-
-const learningReplayBlockedSelector = [
-  '.rail-mode-record',
-  '.sandbox-stop-overlay',
-  '.reference-embed-popup',
-].join(',');
-
-const learningRecordingBlockedSelector = [
-  '.rail-mode-record',
-  '.sandbox-stop-overlay',
-  '.reference-embed-popup',
-].join(',');
-
-const visualReplayLastDemoDirective = '[[控制:回放剛剛示範]]';
-const legacyVisualReplayLastDemoDirective = '[[visual_replay:last_demo]]';
-const visualReplayTaggedDirectivePattern = /\[\[控制:回放示範\s+tag=([a-zA-Z0-9_.:-]+)\]\]/;
-const learningReplayStepDelayMs = 950;
-const learningSensitiveTextPattern = /(password|passwd|token|api[_ -]?key|secret|bearer|sk-[a-z0-9_-]{16,}|xox[baprs]-|gh[pousr]_[a-z0-9_]{20,})/i;
-
-function compactLearningText(value, fallback = '') {
-  const text = String(value || '').replace(/\s+/g, ' ').trim();
-  return text ? text.slice(0, 120) : fallback;
-}
-
-function normalizeLearningKey(value) {
-  const key = String(value || '').trim();
-  if (!key) return '';
-  if (key === ' ') return 'Space';
-  if (/^esc$/i.test(key)) return 'Escape';
-  if (/^return$/i.test(key)) return 'Enter';
-  if (/^arrow(left|right|up|down)$/i.test(key)) {
-    return key.charAt(0).toUpperCase() + key.slice(1);
-  }
-  if (key.length === 1) return key.toUpperCase();
-  return key.charAt(0).toUpperCase() + key.slice(1);
-}
 
 function formatVisualLearningPermissionStatus(status, requested = false) {
   const missing = Array.isArray(status?.missing) ? status.missing : [];
   if (!missing.length && status?.accessibility && status?.input_monitoring) {
     return requested
-      ? '[系統] 已呼叫 macOS 權限請求；Visual Learning 必要權限看起來已允許。若剛剛才開啟，請重啟 ai-console 後再錄一次。'
-      : '[系統] Visual Learning 權限看起來已允許。';
+      ? _t('chatSystem.learning.permissionsAllowedAfterRequest')
+      : _t('chatSystem.learning.permissionsAllowed');
   }
-  const list = missing.length ? missing.join('、') : '輔助使用 / 輸入監控';
-  return `[系統] 已呼叫 macOS 權限請求。仍缺：${list}。請在系統對話框或 系統設定 → 隱私權與安全性 開啟 ai-console，然後重啟 app 再錄。`;
+  const list = missing.length ? missing.join(_t('chatSystem.listSeparator')) : _t('chatSystem.learning.defaultPermissions');
+  return _t('chatSystem.learning.permissionsMissing', {list});
 }
 
 function isNoActiveLearningRecordingError(detail) {
@@ -1677,136 +1406,6 @@ function openFirstMissingVisualLearningPermission(status) {
   return callWails(() => OpenVisualLearningPermissionSettings(first))
     .then(() => true)
     .catch(() => false);
-}
-
-function cssEscapeIdent(value) {
-  if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(value);
-  return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '\\$&');
-}
-
-function buildLearningSelector(element) {
-  if (!element || element.nodeType !== 1) return '';
-  if (element.id) return `#${cssEscapeIdent(element.id)}`;
-  const parts = [];
-  let node = element;
-  while (node && node.nodeType === 1 && parts.length < 4) {
-    const tag = node.tagName.toLowerCase();
-    let part = tag;
-    const dataAttr = node.getAttribute('data-testid') ? 'data-testid' : node.getAttribute('data-vl-target') ? 'data-vl-target' : '';
-    const testId = dataAttr ? node.getAttribute(dataAttr) : '';
-    if (testId) {
-      part += `[${dataAttr}="${String(testId).replace(/"/g, '\\"')}"]`;
-      parts.unshift(part);
-      break;
-    }
-    if (node.classList?.length) {
-      part += `.${Array.from(node.classList).slice(0, 2).map(cssEscapeIdent).join('.')}`;
-    }
-    const parent = node.parentElement;
-    if (parent) {
-      const siblings = Array.from(parent.children).filter((child) => child.tagName === node.tagName);
-      if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(node) + 1})`;
-    }
-    parts.unshift(part);
-    node = parent;
-  }
-  return parts.join(' > ');
-}
-
-function describeLearningTarget(rawTarget) {
-  const element = rawTarget?.nodeType === 1 ? rawTarget : rawTarget?.parentElement;
-  const interactive = element?.closest?.(visualLearningInteractiveSelector) || element;
-  const rect = interactive?.getBoundingClientRect?.();
-  const tag = interactive?.tagName?.toLowerCase?.() || '';
-  const role = interactive?.getAttribute?.('role') || (tag === 'a' ? 'link' : tag);
-  const label = compactLearningText(
-    interactive?.getAttribute?.('aria-label') ||
-    interactive?.getAttribute?.('title') ||
-    interactive?.innerText ||
-    interactive?.value ||
-    interactive?.placeholder ||
-    tag,
-    tag || 'element',
-  );
-  return {
-    element: interactive,
-    label,
-    role,
-    tag,
-    selector: buildLearningSelector(interactive),
-    rect: rect ? {
-      x: Number(rect.x.toFixed(2)),
-      y: Number(rect.y.toFixed(2)),
-      width: Number(rect.width.toFixed(2)),
-      height: Number(rect.height.toFixed(2)),
-    } : null,
-  };
-}
-
-function buildLearningWindowsAnchor(clickX, clickY, rect, viewport) {
-  const width = Math.max(1, Math.round(Number(viewport?.width || window.innerWidth || 1)));
-  const height = Math.max(1, Math.round(Number(viewport?.height || window.innerHeight || 1)));
-  const click = {
-    x: clampReplayCoordinate(Math.round(Number(clickX || 0)), 0, width - 1),
-    y: clampReplayCoordinate(Math.round(Number(clickY || 0)), 0, height - 1),
-  };
-  if (rect && Number(rect.width) > 0 && Number(rect.height) > 0) {
-    const box = clampLearningBBox({
-      x: Math.round(Number(rect.x || 0)),
-      y: Math.round(Number(rect.y || 0)),
-      w: Math.round(Number(rect.width || 0)),
-      h: Math.round(Number(rect.height || 0)),
-    }, width, height);
-    return {
-      platform: 'windows',
-      ok: true,
-      mode: 'dom_rect_anchor',
-      reason: 'in-app DOM element rect captured during learning; YOLO/OpenCV screenshot resolver was not required',
-      click,
-      execution_point: {
-        x: Math.round(box.x + box.w / 2),
-        y: Math.round(box.y + box.h / 2),
-      },
-      execution_hint: 'click_bbox_center',
-      anchor_bbox: box,
-      crop_bbox: box,
-      ocr_status: 'not_used',
-      ocr_note: 'OCR is optional and not used for this recorded DOM anchor.',
-      detector_backend: 'dom',
-      detector_degraded: false,
-      needs_review: false,
-    };
-  }
-  const box = clampLearningBBox({
-    x: click.x - 14,
-    y: click.y - 14,
-    w: 28,
-    h: 28,
-  }, width, height);
-  return {
-    platform: 'windows',
-    ok: true,
-    mode: 'manual_click_box',
-    reason: 'no element rectangle was available during learning; preserving the click as a small manual anchor',
-    click,
-    execution_point: click,
-    execution_hint: 'fast_click_original_point',
-    anchor_bbox: box,
-    crop_bbox: box,
-    ocr_status: 'not_used',
-    ocr_note: 'OCR is optional and not used for this recorded manual anchor.',
-    detector_backend: 'dom',
-    detector_degraded: true,
-    needs_review: true,
-  };
-}
-
-function clampLearningBBox(box, width, height) {
-  const w = clampReplayCoordinate(Math.max(1, Math.round(Number(box.w || 1))), 1, width);
-  const h = clampReplayCoordinate(Math.max(1, Math.round(Number(box.h || 1))), 1, height);
-  const x = clampReplayCoordinate(Math.round(Number(box.x || 0)), 0, Math.max(0, width - w));
-  const y = clampReplayCoordinate(Math.round(Number(box.y || 0)), 0, Math.max(0, height - h));
-  return { x, y, w, h };
 }
 
 function App() {
@@ -1960,7 +1559,20 @@ function App() {
   });
   const [summaryModelSettings, setSummaryModelSettings] = useState(null);
   const [voiceState, setVoiceState] = useState(null);
+  // 語音聊天模式：AI 回覆自動以當前角色聲線朗讀（spec §34.5/§34.6 表現層）。
+  const [voiceChatEnabled, setVoiceChatEnabled] = useState(false);
+  const [voiceChatHint, setVoiceChatHint] = useState(false);
+  const voiceChatEnabledRef = useRef(false);
+  useEffect(() => {
+    const enabled = Boolean(voiceState?.settings?.ttsEnabled);
+    setVoiceChatEnabled(enabled);
+    voiceChatEnabledRef.current = enabled;
+  }, [voiceState]);
   const [voiceRecording, setVoiceRecording] = useState(false);
+  // voice_sync_session（spec §34.1）：語音聊天模式下點一下進入同步聆聽。
+  const [voiceSyncActive, setVoiceSyncActive] = useState(false);
+  const [voiceSyncPhase, setVoiceSyncPhase] = useState('idle');
+  const voiceSyncRef = useRef({active: false, phase: 'idle', lastVoiceAt: 0, spokeMs: 0, committing: false, startedAt: 0});
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [voiceInstallBusy, setVoiceInstallBusy] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState('');
@@ -2572,12 +2184,12 @@ function App() {
     const adapter = adapterList.find((item) => (item.id || item.name) === adapterID);
     const label = adapter?.displayName || adapter?.name || adapterID || 'adapter';
     if (fallbackModel) {
-      return `${label} 的模型 ${model} 已失效，已清除固定選項。你現在可以改選目前可用的模型；建議先試 ${fallbackModel}。`;
+      return t('adapter.modelRepairWithFallback', {label, model, fallbackModel});
     }
     if (reason && reason.includes('fallback list')) {
-      return `${label} 的模型 ${model} 已失效，已清除固定選項。這次先退回 app 的備援清單。`;
+      return t('adapter.modelRepairFallbackList', {label, model});
     }
-    return `${label} 的模型 ${model} 已失效，已清除固定選項。`;
+    return t('adapter.modelRepairCleared', {label, model});
   }
 
   async function reconcileAdapterModelChoicesAgainstOptions(choices, optionMap) {
@@ -3136,9 +2748,9 @@ function App() {
     // Phase D：排程到點時後端 emit 'scheduler:reminder'，這裡在 app 內顯示提醒，
     // 讓使用者知道系統要開始做事（remote_bridge 那條由後端 NotifyJobFired 另外送）。
     const offSchedulerReminder = EventsOn('scheduler:reminder', (payload) => {
-      const title = String(payload?.title || '').trim() || '排程任務';
+      const title = String(payload?.title || '').trim() || t('chatSystem.scheduler.defaultTask');
       const summary = String(payload?.summary || payload?.action || '').trim();
-      const notice = `Ai:排程提醒：「${title}」時間到，系統要開始處理${summary ? `：${summary}` : ''}。`;
+      const notice = `Ai:${t(summary ? 'chatSystem.scheduler.reminderWithSummary' : 'chatSystem.scheduler.reminder', {title, summary})}`;
       const conversationId = activeConversationIdRef.current || appSessionId || 'main';
       setConversationMessages(conversationId, (prev) => [...prev, notice]);
       setToolResult({toolId: 'scheduler', ok: true, message: `排程提醒：${title}`});
@@ -3260,13 +2872,13 @@ function App() {
           const opened = await openFirstMissingVisualLearningPermission(status);
           setConversationMessages(conversationId, (prev) => [
             ...prev,
-            formatVisualLearningPermissionStatus(status, true) + (opened ? '\n已打開第一個缺少的權限設定頁。' : ''),
+            formatVisualLearningPermissionStatus(status, true) + (opened ? `\n${t('chatSystem.learning.permissionSettingsOpened')}` : ''),
           ]);
         })
         .catch((error) => {
           setConversationMessages(conversationId, (prev) => [
             ...prev,
-            `[系統] 無法呼叫 macOS 權限請求。${error?.message || String(error || '')}`,
+            t('chatSystem.learning.permissionRequestFailed', {error: error?.message || String(error || '')}),
           ]);
         });
     });
@@ -3282,13 +2894,13 @@ function App() {
         .then(() => {
           setConversationMessages(conversationId, (prev) => [
             ...prev,
-            allowed ? '[系統] 已保存這段文字輸入到示範。' : '[系統] 未保存文字內容；示範只留下敏感輸入佔位。',
+            t(allowed ? 'chatSystem.learning.textSaved' : 'chatSystem.learning.textRedacted'),
           ]);
         })
         .catch((error) => {
           setConversationMessages(conversationId, (prev) => [
             ...prev,
-            `[系統] 文字輸入確認失敗。${error?.message || String(error || '')}`,
+            t('chatSystem.learning.textConfirmFailed', {error: error?.message || String(error || '')}),
           ]);
         });
     });
@@ -3614,7 +3226,7 @@ function App() {
         persistConversationEntry(conversationId, 'assistant', message.replace(/^Ai:/, ''), traceId).catch(() => {});
         await executeLearningReplayWithChat(plan, conversationId, traceId);
       } catch (err) {
-        const errorMessage = `Ai:我收到 replay 指令，但讀不到上一段示範：${err?.message || String(err)}`;
+        const errorMessage = `Ai:${t('chatSystem.learning.replayDirectiveReadFailed', {error: err?.message || String(err)})}`;
         setConversationMessages(conversationId, (prev) => (
           modelText ? [...prev, errorMessage] : replaceComposerPendingMessage(prev, traceId, errorMessage)
         ));
@@ -3695,7 +3307,7 @@ function App() {
       persistConversationEntry(conversationId, 'assistant', message.replace(/^Ai:/, ''), traceId).catch(() => {});
       await executeLearningReplayWithChat(plan, conversationId, traceId);
     } catch (err) {
-      const message = `Ai:我找不到符合「${operationIntent.query}」的已保存操作：${err?.message || String(err)}`;
+      const message = `Ai:${t('chatSystem.learning.operationLookupFailed', {query: operationIntent.query, error: err?.message || String(err)})}`;
       setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, message));
     }
   }
@@ -3854,7 +3466,7 @@ function App() {
           const opened = await openFirstMissingVisualLearningPermission(permissionStatus);
           setConversationMessages(conversationId, (prev) => [
             ...prev,
-            formatVisualLearningPermissionStatus(permissionStatus, true) + (opened ? '\n已打開第一個缺少的權限設定頁。' : ''),
+            formatVisualLearningPermissionStatus(permissionStatus, true) + (opened ? `\n${t('chatSystem.learning.permissionSettingsOpened')}` : ''),
           ]);
         }
         const run = await callWails(() => StartLearningMode(windowHash));
@@ -3862,7 +3474,7 @@ function App() {
         setVlLearningActive(true);
         setConversationMessages(conversationId, (prev) => [
           ...prev,
-          `[系統] 示範開始。${run?.id ? `Run: ${run.id}。` : ''}請操作一次你要教我的流程。`,
+          t('chatSystem.learning.recordingStartedProcess', {run: run?.id ? `Run: ${run.id}. ` : ''}),
         ]);
       } catch (error) {
         const detail = error?.message || String(error || '');
@@ -3874,12 +3486,12 @@ function App() {
           setVlLearningActive(true);
           setConversationMessages(conversationId, (prev) => [
             ...prev,
-            `[系統] 已接回仍在進行中的示範。${activeRun?.id ? `Run: ${activeRun.id}。` : ''}請先停止目前示範。`,
+            t('chatSystem.learning.recordingResumedStop', {run: activeRun?.id ? `Run: ${activeRun.id}. ` : ''}),
           ]);
         } else {
           setConversationMessages(conversationId, (prev) => [
             ...prev,
-            `[系統] 示範開始，但 Visual Learning 後端沒有成功啟動記錄。${detail ? ` ${detail}` : ''}`,
+            t('chatSystem.learning.recordingBackendFailed', {error: detail}),
           ]);
         }
       }
@@ -3889,7 +3501,7 @@ function App() {
       const detail = error?.message || String(error || '');
       setConversationMessages(conversationId, (prev) => [
         ...prev,
-        `[系統] 示範啟動失敗。${detail ? ` ${detail}` : ''}`,
+        t('chatSystem.learning.recordingStartFailed', {error: detail}),
       ]);
     }
   }
@@ -3915,7 +3527,7 @@ function App() {
           if (!isNoActiveLearningRecordingError(detail)) {
             setConversationMessages(conversationId, (prev) => [
               ...prev,
-              `[系統] 示範結束，但後端停止記錄時回報錯誤。${detail ? ` ${detail}` : ''}`,
+              t('chatSystem.learning.recordingStopFailed', {error: detail}),
             ]);
           }
         }
@@ -3948,7 +3560,7 @@ function App() {
       } catch (error) {
         setConversationMessages(conversationId, (prev) => [
           ...prev,
-          `Ai:我還讀不到上一段示範：${error?.message || String(error)}`,
+          `Ai:${t('chatSystem.learning.replayReadFailed', {error: error?.message || String(error)})}`,
         ]);
       }
       setSandboxStopOptions(null);
@@ -3958,7 +3570,7 @@ function App() {
       }
       return;
     } else if (promotion === 'pending_candidate') {
-      setConversationMessages(conversationId, (prev) => [...prev, '[系統] 已把這次示範存成候選流程。']);
+      setConversationMessages(conversationId, (prev) => [...prev, t('chatSystem.learning.candidateSaved')]);
     }
     setSandboxStopOptions(null);
     setActiveSandboxId(null);
@@ -3966,7 +3578,7 @@ function App() {
 
   function dismissSandboxOptions() {
     const conversationId = activeConversationIdRef.current || 'main';
-    setConversationMessages(conversationId, (prev) => [...prev, '[系統] 已放棄這次示範。']);
+    setConversationMessages(conversationId, (prev) => [...prev, t('chatSystem.learning.demoDiscarded')]);
     setSandboxStopOptions(null);
     setActiveSandboxId(null);
   }
@@ -3988,7 +3600,7 @@ function App() {
     const pending = pendingLearningReplayStartConfirm;
     setPendingLearningReplayStartConfirm(null);
     if (!pending) return;
-    const cancelMessage = 'Ai:Replay 尚未執行；我已保留上面的安全 plan，確認內容正確後可以再輸入「請按照我剛剛的示範」。';
+    const cancelMessage = `Ai:${t('chatSystem.learning.replayCancelled')}`;
     setConversationMessages(pending.conversationId, (prev) => [...prev, cancelMessage]);
     persistConversationEntry(pending.conversationId, 'assistant', cancelMessage.replace(/^Ai:/, ''), pending.traceId).catch(() => {});
   }
@@ -4536,6 +4148,64 @@ function App() {
     }
   }
 
+  // ── Voice Sync R1：session 控制（spec §34.1 狀態機的前端簡化版）──
+  async function startVoiceSyncSession() {
+    if (voiceRecording || voiceBusy) return;
+    // barge-in：使用者開口，AI 先閉嘴（spec §34.6 spoken output 不得疊使用者語音）。
+    callWails(StopVoiceOutput).catch(() => {});
+    voiceSyncRef.current = createVoiceSyncSession();
+    setVoiceSyncActive(true);
+    setVoiceSyncPhase('listening');
+    await startVoiceRecording();
+    if (!voiceRecorderRef.current) {
+      voiceSyncRef.current = {...voiceSyncRef.current, active: false, phase: 'idle'};
+      setVoiceSyncActive(false);
+      setVoiceSyncPhase('idle');
+      return;
+    }
+    setVoiceStatus(t('voice.syncListening'));
+  }
+
+  async function abortVoiceSyncSession() {
+    voiceSyncRef.current = {...voiceSyncRef.current, active: false, phase: 'idle'};
+    setVoiceSyncActive(false);
+    setVoiceSyncPhase('idle');
+    await cancelVoiceRecording();
+  }
+
+  function commitVoiceSyncTurn() {
+    const sync = voiceSyncRef.current;
+    if (!sync.active || sync.committing) return;
+    voiceSyncRef.current = {...sync, active: false, committing: true, phase: 'committing'};
+    setVoiceSyncPhase('committing');
+    Promise.resolve(stopVoiceRecording()).finally(() => {
+      setVoiceSyncActive(false);
+      setVoiceSyncPhase('idle');
+    });
+  }
+
+  function handleVoicePressStart() {
+    if (voiceChatEnabledRef.current) {
+      if (voiceSyncRef.current.active) {
+        abortVoiceSyncSession();
+      } else {
+        startVoiceSyncSession();
+      }
+      return;
+    }
+    startVoiceRecording();
+  }
+
+  function handleVoicePressEnd() {
+    if (voiceChatEnabledRef.current) return; // sync 模式：放開不動作，靜音才 commit
+    stopVoiceRecording();
+  }
+
+  function handleVoicePointerCancel() {
+    if (voiceChatEnabledRef.current) return; // sync 模式：pointercancel 不中斷 session
+    cancelVoiceRecording();
+  }
+
   async function startVoiceRecording() {
     if (voiceRecording || voiceBusy) return;
     setVoiceError('');
@@ -4551,7 +4221,35 @@ function App() {
 
       // Web Audio captures mono PCM so the backend can hand whisper.cpp a plain wav.
       processor.onaudioprocess = (event) => {
-        chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+        const data = event.inputBuffer.getChannelData(0);
+        chunks.push(new Float32Array(data));
+        const sync = voiceSyncRef.current;
+        if (!sync.active) return;
+        // 能量偵測（RMS，取樣間隔 8 降低成本）——spec §34.2 自寫、零依賴。
+        let sum = 0;
+        let count = 0;
+        for (let i = 0; i < data.length; i += 8) { sum += data[i] * data[i]; count += 1; }
+        const rms = Math.sqrt(sum / Math.max(count, 1));
+        const now = Date.now();
+        const blockMs = (data.length / audioContext.sampleRate) * 1000;
+        const transition = advanceVoiceSyncSession(sync, {rms, blockMs, now});
+        voiceSyncRef.current = transition.session;
+        if (transition.action === 'commit') {
+          commitVoiceSyncTurn();
+          return;
+        }
+        if (transition.action === 'abort') {
+          abortVoiceSyncSession();
+          return;
+        }
+        if (transition.phaseChanged) {
+          setVoiceSyncPhase(transition.session.phase);
+          if (transition.session.phase === 'short_pause') {
+            setVoiceStatus(t('voice.syncThinkingPause'));
+          } else {
+            setVoiceStatus(t('voice.syncListening'));
+          }
+        }
       };
       monitor.gain.value = 0;
       source.connect(processor);
@@ -4576,6 +4274,12 @@ function App() {
     const recorder = voiceRecorderRef.current;
     if (!recorder) return;
     voiceRecorderRef.current = null;
+    // 120 秒自動停止等外部路徑也要收掉 sync session，避免狀態卡在 listening。
+    if (voiceSyncRef.current.active) {
+      voiceSyncRef.current = {...voiceSyncRef.current, active: false, phase: 'idle'};
+      setVoiceSyncActive(false);
+      setVoiceSyncPhase('idle');
+    }
     const recordingDuration = Date.now() - recorder.startedAt;
     if (recorder.autoStopTimer) clearTimeout(recorder.autoStopTimer);
     setVoiceRecording(false);
@@ -4627,6 +4331,36 @@ function App() {
     setVoiceStatus('');
   }
 
+  function cleanTextForSpeech(text) {
+    return String(text || '')
+      .replace(/^Ai:/, '')
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/`[^`]*`/g, ' ')
+      .replace(/https?:\/\/\S+/g, ' ')
+      .replace(/[#*_>|]{1,}/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 1200);
+  }
+
+  function speakAssistantReply(text) {
+    const clean = cleanTextForSpeech(text);
+    if (!clean) return;
+    callWails(() => SpeakVoiceLine(clean, 'readout')).catch(() => {});
+  }
+
+  async function toggleVoiceChatMode(next) {
+    const target = typeof next === 'boolean' ? next : !voiceChatEnabledRef.current;
+    setVoiceChatHint(false);
+    try {
+      const state = await callWails(() => SetVoiceOutputEnabled(target));
+      setVoiceState(state || null);
+      if (!target) callWails(StopVoiceOutput).catch(() => {});
+    } catch (err) {
+      setVoiceError(err?.message || String(err));
+    }
+  }
+
   async function applyVoiceTranscript(text) {
     if (voiceState?.settings?.commandMode) {
       const route = await callWails(() => RouteVoiceCommand(text));
@@ -4650,6 +4384,7 @@ function App() {
     }
     await submitComposerText(text);
     setVoiceStatus(t('voice.sent'));
+    if (!voiceChatEnabledRef.current) setVoiceChatHint(true);
   }
 
   function handleVoiceBackgroundAction(action) {
@@ -4894,7 +4629,7 @@ function App() {
         setConversationMessages(options.conversationId, (prev) => replaceComposerPendingMessage(
           prev,
           options.traceId,
-          `Ai:任務已開始：${run?.title || '任務進度'}`,
+          `Ai:${t('chatSystem.taskStarted', {title: run?.title || t('chatSystem.taskProgress')})}`,
         ));
       }
     } catch (error) {
@@ -4936,13 +4671,19 @@ function App() {
 
   // 停止鈕統一入口：優先中斷正在跑的一般對話／skill（非 DAG），否則回到 DAG 任務取消。
   async function cancelActiveExecution(reason = 'user_stop') {
+    callWails(StopVoiceOutput).catch(() => {});
+    if (voiceSyncRef.current.active || voiceRecorderRef.current) {
+      await abortVoiceSyncSession();
+      setVoiceStatus(t('voice.stopRecording'));
+      return;
+    }
     const chatTrace = activeChatTraceRef.current;
     if (chatTrace) {
       cancelledChatTracesRef.current.add(chatTrace);
       activeChatTraceRef.current = null;
       setActiveChatTrace(null);
       const conversationId = activeConversationIdRef.current || 'main';
-      setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, chatTrace, 'Ai:已中斷本次回覆。'));
+      setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, chatTrace, `Ai:${t('chatSystem.replyInterrupted')}`));
       try {
         await callWails(() => CancelChatMessage(chatTrace));
       } catch (error) {
@@ -5236,6 +4977,10 @@ function App() {
   }
 
   function persistConversationEntry(conversationId, role, text, traceId) {
+    // 語音聊天模式開啟時，AI 回覆同步進入朗讀佇列（voice_id 於建立當下快照）。
+    if (role === 'assistant' && voiceChatEnabledRef.current) {
+      speakAssistantReply(text);
+    }
     // conversationId is the exact owner of this turn: "main" or a sub id.
     return callWails(() => AppendTalkEntryForAgent(conversationId || 'main', role, text))
       .catch((err) => {
@@ -5447,7 +5192,7 @@ function App() {
           setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(
             prev,
             traceId,
-            `Ai:我還讀不到上一段示範：${err?.message || String(err)}`
+            `Ai:${t('chatSystem.learning.replayReadFailed', {error: err?.message || String(err)})}`
           ));
       });
       return;
@@ -5469,7 +5214,7 @@ function App() {
         setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, message));
         persistConversationEntry(conversationId, 'assistant', message.replace(/^Ai:/, ''), traceId).catch(() => {});
       } catch (err) {
-        const message = `Ai:我讀不到已保存操作 catalog：${err?.message || String(err)}`;
+        const message = `Ai:${t('chatSystem.learning.catalogReadFailed', {error: err?.message || String(err)})}`;
         setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(prev, traceId, message));
       }
       return;
@@ -5484,9 +5229,9 @@ function App() {
           setConversationMessages(conversationId, (prev) => replaceComposerPendingMessage(
             prev,
             traceId,
-            `Ai:${cliResp.text || '這是要我實際執行，還是想先討論？'}`,
+            `Ai:${cliResp.text || t('chatSystem.taskClarification')}`,
           ));
-          persistConversationEntry(conversationId, 'assistant', cliResp.text || '這是要我實際執行，還是想先討論？', traceId).catch(() => {});
+          persistConversationEntry(conversationId, 'assistant', cliResp.text || t('chatSystem.taskClarification'), traceId).catch(() => {});
           refreshReadinessGateState();
           scheduleReadinessGateBurstRefresh();
           return;
@@ -6786,7 +6531,7 @@ function App() {
           actionType: pending.job.action_type || 'event',
           actionPayload: schedulerDefaultPayload(normalized.name, normalized.actionText || normalized.name, normalized.summary),
         });
-        sendSchedulerReply(`Ai:已寫入修改：「${normalized.name}」。你可以點右側「排程」查看摘要。`);
+        sendSchedulerReply(`Ai:${t('chatSystem.scheduler.updated', {name: normalized.name})}`);
       } else {
         await callWails(() => CreateScheduledJob(
           normalized.name,
@@ -6794,13 +6539,13 @@ function App() {
           'event',
           schedulerDefaultPayload(normalized.name, normalized.actionText || normalized.name, normalized.summary),
         ));
-        sendSchedulerReply(`Ai:已建立排程：「${normalized.name}」。你可以點右側「排程」確認是否寫入正確。`);
+        sendSchedulerReply(`Ai:${t('chatSystem.scheduler.created', {name: normalized.name})}`);
       }
       resetSchedulerComposerState('排程已寫入');
       await Promise.all([refreshSchedulerClock(), refreshSchedulerJobs()]);
     } catch (error) {
       setSchedulerError(error?.message || String(error));
-      sendSchedulerReply(`Ai:排程寫入失敗：${error?.message || String(error)}`);
+      sendSchedulerReply(`Ai:${t('chatSystem.scheduler.writeFailed', {error: error?.message || String(error)})}`);
     } finally {
       setSchedulerBusy(false);
     }
@@ -6819,7 +6564,7 @@ function App() {
   function cancelComposerAction() {
     if (schedulerConversation?.phase !== 'confirm') return;
     const conversationId = activeConversationIdRef.current || 'main';
-    const message = 'Ai:好，我先取消這次排程確認。';
+    const message = `Ai:${t('chatSystem.scheduler.confirmationCancelled')}`;
     setConversationMessages(conversationId, (prev) => [...prev, message]);
     persistConversationEntry(conversationId, 'assistant', message.replace(/^Ai:/, '')).catch(() => {});
     resetSchedulerComposerState('已取消排程確認');
@@ -6842,7 +6587,7 @@ function App() {
     // 直接可判定、不需動用模型的快捷詞：取消這次設定 / 在 confirm 階段的肯定確認。
     if (pending && isSchedulerCancellation(text)) {
       resetSchedulerComposerState();
-      sendSchedulerReply('Ai:好，我先取消這次排程設定。');
+      sendSchedulerReply(`Ai:${t('chatSystem.scheduler.setupCancelled')}`);
       return true;
     }
     if (pending && pending.phase === 'confirm' && isSchedulerAffirmation(text)) {
@@ -6875,7 +6620,7 @@ function App() {
 
     // ---- 後援：模型失效時退回本機 regex，並明確告知使用者已降級。 ----
     postDebugTrace('ui.scheduler.degraded', traceId, {user_text: text});
-    setToolResult({toolId: 'scheduler', ok: false, message: SCHEDULER_DEGRADED_NOTICE_SHORT});
+    setToolResult({toolId: 'scheduler', ok: false, message: t('chatSystem.scheduler.degradedNoticeShort')});
     return handleSchedulerComposerIntentFallback({pending, text, jobs, sendSchedulerReply});
   }
 
@@ -6923,7 +6668,7 @@ function App() {
       if (intent === 'open') {
         setSchedulerPanelOpen(true);
         Promise.all([refreshSchedulerClock(), refreshSchedulerJobs()]).catch(() => {});
-        sendSchedulerReply('Ai:我先打開排程清單，請確認要看或修改哪一筆。');
+        sendSchedulerReply(`Ai:${t('chatSystem.scheduler.openList')}`);
         return true;
       }
     }
@@ -6936,7 +6681,7 @@ function App() {
       if (!job) {
         setSchedulerPanelOpen(true);
         Promise.all([refreshSchedulerClock(), refreshSchedulerJobs()]).catch(() => {});
-        sendSchedulerReply('Ai:我找不到你想修改的那一筆排程，先打開清單讓你確認編號。');
+        sendSchedulerReply(`Ai:${t('chatSystem.scheduler.updateNotFound')}`);
         return true;
       }
     }
@@ -6994,7 +6739,7 @@ function App() {
     const sendWithNotice = (message) => {
       let out = message;
       if (!noticeShown) {
-        out = out.replace(/^Ai:/, `Ai:${SCHEDULER_DEGRADED_NOTICE}\n\n`);
+        out = out.replace(/^Ai:/, `Ai:${t('chatSystem.scheduler.degradedNotice')}\n\n`);
         noticeShown = true;
       }
       sendSchedulerReply(out);
@@ -7022,7 +6767,7 @@ function App() {
     if (intent.type === 'open') {
       setSchedulerPanelOpen(true);
       Promise.all([refreshSchedulerClock(), refreshSchedulerJobs()]).catch(() => {});
-      sendWithNotice(`Ai:${intent.message || '我先打開排程清單，請確認要修改哪一筆。'}`);
+      sendWithNotice(`Ai:${intent.message || t('chatSystem.scheduler.openListForUpdate')}`);
       return true;
     }
 
@@ -8037,13 +7782,13 @@ function App() {
       try { window.localStorage.removeItem(learningDigestStorageKey); } catch { /* */ }
       setConversationMessages(conversationId, (prev) => [
         ...prev,
-        '[系統] 學習模式關閉，生態系閒置整理已停止。',
+        t('chatSystem.learning.modeOff'),
       ]);
     } else {
       setLearningEnabled(true);
       setConversationMessages(conversationId, (prev) => [
         ...prev,
-        `[系統] 學習模式開啟。閒置 ${Math.round(learningIdleDelayMs / 60000)} 分鐘後會自動整理生態系（CLI token、sub 流程與 skill），結果會出現在 Review Panel。`,
+        t('chatSystem.learning.modeOn', {minutes: Math.round(learningIdleDelayMs / 60000)}),
       ]);
     }
   }
@@ -8069,7 +7814,7 @@ function App() {
         if (!isNoActiveLearningRecordingError(detail)) {
           setConversationMessages(conversationId, (prev) => [
             ...prev,
-            `[系統] 示範結束，但後端停止記錄時回報錯誤。${detail ? ` ${detail}` : ''}`,
+            t('chatSystem.learning.recordingStopFailed', {error: detail}),
           ]);
         }
       }
@@ -8083,7 +7828,7 @@ function App() {
           const opened = await openFirstMissingVisualLearningPermission(permissionStatus);
           setConversationMessages(conversationId, (prev) => [
             ...prev,
-            formatVisualLearningPermissionStatus(permissionStatus, true) + (opened ? '\n已打開第一個缺少的權限設定頁。' : ''),
+            formatVisualLearningPermissionStatus(permissionStatus, true) + (opened ? `\n${t('chatSystem.learning.permissionSettingsOpened')}` : ''),
           ]);
         }
         const run = await callWails(() => StartLearningMode('window-' + Date.now()));
@@ -8091,7 +7836,7 @@ function App() {
         setVlLearningActive(true);
         setConversationMessages(conversationId, (prev) => [
           ...prev,
-          `[系統] 示範開始。${run?.id ? `Run: ${run.id}。` : ''}請點一次你要教我的目標。`,
+          t('chatSystem.learning.recordingStartedTarget', {run: run?.id ? `Run: ${run.id}. ` : ''}),
         ]);
       } catch (error) {
         const detail = error?.message || String(error || '');
@@ -8103,13 +7848,13 @@ function App() {
           setVlLearningActive(true);
           setConversationMessages(conversationId, (prev) => [
             ...prev,
-            `[系統] 已接回仍在進行中的示範。${activeRun?.id ? `Run: ${activeRun.id}。` : ''}再按一次可停止記錄。`,
+            t('chatSystem.learning.recordingResumedToggle', {run: activeRun?.id ? `Run: ${activeRun.id}. ` : ''}),
           ]);
           return;
         }
         setConversationMessages(conversationId, (prev) => [
           ...prev,
-          `[系統] 示範開始，但後端記錄沒有啟動。${detail ? ` ${detail}` : ''}`,
+          t('chatSystem.learning.recordingBackendInactive', {error: detail}),
         ]);
       }
     }
@@ -9224,6 +8969,15 @@ function App() {
         onSubmit={submitFloatingAvatarText}
         onPhoto={takeFloatingKeepsakePhoto}
         photoBusy={floatingPhotoBusy}
+        voiceState={voiceState}
+        voiceRecording={voiceRecording}
+        voiceBusy={voiceBusy}
+        voiceChatEnabled={voiceChatEnabled}
+        voiceSyncActive={voiceSyncActive}
+        voiceSyncPhase={voiceSyncPhase}
+        onVoicePressStart={handleVoicePressStart}
+        onVoicePressEnd={handleVoicePressEnd}
+        onVoiceCancel={handleVoicePointerCancel}
         onSwitchAgent={switchFloatingAvatarAgent}
         onSetReminderMode={setFloatingReminderMode}
         activePersonaId={floatingPersona.id}
@@ -9320,7 +9074,9 @@ function App() {
         panelSettings={settingsState.panel}
         onPanelChange={savePanelPatch}
         voiceState={voiceState}
+        voiceChatEnabled={voiceChatEnabled}
         voiceInstallBusy={voiceInstallBusy}
+        onToggleVoiceChat={toggleVoiceChatMode}
         onVoiceSettingsChange={saveVoiceSettingsPatch}
         onVoiceSettingsRefresh={() => callWails(GetVoiceSettings).then((settings) => setVoiceState(settings || null))}
         onVoiceModelInstall={installVoiceBaseModel}
@@ -9425,19 +9181,21 @@ function App() {
         />
       )}
       {schedulerPanelOpen && (
-        <SchedulerPanel
-          clock={schedulerClock}
-          jobs={schedulerJobs}
-          draft={schedulerDraft}
-          busy={schedulerBusy}
-          error={schedulerError}
-          onDraftChange={setSchedulerDraft}
-          onRefresh={() => Promise.all([refreshSchedulerClock(), refreshSchedulerJobs()])}
-          onCreate={createSchedulerJob}
-          onJobAction={updateSchedulerJob}
-          onBootstrapSkill={bootstrapSchedulerSkill}
-          onClose={() => setSchedulerPanelOpen(false)}
-        />
+        <React.Suspense fallback={null}>
+          <SchedulerPanel
+            clock={schedulerClock}
+            jobs={schedulerJobs}
+            draft={schedulerDraft}
+            busy={schedulerBusy}
+            error={schedulerError}
+            onDraftChange={setSchedulerDraft}
+            onRefresh={() => Promise.all([refreshSchedulerClock(), refreshSchedulerJobs()])}
+            onCreate={createSchedulerJob}
+            onJobAction={updateSchedulerJob}
+            onBootstrapSkill={bootstrapSchedulerSkill}
+            onClose={() => setSchedulerPanelOpen(false)}
+          />
+        </React.Suspense>
       )}
       <ConsequenceMenuOverlay
         cards={reviewCards.filter((card) => !dismissedDestructiveCards.includes(reviewCardID(card)))}
@@ -9598,7 +9356,8 @@ function App() {
       )}
       {activePanel === 'settings' ? (
         <SettingsErrorBoundary onClose={() => setActivePanel(null)}>
-          <SettingsWorkspace
+          <React.Suspense fallback={null}>
+            <SettingsWorkspace
             settingsState={settingsState}
             onPersonaAdd={addPersona}
             onPersonaDrop={dropPersonaPackage}
@@ -9643,7 +9402,8 @@ function App() {
             onAvatarProviderSelect={setAvatarProviderMode}
             onAvatarStateSelect={setManualAvatarState}
             onAvatarLoad={loadCurrentAvatar}
-          />
+            />
+          </React.Suspense>
         </SettingsErrorBoundary>
       ) : (
         <>
@@ -9770,7 +9530,7 @@ function App() {
                   // 內容比對刪除：後端走 pipeline 記 delete_sentences 維持 hash 鏈；找不到則 no-op。
                   callWails(() => DeleteTalkMessageForAgent(convId, target)).catch(() => {});
                   // 級聯清除該訊息的使用者標註與系統暗標（動態載入，避免綁定尚未產生時 build 失敗）
-                  import('../../wailsjs/go/main/App').then((m) => m.PurgeMessageMarks?.(convId, messageDomId(target, index, messages))).catch(() => {});
+                  Promise.resolve(PurgeMessageMarks?.(convId, messageDomId(target, index, messages))).catch(() => {});
                 }
               }}
               onSummarizeSearch={summarizeSearchResultText}
@@ -9797,10 +9557,16 @@ function App() {
               voiceBusy={voiceBusy}
               voiceStatus={voiceStatus}
               voiceError={voiceError}
-              onVoicePressStart={startVoiceRecording}
-              onVoicePressEnd={stopVoiceRecording}
-              onVoiceCancel={cancelVoiceRecording}
-              taskActive={isTaskProgressActive(dagRun) || !!activeChatTrace}
+              onVoicePressStart={handleVoicePressStart}
+              onVoicePressEnd={handleVoicePressEnd}
+              onVoiceCancel={handleVoicePointerCancel}
+              voiceSyncActive={voiceSyncActive}
+              voiceSyncPhase={voiceSyncPhase}
+              voiceChatEnabled={voiceChatEnabled}
+              voiceChatHint={voiceChatHint}
+              onToggleVoiceChat={toggleVoiceChatMode}
+              onDismissVoiceChatHint={() => setVoiceChatHint(false)}
+              taskActive={isTaskProgressActive(dagRun) || !!activeChatTrace || voiceSyncActive || voiceRecording}
               onCancelTask={cancelActiveExecution}
               pendingTaskReview={pendingTaskReview}
               taskReviewDetailsOpen={reviewPopup === 'risk'}
@@ -9873,22 +9639,26 @@ function App() {
         document.body
       )}
       {typeof document !== 'undefined' && vlMonitorOpen && createPortal(
-	        <VisualLearningPanel
-	          learningActive={vlLearningActive}
-	          onLearningToggle={toggleVisualLearningRecording}
-	          pendingCount={vlPendingCount}
-	          hasBlocking={vlHasBlocking}
-	          recentEvents={vlRecentLearningEvents}
-	          onClose={() => setVlMonitorOpen(false)}
-	        />,
+        <React.Suspense fallback={null}>
+	          <VisualLearningPanel
+	            learningActive={vlLearningActive}
+	            onLearningToggle={toggleVisualLearningRecording}
+	            pendingCount={vlPendingCount}
+	            hasBlocking={vlHasBlocking}
+	            recentEvents={vlRecentLearningEvents}
+	            onClose={() => setVlMonitorOpen(false)}
+	          />
+        </React.Suspense>,
         document.body
       )}
       {/* §M3 Embedding picker modal：first-drop 才開 */}
       {embeddingPickerTarget && typeof document !== 'undefined' && createPortal(
-        <EmbeddingPickerModal
-          displayName={embeddingPickerTarget.displayName}
-          onClose={() => setEmbeddingPickerTarget(null)}
-        />,
+        <React.Suspense fallback={null}>
+          <EmbeddingPickerModal
+            displayName={embeddingPickerTarget.displayName}
+            onClose={() => setEmbeddingPickerTarget(null)}
+          />
+        </React.Suspense>,
         document.body
       )}
       {/* §M3+ 雙擊引用文件卡片：顯示目前 embedding 狀態 popup */}
@@ -10450,199 +10220,96 @@ function findActivePersona(settingsState) {
   return settingsState.personas.find((persona) => persona.id === settingsState.activePersonaId) || settingsState.personas[0];
 }
 
-function isLearningReplayRequest(text) {
-  const normalized = String(text || '').trim().toLowerCase();
-  return /按照.*剛剛.*示範/.test(normalized)
-    || /照.*剛剛.*示範/.test(normalized)
-    || /回放.*剛剛.*示範/.test(normalized)
-    || /回放.*剛剛.*步驟/.test(normalized)
-    || /回放.*剛剛.*操作/.test(normalized)
-    || /重播.*剛剛.*示範/.test(normalized)
-    || /重播.*剛剛.*步驟/.test(normalized)
-    || /重播.*剛剛.*操作/.test(normalized)
-    || /再.*示範.*剛剛/.test(normalized)
-    || /再.*執行.*剛剛/.test(normalized)
-    || /再.*跑.*剛剛/.test(normalized)
-    || /剛剛.*步驟/.test(normalized)
-    || /replay.*last.*demo/.test(normalized)
-    || /replay.*previous.*demo/.test(normalized)
-    || /replay.*demo/.test(normalized)
-    || /replay.*steps/.test(normalized)
-    || /follow.*demo/.test(normalized);
-}
-
-function normalizeLearningOperationQuery(text) {
-  const raw = String(text || '').trim();
-  if (!raw) return '';
-  return raw
-    .replace(/操作|操做|operation/gi, ' ')
-    .replace(/相關|關於|有關|已保存|已儲存|保存|儲存|錄影紀錄|錄製紀錄|示範紀錄|示範|流程|畫面|tag/gi, ' ')
-    .replace(/幫我|請|查詢|搜尋|查找|尋找|找|列出|查看|看看|知道|執行|回放|重播|開啟|打開|有哪些|什麼|甚麼|樣|的/g, ' ')
-    .replace(/[，。！？、,.!?;:()[\]{}"'`<>|\\/]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function parseLearningOperationCatalogRequest(text) {
-  const raw = String(text || '').trim();
-  if (!raw) return null;
-  const lower = raw.toLowerCase();
-  const mentionsSavedCatalog = /已保存|已儲存|保存|儲存|錄影|錄製|示範|紀錄|記錄|catalog/i.test(raw);
-  const asksSavedTag = /tag/i.test(raw) && /儲存|保存|已保存|已儲存|畫面|錄影|錄製|示範|紀錄|記錄|操作|操做/.test(raw);
-  const asksCatalogList = /有哪些|列出|清單|查看|看看|知道/.test(raw)
-    && (mentionsSavedCatalog || /tag/i.test(raw))
-    && /操作|操做|錄影|錄製|示範|tag|catalog/i.test(raw);
-  // Only explicit catalog/list/tag questions are handled locally. Natural
-  // operation requests must go to the LLM so it can choose an action-chain.
-  if (!asksSavedTag && !asksCatalogList) return null;
-  const catalogQuery = normalizeLearningOperationQuery(raw);
-  return catalogQuery ? {mode: 'search', query: catalogQuery} : {mode: 'list', query: ''};
-}
-
-function operationIntentFromCLIResponse(resp) {
-  const action = String(resp?.action || '').trim().toLowerCase();
-  const target = String(resp?.target || '').trim();
-  const next = String(resp?.next || '').trim().toLowerCase();
-  if (!target) return null;
-  // Internal CLI action-chain contract. User input stays natural language.
-  if ((action === '查詢' || action === '搜尋' || action === 'search' || action === 'query') && (next === '操作' || next === '操做')) {
-    return {mode: 'query', query: normalizeLearningOperationQuery(target) || target};
-  }
-  if (action === '操作' || action === '操做') {
-    return {mode: 'execute', query: normalizeLearningOperationQuery(target) || target, raw: target};
-  }
-  return null;
-}
-
-function isLastLearningOperationReference(operationIntent) {
-  const haystack = `${operationIntent?.raw || ''} ${operationIntent?.query || ''}`.toLowerCase();
-  if (!haystack.trim()) return false;
-  return /上次|上一個|上一筆|剛剛|剛才|再一次|再執行一次|重跑一次|重新.*一次/.test(haystack)
-    || /last|previous|again|one more time|rerun/.test(haystack);
-}
-
-function resolveLearningOperationMatch(matches) {
-  if (!matches.length) return null;
-  const [first, second] = matches;
-  const firstScore = Number(first?.score || 0);
-  const secondScore = Number(second?.score || 0);
-  if (firstScore < 1.5) return null;
-  if (second && secondScore > 0 && (firstScore - secondScore) < 0.75) return null;
-  return first;
-}
-
 function formatLearningOperationSearchResults(query, matches, forExecution = false) {
   if (!matches.length) {
-    return `Ai:我找不到符合「${query}」的已保存操作。可以重新示範一次，或換更明確的關鍵詞。`;
+    return `Ai:${_t('chatSystem.learning.operationNoMatches', {query})}`;
   }
   const lines = matches.slice(0, 6).map((item, index) => {
-    const risk = item?.risk?.level ? `風險：${item.risk.level}` : '';
+    const risk = item?.risk?.level ? _t('chatSystem.learning.risk', {value: item.risk.level}) : '';
     const keywords = Array.isArray(item?.keywords) && item.keywords.length
-      ? `關鍵詞：${item.keywords.slice(0, 6).join('、')}`
+      ? _t('chatSystem.learning.keywords', {value: item.keywords.slice(0, 6).join(_t('chatSystem.listSeparator'))})
       : '';
-    const opTag = item?.operation_tag ? `操作分類：${item.operation_tag}` : '';
-    const score = Number.isFinite(Number(item?.score)) ? `匹配：${Number(item.score).toFixed(2)}` : '';
-    const meta = [opTag, keywords, risk, score].filter(Boolean).join('；');
-    return `${index + 1}. ${item.title || item.operation_tag || item.tag || item.run_id || '未命名操作'}\n   ${item.summary || '沒有摘要。'}${meta ? `\n   ${meta}` : ''}`;
+    const opTag = item?.operation_tag ? _t('chatSystem.learning.operationType', {value: item.operation_tag}) : '';
+    const score = Number.isFinite(Number(item?.score)) ? _t('chatSystem.learning.matchScore', {value: Number(item.score).toFixed(2)}) : '';
+    const meta = [opTag, keywords, risk, score].filter(Boolean).join(_t('chatSystem.metaSeparator'));
+    return _t('chatSystem.learning.catalogItem', {
+      index: index + 1,
+      title: item.title || item.operation_tag || item.tag || item.run_id || _t('chatSystem.learning.unnamedOperation'),
+      summary: item.summary || _t('chatSystem.learning.noSummary'),
+      meta: meta ? `\n   ${meta}` : '',
+    });
   });
   const prefix = forExecution
-    ? `Ai:「${query}」有多個或不夠明確的操作候選，請換更精準的關鍵詞。`
-    : `Ai:我找到這些「${query}」相關操作：`;
-  return [prefix, ...lines, '請用更明確的自然語言指定其中一個操作。'].join('\n');
+    ? `Ai:${_t('chatSystem.learning.operationAmbiguous', {query})}`
+    : `Ai:${_t('chatSystem.learning.operationMatches', {query})}`;
+  return [prefix, ...lines, _t('chatSystem.learning.specifyOperation')].join('\n');
 }
 
 function formatLearningOperationCatalog(items) {
   if (!items.length) {
-    return 'Ai:目前還沒有已保存操作。請先開始示範並停止示範，系統就會產生操作名稱、摘要和關鍵詞。';
+    return `Ai:${_t('chatSystem.learning.catalogEmpty')}`;
   }
   const lines = items.slice(0, 10).map((item, index) => {
-    const risk = item?.risk?.level ? `風險：${item.risk.level}` : '';
+    const risk = item?.risk?.level ? _t('chatSystem.learning.risk', {value: item.risk.level}) : '';
     const keywords = Array.isArray(item?.keywords) && item.keywords.length
-      ? `關鍵詞：${item.keywords.slice(0, 6).join('、')}`
+      ? _t('chatSystem.learning.keywords', {value: item.keywords.slice(0, 6).join(_t('chatSystem.listSeparator'))})
       : '';
-    const opTag = item?.operation_tag ? `操作分類：${item.operation_tag}` : '';
-    const internal = item?.tag || item?.run_id ? `內部：${item.tag || item.run_id}` : '';
-    const meta = [opTag, keywords, risk, `步驟：${item.step_count || 0}`, internal].filter(Boolean).join('；');
-    return `${index + 1}. ${item.title || item.operation_tag || '未命名操作'}\n   ${item.summary || '沒有摘要。'}\n   ${meta}`;
+    const opTag = item?.operation_tag ? _t('chatSystem.learning.operationType', {value: item.operation_tag}) : '';
+    const internal = item?.tag || item?.run_id ? _t('chatSystem.learning.internalId', {value: item.tag || item.run_id}) : '';
+    const meta = [opTag, keywords, risk, _t('chatSystem.learning.stepCount', {count: item.step_count || 0}), internal].filter(Boolean).join(_t('chatSystem.metaSeparator'));
+    return _t('chatSystem.learning.catalogItemWithMeta', {
+      index: index + 1,
+      title: item.title || item.operation_tag || _t('chatSystem.learning.unnamedOperation'),
+      summary: item.summary || _t('chatSystem.learning.noSummary'),
+      meta,
+    });
   });
-  return ['Ai:目前已保存的操作如下：', ...lines].join('\n');
+  return [`Ai:${_t('chatSystem.learning.catalogHeader')}`, ...lines].join('\n');
 }
 
 function formatLearningOperationLearned(run) {
   const stepCount = Number(run?.step_count ?? run?.StepCount ?? 0);
   if (stepCount <= 0) {
-    return 'Ai:這次示範已停止，但沒有錄到任何可回放步驟。請確認「輸入監控」仍允許 ai-console，重新啟動 app，開始示範後先點一下或輸入一段文字再停止。';
+    return `Ai:${_t('chatSystem.learning.recordingEmpty')}`;
   }
-  const title = run?.title || run?.name || run?.operation_tag || '未命名操作';
-  const summary = run?.summary || '已保存這次示範。';
+  const title = run?.title || run?.name || run?.operation_tag || _t('chatSystem.learning.unnamedOperation');
+  const summary = run?.summary || _t('chatSystem.learning.demoSaved');
   const keywords = Array.isArray(run?.keywords) && run.keywords.length
-    ? `\n關鍵詞：${run.keywords.slice(0, 8).join('、')}`
+    ? `\n${_t('chatSystem.learning.keywords', {value: run.keywords.slice(0, 8).join(_t('chatSystem.listSeparator'))})}`
     : '';
-  const opTag = run?.operation_tag ? `\n操作分類：${run.operation_tag}` : '';
-  const risk = run?.risk?.level ? `\n風險：${run.risk.level}` : '';
-  return `Ai:已保存操作：「${title}」。\n${summary}${opTag}${keywords}${risk}\n之後可以用自然語言請我查找或執行這類操作。`;
-}
-
-function isLearningReplayRelatedText(text) {
-  const normalized = String(text || '').trim().toLowerCase();
-  if (!normalized) return false;
-  return /示範|回放|重播|剛剛.*步驟|剛剛.*操作|照.*剛剛|按照.*剛剛/.test(normalized)
-    || /replay|demo|last\s+steps|previous\s+steps/.test(normalized);
-}
-
-function extractVisualReplayDirective(text) {
-  const raw = String(text || '');
-  const taggedMatch = raw.match(visualReplayTaggedDirectivePattern);
-  if (taggedMatch) {
-    return {
-      shouldReplay: true,
-      tag: taggedMatch[1],
-      text: raw.replace(visualReplayTaggedDirectivePattern, '').trim(),
-    };
-  }
-  const matchedDirective = raw.includes(visualReplayLastDemoDirective)
-    ? visualReplayLastDemoDirective
-    : raw.includes(legacyVisualReplayLastDemoDirective)
-      ? legacyVisualReplayLastDemoDirective
-      : '';
-  if (!matchedDirective) {
-    return {shouldReplay: false, tag: '', text: raw};
-  }
-  return {
-    shouldReplay: true,
-    tag: '',
-    text: raw.split(matchedDirective).join('').trim(),
-  };
+  const opTag = run?.operation_tag ? `\n${_t('chatSystem.learning.operationType', {value: run.operation_tag})}` : '';
+  const risk = run?.risk?.level ? `\n${_t('chatSystem.learning.risk', {value: run.risk.level})}` : '';
+  return `Ai:${_t('chatSystem.learning.operationSaved', {title, summary, operationType: opTag, keywords, risk})}`;
 }
 
 function formatLearningReplayPlan(plan) {
   const steps = Array.isArray(plan?.steps) ? plan.steps : [];
   if (!steps.length) {
-    return 'Ai:我還沒有讀到可重放的示範步驟。請先按「開始示範」，點一次目標，然後按「停止示範」。';
+    return `Ai:${_t('chatSystem.learning.noReplaySteps')}`;
   }
   const lines = steps.map((step, index) => {
-    const target = step.window_title || step.label || step.role || step.css_selector || step.tag || `座標 (${step.x}, ${step.y})`;
+    const target = step.window_title || step.label || step.role || step.css_selector || step.tag || _t('chatSystem.learning.coordinates', {x: step.x, y: step.y});
     const selector = step.css_selector ? `，selector: ${step.css_selector}` : '';
     const anchor = step.windows_anchor?.ok ? `，anchor: ${step.windows_anchor.mode || 'available'}` : '，anchor: none';
     const nativeInfo = isNativeReplayStep(step)
-      ? `，視窗: ${step.window_title || 'unknown'}，process: ${basenameForDisplay(step.window_process || step.tag || '')}`
+      ? _t('chatSystem.learning.nativeWindowInfo', {window: step.window_title || 'unknown', process: basenameForDisplay(step.window_process || step.tag || '')})
       : '';
-    const coordLabel = isNativeReplayStep(step) ? '螢幕座標' : '座標';
+    const coordLabel = _t(isNativeReplayStep(step) ? 'chatSystem.learning.screenCoordinatesLabel' : 'chatSystem.learning.coordinatesLabel');
     const inputInfo = step.action === 'text'
-      ? `，文字: ${step.sensitive ? '敏感佔位' : `${String(step.text || '').length} 字`}`
+      ? _t('chatSystem.learning.textInfo', {value: step.sensitive ? _t('chatSystem.learning.sensitivePlaceholder') : _t('chatSystem.learning.characterCount', {count: String(step.text || '').length})})
       : step.action === 'shortcut'
-        ? `，快捷鍵: ${(step.modifiers || []).join('+')}${step.modifiers?.length ? '+' : ''}${step.key || ''}`
+        ? _t('chatSystem.learning.shortcutInfo', {value: `${(step.modifiers || []).join('+')}${step.modifiers?.length ? '+' : ''}${step.key || ''}`})
         : '';
-    return `${index + 1}. ${step.action || 'click'} ${target}，${coordLabel} (${step.x}, ${step.y})${inputInfo}${nativeInfo}${selector}${anchor}`;
+    return _t('chatSystem.learning.planStep', {index: index + 1, action: step.action || 'click', target, coordinateLabel: coordLabel, x: step.x, y: step.y, inputInfo, nativeInfo, selector, anchor});
   });
   const anchorCount = steps.filter((step) => step.windows_anchor?.ok).length;
   return [
-    'Ai:我讀到剛剛的示範了，已產生安全 replay plan。確認後會先嘗試操作本視窗內的元素。',
+    `Ai:${_t('chatSystem.learning.planIntro')}`,
     `Tag: ${plan?.tag || 'demo-last'}，Title: ${plan?.title || plan?.run_name || 'untitled'}。`,
     plan?.run_summary ? `Summary: ${plan.run_summary}` : '',
-    `Run: ${plan?.run_id || 'unknown'}，步驟 ${steps.length} 個，visual anchor 覆蓋 ${anchorCount}/${steps.length}。`,
+    _t('chatSystem.learning.planRunMeta', {run: plan?.run_id || 'unknown', steps: steps.length, anchors: anchorCount}),
     ...lines,
-    '執行時本視窗會先走 selector，外部瀏覽器會走 native 螢幕座標；找不到本視窗元素才 fallback 到示範座標。',
+    _t('chatSystem.learning.planExecutionNote'),
   ].filter(Boolean).join('\n');
 }
 
@@ -10656,16 +10323,16 @@ function formatLearningReplayConfirmation(plan) {
     return [label, label];
   })).values()).slice(0, 4);
   const lines = [
-    `即將依照剛剛的示範執行 ${steps.length} 個步驟。`,
-    `本視窗 selector ${domSteps} 步，外部 native click ${nativeSteps.length} 步。`,
+    _t('chatSystem.learning.confirmStepCount', {count: steps.length}),
+    _t('chatSystem.learning.confirmMethodCounts', {dom: domSteps, native: nativeSteps.length}),
   ];
   if (textSteps.length) {
-    lines.push(`包含文字/敏感輸入 ${textSteps.length} 步；需確認的文字會先停下來。`);
+    lines.push(_t('chatSystem.learning.confirmTextSteps', {count: textSteps.length}));
   }
   if (windows.length) {
-    lines.push('', '外部目標視窗：', ...windows.map((item) => `- ${item}`));
+    lines.push('', _t('chatSystem.learning.externalWindows'), ...windows.map((item) => `- ${item}`));
   }
-  lines.push('', '外部 native click 會慢速移動鼠標到目標並短暫停頓；錯誤率會在執行後統整呈現，失敗步驟會跳過並繼續後面。', '確定要執行嗎？');
+  lines.push('', _t('chatSystem.learning.confirmNativeWarning'), _t('chatSystem.learning.confirmQuestion'));
   return lines.join('\n');
 }
 
@@ -10693,14 +10360,27 @@ function formatLearningReplayExecutionResult(result) {
   const anchorTotal = steps.filter((step) => step.windows_anchor?.ok).length;
   const reviewAnchors = steps.filter((step) => step.windows_anchor?.needs_review).length;
   const lines = [
-    `Ai:Replay executor 執行完成：${okCount}/${steps.length} 步成功。`,
-    `selector 命中 ${selectorCount} 步，native 座標 ${nativeOK}/${nativeTotal} 步${nativeTotal ? `（前景確認 ${nativeForegroundOK}/${nativeTotal}）` : ''}，座標 fallback ${coordinateCount} 步。`,
-    `文字輸入成功 ${textOK} 步，快捷鍵/按鍵成功 ${keyOK} 步。`,
-    `visual anchor 覆蓋 ${anchorTotal}/${steps.length} 步，需複核 ${reviewAnchors} 步；YOLO/OpenCV 重定位 ${visualOK}/${visualTotal} 步${visualConfirm ? `，待確認 ${visualConfirm} 步` : ''}。`,
-    `略過 ${skipped.length} 步，失敗 ${failed.length} 步，警告 ${warned.length} 步。`,
+    `Ai:${_t('chatSystem.learning.executionComplete', {ok: okCount, total: steps.length})}`,
+    _t('chatSystem.learning.executionMethods', {
+      selector: selectorCount,
+      nativeOk: nativeOK,
+      nativeTotal,
+      foreground: nativeTotal ? _t('chatSystem.learning.foregroundCount', {ok: nativeForegroundOK, total: nativeTotal}) : '',
+      fallback: coordinateCount,
+    }),
+    _t('chatSystem.learning.executionInputs', {text: textOK, keys: keyOK}),
+    _t('chatSystem.learning.executionVisual', {
+      anchors: anchorTotal,
+      total: steps.length,
+      review: reviewAnchors,
+      visualOk: visualOK,
+      visualTotal,
+      confirm: visualConfirm ? _t('chatSystem.learning.pendingReviewCount', {count: visualConfirm}) : '',
+    }),
+    _t('chatSystem.learning.executionIssues', {skipped: skipped.length, failed: failed.length, warned: warned.length}),
   ];
   const details = steps.filter((step) => step.warning || step.skipped || (!step.ok && !step.skipped) || isVisualRelocation(step)).map((step) => {
-    const target = step.label || step.selector || `座標 (${step.x}, ${step.y})`;
+    const target = step.label || step.selector || _t('chatSystem.learning.coordinates', {x: step.x, y: step.y});
     const status = !step.ok && !step.skipped ? 'FAIL' : step.skipped ? 'SKIP' : 'WARN';
     const error = step.error ? `，${step.error}` : step.warning ? `，${step.warning}` : '';
     const relocation = step.relocation_method
@@ -10752,7 +10432,7 @@ async function executeLearningReplayStep(step) {
       x: step?.x,
       y: step?.y,
       windows_anchor: step?.windows_anchor,
-      error: '系統控制項不重播，避免重新開始錄製',
+      error: _t('chatSystem.learning.errorSystemControl'),
     };
   }
   if (action === 'sensitive_text') {
@@ -10766,7 +10446,7 @@ async function executeLearningReplayStep(step) {
       x: step?.x,
       y: step?.y,
       sensitive: true,
-      error: '敏感文字未保存；需透過授權的密碼/憑證 App 填入',
+      error: _t('chatSystem.learning.errorSensitiveText'),
     };
   }
   if (action === 'text') {
@@ -10785,7 +10465,7 @@ async function executeLearningReplayStep(step) {
       x: step?.x,
       y: step?.y,
       windows_anchor: step?.windows_anchor,
-      error: `尚未支援 ${action}`,
+      error: _t('chatSystem.learning.errorUnsupportedAction', {action}),
     };
   }
 
@@ -10820,7 +10500,7 @@ async function executeLearningReplayStep(step) {
         x: point.x,
         y: point.y,
         windows_anchor: step?.windows_anchor,
-        error: '座標落在系統控制項，已略過',
+        error: _t('chatSystem.learning.errorBlockedCoordinate'),
       };
     }
     await showLearningReplayWebCursor(point.x, point.y);
@@ -10846,7 +10526,7 @@ async function executeLearningReplayStep(step) {
     x: point.x,
     y: point.y,
     windows_anchor: step?.windows_anchor,
-    error: '找不到可點擊元素',
+    error: _t('chatSystem.learning.errorNoClickableElement'),
   };
 }
 
@@ -10885,7 +10565,7 @@ function executeWebviewTextReplayStep(step, selector, label) {
       x: step?.x,
       y: step?.y,
       text: step?.text || '',
-      error: '文字輸入需要確認後才回放',
+      error: _t('chatSystem.learning.errorTextNeedsConfirmation'),
     };
   }
   const target = findReplayInputTarget(selector, step);
@@ -10898,7 +10578,7 @@ function executeWebviewTextReplayStep(step, selector, label) {
       label,
       x: step?.x,
       y: step?.y,
-      error: '找不到可輸入文字的元素',
+      error: _t('chatSystem.learning.errorNoTextElement'),
     };
   }
   const text = String(step?.text || '');
@@ -11051,11 +10731,6 @@ function normalizeReplayPoint(step) {
     x: clampReplayCoordinate(x, 0, Math.max(0, currentWidth - 1)),
     y: clampReplayCoordinate(y, 0, Math.max(0, currentHeight - 1)),
   };
-}
-
-function clampReplayCoordinate(value, min, max) {
-  if (!Number.isFinite(value)) return min;
-  return Math.min(max, Math.max(min, value));
 }
 
 const learningReplayWebCursorState = {
@@ -11233,14 +10908,6 @@ function appendUniqueReferenceFile(current, file) {
   return found ? merged : [...current, file];
 }
 
-function referenceFileKey(file) {
-  return String(file?.path || file?.name || '');
-}
-
-function sharedSourceKey(link) {
-  return String(link?.id || link?.ID || link?.url || link?.URL || '');
-}
-
 function normalizeReferenceImportPaths(paths = []) {
   return Array.from(paths || [])
     .map((path) => (typeof path === 'string' ? path : path?.path))
@@ -11306,20 +10973,6 @@ function updateReferenceFileStatus(current, path, patch) {
   });
 }
 
-function referenceFileStatusLabel(status, translate = _t) {
-  return {
-    importing: translate('rightRail.refStatusImporting'),
-    checking: translate('rightRail.refStatusChecking'),
-    ready: translate('rightRail.refStatusReady'),
-    error: translate('rightRail.refStatusError'),
-  }[status] || translate('rightRail.refStatusAdded');
-}
-
-function shouldShowReferenceFileDetail(file) {
-  if (!file?.detail) return false;
-  return !(file.source === 'library' && file.status === 'ready');
-}
-
 function avatarStateLabel(state) {
   return getAvatarStateLabels()[state] || state;
 }
@@ -11348,12 +11001,8 @@ function getPixelAvatarDataUrl(pack, state, size = pixelAvatarRenderSize) {
 }
 
 function getBundledAvatarPackUrl(pack, state = 'idle') {
-  if (pack === 'wolf') return wolfdogAvatarUrls[state] || wolfdogAvatarUrls.idle;
-  if (pack === 'uncle') return uncleBustAvatarUrls[state] || uncleBustAvatarUrls.idle;
-  if (pack === 'secretary') return secretaryAvatarUrls[state] || secretaryAvatarUrls.idle;
-  if (pack === 'police') return policeAvatarUrls[state] || policeAvatarUrls.idle;
-  if (pack === 'touharu') return touharuAvatarUrls[state] || touharuAvatarUrls.idle;
-  return '';
+  const urls = PERSONA_STATE_AVATAR_URLS[pack];
+  return urls?.[state] || urls?.idle || '';
 }
 
 let monitorLinkCache = null;
@@ -11384,188 +11033,6 @@ function makeDebugTraceID(scope) {
 }
 
 
-/* i18n: map backend-persisted Chinese labels to current locale display labels.
-   The Go backend stores display strings as-is (always Chinese on first save). */
-// 版型 → 字型堆疊（family 名稱需與 fontFaces.js 一致）。fontDefault 不覆寫，沿用語言預設字。
-const FONT_PRESET_STACKS = {
-  'settings.fontNormal': "'Inter','Noto Sans TC','Noto Sans JP',sans-serif",
-  'settings.fontHand':   "'Caveat','Klee One','LXGW WenKai','Noto Sans TC','Noto Sans JP',cursive",
-  'settings.fontCalli':  "'Dancing Script','LXGW WenKai','Yuji Syuku','Noto Serif TC','Noto Sans JP',serif",
-  'settings.fontRound':  "'Fredoka','jf-openhuninn','Noto Sans JP','Noto Sans TC',sans-serif",
-  'settings.fontMono':   "'JetBrains Mono','Noto Sans TC','Noto Sans JP',monospace",
-};
-
-// 把已儲存的版型值（可能是任一語言的顯示字串）正規化為穩定 key。
-function fontPresetKey(value) {
-  if (!value) return 'settings.fontDefault';
-  if (_fontPresetLabelMap[value]) return _fontPresetLabelMap[value];
-  for (const k of new Set(Object.values(_fontPresetLabelMap))) {
-    if (_t(k) === value) return k;
-  }
-  return 'settings.fontDefault';
-}
-
-// 版型 → 套在根元素的 CSS 變數（覆寫字體 family）。fontDefault 回傳空物件。
-function fontPresetVars(value) {
-  const stack = FONT_PRESET_STACKS[fontPresetKey(value)];
-  if (!stack) return {};
-  return { '--font-console': stack, '--i18n-font': stack };
-}
-function normalizePanelSettings(panel = {}) {
-  return {...panel, panelStyle: normalizePanelStyle(panel.panelStyle)};
-}
-
-function panelFromUISettings(uiSettings = {}, fallbackPanel = fallbackSettings.panel) {
-  return {
-    panelLanguage: localizeBackendLabel(uiSettings.panel_language, _panelLangLabelMap) || fallbackPanel.panelLanguage,
-    roleLanguage: localizeBackendLabel(uiSettings.role_language, _roleLangLabelMap) || fallbackPanel.roleLanguage,
-    fontPreset: localizeBackendLabel(uiSettings.font_preset, _fontPresetLabelMap) || fallbackPanel.fontPreset,
-    fontScale: uiSettings.font_scale || fallbackPanel.fontScale,
-    panelStyle: styleKeyOf(uiSettings.panel_style || fallbackPanel.panelStyle),
-  };
-}
-
-function normalizeSettingsState(settingsState = {}, fallback = fallbackSettings) {
-  const merged = {
-    ...fallback,
-    ...settingsState,
-    panel: {
-      ...(fallback.panel || fallbackSettings.panel),
-      ...(settingsState.panel || {}),
-    },
-  };
-  const personas = normalizeLockedPersonas(
-    merged.personas || fallbackSettings.personas,
-    merged.removedDefaultPersonaIds || [],
-    personaLocaleFromPanel(merged.panel),
-  );
-  const activePersonaId = personas.some((persona) => persona.id === merged.activePersonaId)
-    ? merged.activePersonaId
-    : lockedPersonaId;
-  return {...merged, activePersonaId, personas, panel: normalizePanelSettings(merged.panel)};
-}
-
-function normalizeLockedPersonas(personas = [], removedDefaultPersonaIds = [], personaLocale = '') {
-  // persona-a is a reserved persona identity, not a reserved slot. Keep its
-  // name stable while preserving whatever ordering the user chose, because the
-  // app treats the first card as the current main persona.
-  const normalized = personas.map((persona) => {
-    const withPatrolDialogue = {
-      ...persona,
-      patrolDialogue: persona?.patrolDialogue ?? persona?.patrol_dialogue ?? '',
-    };
-    if (persona.id === lockedPersonaId) {
-      // The first card is locked: always force its name to the localized
-      // locked name so it follows the language switch even when the stored
-      // value is a stale/legacy variant that no longer matches legacyNames.
-      const localizedCopy = normalizeBuiltInPersonaCopy(withPatrolDialogue, personaLocale);
-      return {...localizedCopy, name: personaI18n(personaLocale, 'persona.lockedName')};
-    }
-    return normalizeBuiltInPersonaCopy(withPatrolDialogue, personaLocale);
-  });
-  const lockedIndex = normalized.findIndex((persona) => persona.id === lockedPersonaId);
-  if (lockedIndex < 0) {
-    return appendMissingDefaultPersonas([normalizeBuiltInPersonaCopy(fallbackSettings.personas[0], personaLocale), ...normalized], removedDefaultPersonaIds, personaLocale);
-  }
-  return appendMissingDefaultPersonas(normalized, removedDefaultPersonaIds, personaLocale);
-}
-
-const defaultPersonaCopy = {
-  'persona-a': {
-    name: (locale) => personaI18n(locale, 'persona.lockedName'),
-    identity: (locale) => personaI18n(locale, 'persona.defaultIdentityA'),
-    personality: () => '',
-    legacyNames: ['憂樂傻酷', 'YuRoSaKu', 'yurosaku'],
-    legacyIdentities: [
-      '酷酷的男性狼犬獸人助手',
-      'A cool male wolf-dog anthro assistant',
-    ],
-    legacyPersonalities: [''],
-  },
-  'persona-b': {
-    name: (locale) => personaI18n(locale, 'persona.defaultNameB'),
-    identity: (locale) => personaI18n(locale, 'persona.defaultIdentityB'),
-    personality: () => '',
-    legacyNames: ['人格 B', '厭世叔', '厭世大叔', 'Grumpy Uncle', 'Tío Gruñón', 'Tio Rabugento', '不機嫌おじさん', '심술쟁이 아저씨', 'ลุงขี้บ่น'],
-    legacyIdentities: [
-      '厭世社畜但帥帥的粗眉硬漢助手',
-      'A world-weary office drone — still handsome, thick-browed, and tough',
-    ],
-    legacyPersonalities: [''],
-  },
-  'persona-c': {
-    name: (locale) => personaI18n(locale, 'persona.defaultNameC'),
-    identity: (locale) => personaI18n(locale, 'persona.defaultIdentityC'),
-    personality: () => '',
-    legacyNames: ['人格 C', '秘書小妹', '秘書小姐', 'Secretary Sis', 'Hermana Secretaria', 'Irmã Secretária', '秘書お姉さん', '비서 아가씨', 'พี่สาวเลขาฯ'],
-    legacyIdentities: [
-      '聰明俐落的秘書小妹助手',
-      'A sharp and efficient secretary assistant',
-    ],
-    legacyPersonalities: [''],
-  },
-  'persona-d': {
-    name: (locale) => personaI18n(locale, 'persona.defaultNameD'),
-    identity: (locale) => personaI18n(locale, 'persona.defaultIdentityD'),
-    personality: (locale) => personaI18n(locale, 'persona.defaultPersonalityD'),
-    legacyNames: ['人格 D', '規則警察', '警察桂澤', 'Rule Police', 'Officer Reggie Law', 'Agente Reglaz', 'Agente Regraldo', '木曽久巡査', '규식 순경', 'ผู้หมวดกฎเก่ง'],
-    legacyIdentities: [
-      '循規蹈矩、嚴格守序、看到違規就會說教的警察助手',
-      '循規蹈矩的警察助手；「桂澤」聽起來像規則，看到流程被跳過就會立刻吹哨。',
-      'A strict rule-following police assistant who lectures when rules are bent',
-      'Rules-first police assistant who lectures when rules are bent',
-    ],
-    legacyPersonalities: [
-      '重視規則、流程與安全，回答會先提醒限制與責任，語氣像警察一樣嚴肅但可靠。',
-      '把規則、流程與安全放第一，回答會先提醒限制、責任與風險；嚴肅但可靠，說教時也有一點冷面幽默。',
-      'Prioritizes rules, process, and safety. Replies first with constraints and responsibility, stern like a police officer but reliable.',
-    ],
-  },
-  'persona-e': {
-    name: (locale) => personaI18n(locale, 'persona.defaultNameE'),
-    identity: (locale) => personaI18n(locale, 'persona.defaultIdentityE'),
-    personality: (locale) => personaI18n(locale, 'persona.defaultPersonalityE'),
-    legacyNames: ['東春巫女', 'Touharu Miko', 'Miko Touharu', '東春の巫女', '동춘 무녀', 'มิโกะโทฮารุ'],
-    legacyIdentities: [
-      '白髮馬尾、棕眼曬黑、直覺敏銳的巫女助手',
-      '白髮馬尾、棕眼曬黑、直覺敏銳的東春巫女助手',
-      'A tan white-ponytailed miko assistant with sharp intuition',
-      'Tan-skinned white-ponytailed miko assistant with sharp intuition',
-    ],
-    legacyPersonalities: [
-      '傲嬌、淘氣又直覺敏銳，嘴上不饒人，但能很快察覺問題不對勁。',
-      '傲嬌又淘氣，嘴上不饒人，但能很快察覺問題不對勁，像春雷一樣先提醒你。',
-      'Tsundere and mischievous, with quick instincts and a habit of noticing when something feels off.',
-      'Tsundere and mischievous, but highly intuitive and quick to sense when something is wrong.',
-    ],
-  },
-};
-
-function isLegacyDefaultCopy(value, legacyValues = []) {
-  const text = String(value || '').trim();
-  return text === '' || legacyValues.includes(text);
-}
-
-function normalizeBuiltInPersonaCopy(persona = {}, personaLocale = '') {
-  const copy = defaultPersonaCopy[persona.id];
-  if (!copy) return persona;
-  return {
-    ...persona,
-    name: isLegacyDefaultCopy(persona.name, copy.legacyNames) ? copy.name(personaLocale) : persona.name,
-    identity: isLegacyDefaultCopy(persona.identity, copy.legacyIdentities) ? copy.identity(personaLocale) : persona.identity,
-    personality: isLegacyDefaultCopy(persona.personality, copy.legacyPersonalities) ? copy.personality(personaLocale) : persona.personality,
-  };
-}
-
-function appendMissingDefaultPersonas(personas = [], removedDefaultPersonaIds = [], personaLocale = '') {
-  const known = new Set(personas.map((persona) => persona.id));
-  const removed = new Set(removedDefaultPersonaIds || []);
-  const seeds = fallbackSettings.personas.filter((persona) => (
-    persona.id !== lockedPersonaId && !known.has(persona.id) && !removed.has(persona.id)
-  )).map((persona) => normalizeBuiltInPersonaCopy(persona, personaLocale));
-  return seeds.length > 0 ? [...personas, ...seeds] : personas;
-}
-
 function normalizeToolList(toolList = []) {
   const merged = new Map(getFallbackTools().map((tool) => [tool.id, tool]));
   toolList.forEach((tool) => {
@@ -11575,19 +11042,8 @@ function normalizeToolList(toolList = []) {
   return Array.from(merged.values());
 }
 
-function panelStyleTheme(style) {
-  return STYLE_KEY_THEME[styleKeyOf(style)] || 'onanegiku';
-}
-
-// Converts persisted values like "80%" into a bounded CSS scale number.
-function fontScaleValue(fontScale) {
-  const value = Number.parseInt(String(fontScale || '100%').replace('%', ''), 10);
-  const normalized = Number.isNaN(value) ? 100 : value;
-  return Math.min(120, Math.max(50, normalized)) / 100;
-}
-
 function getPersonaAvatar(persona) {
-  return persona?.avatarUrl || personaAvatarUrls[persona?.id] || personaAvatarUrls['persona-a'];
+  return persona?.avatarUrl || PERSONA_AVATAR_URLS[persona?.id] || PERSONA_AVATAR_URLS[LOCKED_PERSONA_ID];
 }
 
 function bytesToDataUrl(bytes = [], mimeType = 'image/png') {
@@ -11617,14 +11073,6 @@ function resolveStaticAvatarPath(config) {
   return config?.static_avatar_path || config?.StaticAvatarPath || '';
 }
 
-function defaultPixelPackForPersona(personaID) {
-  if (personaID === 'persona-b') return 'uncle';
-  if (personaID === 'persona-c') return 'secretary';
-  if (personaID === 'persona-d') return 'police';
-  if (personaID === 'persona-e') return 'touharu';
-  return 'wolf';
-}
-
 function pixelPackForPersona(persona, config) {
   const pack = config?.pixel_pack || config?.PixelPack || '';
   if (['wolf', 'uncle', 'secretary', 'police', 'touharu'].includes(pack)) return pack;
@@ -11636,7 +11084,7 @@ function pixelPackForPersona(persona, config) {
 function resolvePersonaFullBodySrc(persona, config, state) {
   const explicit = persona?.fullBodyAvatarUrl || persona?.full_body_avatar_url || '';
   if (explicit) return explicit;
-  const pack = fullBodyAvatarUrls[pixelPackForPersona(persona, config)];
+  const pack = PERSONA_FULL_BODY_URLS[pixelPackForPersona(persona, config)];
   if (!pack) return '';
   if (state && pack[state]) return pack[state];
   return state === 'blocked' ? pack.blocked : pack.idle;
@@ -11742,7 +11190,8 @@ function Sidebar({
   adapters, adapterList, activeAdapterId,
   adapterModelChoices, adapterModelOptions, onAdapterModelPick, onAdapterModelRefresh,
   onAdapterSelect, onLocalAdapterWake, adapterCandidateLinks, activePanel,
-  isToolPopupOpen, panelSettings, onPanelChange, voiceState, voiceInstallBusy,
+  isToolPopupOpen, panelSettings, onPanelChange, voiceState, voiceChatEnabled, voiceInstallBusy,
+  onToggleVoiceChat,
   onVoiceSettingsChange, onVoiceSettingsRefresh, onVoiceModelInstall, onVoiceModelRemove, onRestoreDefaults, onTogglePanel,
   onToolPopupToggle, onProjectManageOpen, onCreateSubagent, onAdaptersReordered, onAdaptersChanged, onAdapterRemove,
 }) {
@@ -12033,20 +11482,32 @@ function Sidebar({
           <span>⛁</span>
           <span>{t('project.manageTitle')}</span>
         </button>
+        <button
+          className={`command-btn command-voice-chat${voiceChatEnabled ? ' command-voice-chat-active' : ''}`}
+          type="button"
+          aria-pressed={voiceChatEnabled}
+          onClick={() => onToggleVoiceChat?.()}
+        >
+          <span>♬</span>
+          <span>{t('settings.voiceChatMode')}</span>
+          <i className="command-voice-chat-status" aria-hidden="true" />
+        </button>
       </nav>
       <div className="highlight-groups-anchor" data-highlight-groups-anchor />
       {settingsOpen && (
-        <SettingsMenu
-          panel={panelSettings}
-          onPanelChange={onPanelChange}
-          voiceState={voiceState}
-          voiceInstallBusy={voiceInstallBusy}
-          onVoiceSettingsChange={onVoiceSettingsChange}
-          onVoiceSettingsRefresh={onVoiceSettingsRefresh}
-          onVoiceModelInstall={onVoiceModelInstall}
-          onVoiceModelRemove={onVoiceModelRemove}
-          onRestoreDefaults={onRestoreDefaults}
-        />
+        <React.Suspense fallback={null}>
+          <SettingsMenu
+            panel={panelSettings}
+            onPanelChange={onPanelChange}
+            voiceState={voiceState}
+            voiceInstallBusy={voiceInstallBusy}
+            onVoiceSettingsChange={onVoiceSettingsChange}
+            onVoiceSettingsRefresh={onVoiceSettingsRefresh}
+            onVoiceModelInstall={onVoiceModelInstall}
+            onVoiceModelRemove={onVoiceModelRemove}
+            onRestoreDefaults={onRestoreDefaults}
+          />
+        </React.Suspense>
       )}
       {/* §M-1 model picker 彈窗 — 雙擊 adapter 卡片時顯示，貼在卡片右側 */}
       {modelPicker && typeof document !== 'undefined' && createPortal(
@@ -12157,12 +11618,20 @@ export function PersonaSettingsDrawer({
   const [strengthPickerOpen, setStrengthPickerOpen] = useState(false);
   const [avatarMenuPersonaId, setAvatarMenuPersonaId] = useState(null);
   const [strengthDraft, setStrengthDraft] = useState(parseToneChance(activePersona.roleStrength));
+  const [voiceProfiles, setVoiceProfiles] = useState([]);
+  const [voicePreviewBusy, setVoicePreviewBusy] = useState(false);
+  const activeVoiceId = activePersona.voiceId || defaultVoiceIdByPersonaId[activePersona.id] || 'os_default';
+  const activeVoiceProfile = voiceProfiles.find((profile) => profile.voiceId === activeVoiceId) || voiceProfiles[0] || null;
 
   useEffect(() => {
     setStrengthDraft(parseToneChance(activePersona.roleStrength));
     setStrengthPickerOpen(false);
     onAvatarLoad?.(activePersona.id);
   }, [activePersona.id]);
+
+  useEffect(() => {
+    VoiceProfiles().then((list) => setVoiceProfiles(Array.isArray(list) ? list : [])).catch(() => {});
+  }, []);
 
   function collectPersonaFormPatch() {
     const form = personaFormRef.current;
@@ -12173,6 +11642,7 @@ export function PersonaSettingsDrawer({
       replyStrategy: form.elements.replyStrategy?.value || '',
       roleStrength: `${strengthDraft}%`,
       personality: form.elements.personality?.value || '',
+      voiceId: activeVoiceId,
       scenario: form.elements.scenario?.value || '',
       description: form.elements.description?.value || '',
       patrolDialogue: form.elements.patrolDialogue?.value || '',
@@ -12191,6 +11661,22 @@ export function PersonaSettingsDrawer({
     const row = personaRowRef.current;
     if (!row) return;
     row.scrollBy({left: direction * row.clientWidth, behavior: 'smooth'});
+  }
+
+  function selectPersonaVoice(label) {
+    const profile = voiceProfiles.find((item) => localizedVoiceProfileName(item, t) === label);
+    if (!profile) return;
+    onPersonaChange(activePersona.id, {voiceId: profile.voiceId});
+  }
+
+  async function previewPersonaVoice() {
+    if (!activeVoiceId || voicePreviewBusy) return;
+    const name = activePersona.name || t('persona.fallbackName');
+    setVoicePreviewBusy(true);
+    try {
+      await PreviewVoiceProfileText(activeVoiceId, t('persona.voicePreviewLine', { name }));
+    } catch { /* 引擎不可用時靜默 */ }
+    setVoicePreviewBusy(false);
   }
 
   async function handlePersonaExportAction(action) {
@@ -12567,14 +12053,33 @@ export function PersonaSettingsDrawer({
               />
             )}
           </div>
-          <input
-            aria-label={t('persona.scenarioAriaLabel')}
-            defaultValue={activePersona.scenario}
-            key={`${activePersona.id}-scenario`}
-            name="scenario"
-            placeholder={t('persona.scenePlaceholder')}
-            onBlur={(event) => onPersonaChange(activePersona.id, {scenario: event.target.value})}
-          />
+          <div className="persona-scenario-stack">
+            <input
+              aria-label={t('persona.scenarioAriaLabel')}
+              defaultValue={activePersona.scenario}
+              key={`${activePersona.id}-scenario`}
+              name="scenario"
+              placeholder={t('persona.scenePlaceholder')}
+              onBlur={(event) => onPersonaChange(activePersona.id, {scenario: event.target.value})}
+            />
+            <div className="persona-voice-row">
+              <SettingPopupSelect
+                icon="♪"
+                label={t('persona.voiceSelectLabel')}
+                value={activeVoiceProfile ? localizedVoiceProfileName(activeVoiceProfile, t) : t('persona.voiceSelectLabel')}
+                options={voiceProfiles.map((profile) => localizedVoiceProfileName(profile, t))}
+                onSelect={selectPersonaVoice}
+              />
+              <button
+                type="button"
+                className="persona-voice-preview-btn"
+                disabled={!activeVoiceProfile || voicePreviewBusy}
+                onClick={previewPersonaVoice}
+              >
+                {voicePreviewBusy ? '…' : t('settings.voicePreviewPlay')}
+              </button>
+            </div>
+          </div>
         </div>
         <textarea
           aria-label={t('persona.descriptionAriaLabel')}
@@ -13637,389 +13142,6 @@ function TopConsole({
 //   所有元素掛在輸入框正上方（conversation 底部），操作完成後消失刷新。
 //   UI 像高級咖啡店一樣簡潔；動畫是煙火，不是護照。
 
-function MicIcon() {
-  return (
-    <svg className="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 3.5c-1.7 0-3 1.3-3 3v5c0 1.7 1.3 3 3 3s3-1.3 3-3v-5c0-1.7-1.3-3-3-3Z" />
-      <path d="M6.5 10.5c0 3 2.4 5.5 5.5 5.5s5.5-2.5 5.5-5.5M12 16v3.5M9 20.5h6" />
-    </svg>
-  );
-}
-
-function localizeChatSystemMessage(message, chatLocale = 'zh-TW') {
-  const raw = String(message || '');
-  const body = raw.replace(/^Ai:/, '').trim();
-  if (raw.startsWith('Ai:') && body === '請選擇：') {
-    return `Ai:${tForLanguage(chatLocale, 'chatSystem.choose')}`;
-  }
-  return raw;
-}
-
-function ConversationPanel({
-  messages, personaName, draft, onDraftChange, onSend, onDelete, onSummarizeSearch, onExportSearchSummary,
-  onInjectText, activeConversationId, chatLocale = 'zh-TW',
-  // v3.6.4 Readiness Gate props
-  readinessGate = fallbackReadinessGate,
-  selectedFloatingCandidateIDs = [],
-  longPressProgress = 0, gachaPhase = null, riskImpactExpanded = false,
-  onSelectCandidate, onNormalConfirm, onNormalReject, onHighRiskYes,
-  onLongPressStart, onLongPressEnd,
-  // §12A.5B Dispatch 狀態
-  dispatchStatus = {},
-  voiceState = null, voiceRecording = false, voiceBusy = false, voiceStatus = '', voiceError = '',
-  onVoicePressStart, onVoicePressEnd, onVoiceCancel,
-  taskActive = false, onCancelTask,
-  pendingTaskReview = null, taskReviewDetailsOpen = false,
-  onConfirmTaskReview, onCancelTaskReview, onShowTaskReviewDetails,
-  composerConfirmAction = null, onComposerConfirm, onComposerCancel,
-}) {
-  const t = useI18n(s => s.t);
-  const [activeMessage, setActiveMessage] = useState(null);
-  const [imagePreviews, setImagePreviews] = useState([]);
-  const [imageError, setImageError] = useState('');
-  const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8MB：擋住整張截圖把記憶體灌爆
-  const composerComposingRef = useRef(false);
-  const taskReviewCardRef = useRef(null);
-  const imageInputRef = useRef(null);
-  const voiceReady = voiceState?.status === 'ready';
-  const micAvailable = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
-  const voiceDisabled = voiceBusy || !voiceReady || !micAvailable;
-  const voiceTitle = voiceReady ? t('composer.voiceHold') : voiceStatusLabel(voiceState?.status);
-  const hasSelectedFloatingCandidates = selectedFloatingCandidateIDs.length > 0;
-  const composerReady = !!draft.trim() || hasSelectedFloatingCandidates;
-  const displayMessage = (message) => localizeChatSystemMessage(stripComposerPendingMarker(message), chatLocale)
-    .replace(/^Ai:/, personaName + ':')
-    .replace(/^輸入:/, '');
-
-  const messageKind = (message) => {
-    if (message.startsWith('Ai:')) return 'ai';
-    return 'user';
-  };
-
-  function addImageFiles(fileList) {
-    const files = Array.from(fileList || []).filter((file) => file?.type?.startsWith('image/'));
-    if (files.length === 0) return;
-    files.forEach((file) => {
-      if (file.size > MAX_IMAGE_BYTES) {
-        // 大圖直接擋下：避免 base64 在 state 與 DOM 各塞一份把記憶體灌爆、UI 卡頓。
-        setImageError(t('composer.imageTooLarge', { max: '8MB' }));
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setImagePreviews((prev) => [...prev, {
-          id: `img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          src: event.target?.result || '',
-          name: file.name || 'image',
-          type: file.type,
-        }]);
-        setImageError('');
-      };
-      reader.readAsDataURL(file);
-    });
-  }
-
-  function removeImage(id) {
-    setImagePreviews((prev) => prev.filter((img) => img.id !== id));
-  }
-
-  function handleComposerPaste(event) {
-    const files = Array.from(event.clipboardData?.files || []).filter((file) => file?.type?.startsWith('image/'));
-    if (files.length === 0) return;
-    event.preventDefault();
-    addImageFiles(files);
-  }
-
-  function handleComposerDrop(event) {
-    const files = Array.from(event.dataTransfer?.files || []).filter((file) => file?.type?.startsWith('image/'));
-    if (files.length === 0) return;
-    event.preventDefault();
-    addImageFiles(files);
-  }
-
-  useEffect(() => {
-    if (!pendingTaskReview?.id) return;
-    window.requestAnimationFrame(() => {
-      taskReviewCardRef.current?.scrollIntoView({block: 'center', behavior: 'smooth'});
-    });
-  }, [pendingTaskReview?.id]);
-
-  // SEC-06 UX: 新訊息進來（含「讀取內容」按鈕注入）時自動捲到底，
-  // 讓使用者立刻看到最新狀態，不會以為點了沒反應。只在訊息變多時捲。
-  const messageListRef = useRef(null);
-  const prevMessageCountRef = useRef(messages.length);
-  useEffect(() => {
-    if (messages.length > prevMessageCountRef.current) {
-      window.requestAnimationFrame(() => {
-        const el = messageListRef.current;
-        if (el) el.scrollTo({top: el.scrollHeight, behavior: 'smooth'});
-      });
-    }
-    prevMessageCountRef.current = messages.length;
-  }, [messages.length]);
-
-  return (
-    <section
-      className="conversation-panel"
-      onDragOver={(event) => { if (event.dataTransfer?.types?.includes('Files')) event.preventDefault(); }}
-      onDrop={(event) => { if (event.dataTransfer?.types?.includes('Files')) event.preventDefault(); }}
-    >
-      <div className="message-list" ref={messageListRef}>
-        {messages.map((message, index) => (
-          <MessageRow
-            key={`${message}-${index}`}
-            message={message}
-            displayText={displayMessage(message)}
-            kind={messageKind(message)}
-            isActive={activeMessage === index}
-            index={index}
-            domMessageId={messageDomId(message, index, messages)}
-            summaryLabel={t('composer.summary')}
-            deleteLabel={t('composer.delete')}
-            onActivate={() => setActiveMessage(index)}
-            onDelete={(rowIndex) => {
-              onDelete(rowIndex);
-              setActiveMessage(null);
-            }}
-            onSummarizeSearch={onSummarizeSearch}
-            onExportSearchSummary={onExportSearchSummary}
-            onInjectText={onInjectText}
-            sessionId={activeConversationId}
-            previousMessage={messages[index - 1] || ''}
-            chatLocale={chatLocale}
-          />
-        ))}
-        {pendingTaskReview && (
-          <article className="task-review-inline-card" ref={taskReviewCardRef}>
-            <header>
-              <strong>需要你確認這一步</strong>
-              <span>待確認</span>
-            </header>
-            <div className="task-review-inline-grid">
-              <div>
-                <small>這一步要做什麼</small>
-                <p>{pendingTaskReview.title}</p>
-              </div>
-              <div>
-                <small>為什麼需要確認</small>
-                <p>{pendingTaskReview.reason}</p>
-              </div>
-            </div>
-            <p className="task-review-inline-impact">會影響：{pendingTaskReview.impact}</p>
-            <p className="task-review-inline-impact">使用的工具/模型：{pendingTaskReview.tool}</p>
-            <footer>
-              <button type="button" className="task-review-detail-btn" onClick={onShowTaskReviewDetails}>
-                {taskReviewDetailsOpen ? '關閉' : '查看內容'}
-              </button>
-              <button type="button" className="task-review-cancel-btn" onClick={onCancelTaskReview}>取消</button>
-              <button
-                type="button"
-                className="task-review-confirm-btn"
-                onClick={() => onConfirmTaskReview?.(pendingTaskReview.id)}
-              >
-                確認執行
-              </button>
-            </footer>
-          </article>
-        )}
-      </div>
-
-      {/* ── v3.6.4 Readiness Gate 輸入框上方區域 ──
-          §12A 佈局：所有 Readiness Gate 暫態 UI 元素掛在 composer 上方。
-          由上而下順序：RetrievalTransparency → FloatingCandidateActions → MissingSlotCapsule → ConfirmationTier
-          操作完成後消失刷新，不佔用固定空間。 */}
-      {(readinessGate.retrieval_scanning
-        || readinessGate.floating_candidates?.length > 0
-        || readinessGate.missing_slots?.length > 0
-        || (readinessGate.risk_tier && readinessGate.risk_tier !== 'none')
-      ) && (
-        <div className="readiness-above-composer">
-          {/* §12A.6: Retrieval Transparency — 掃描動畫在對話訊息流 inline 顯示 */}
-          <RetrievalTransparency
-            isScanning={readinessGate.retrieval_scanning}
-            sources={readinessGate.retrieval_sources || []}
-          />
-          {/* §12A.1: Floating Candidate Actions — 最多 3 個意圖候選 */}
-          <FloatingCandidateActions
-            candidates={readinessGate.floating_candidates || []}
-            selectedIDs={selectedFloatingCandidateIDs}
-            onSelect={onSelectCandidate}
-          />
-          {/* §12A.3: Missing Slot Capsule — 缺欄位膠囊 */}
-          <MissingSlotCapsule
-            missingSlots={readinessGate.missing_slots || []}
-            isHighRisk={readinessGate.risk_tier === 'high'}
-          />
-          {/* §11.2: 三層確認機制 — 依風險等級切換 */}
-          <ConfirmationTier
-            riskTier={readinessGate.risk_tier}
-            impactExplanation={readinessGate.impact_explanation}
-            impactExpanded={riskImpactExpanded}
-            longPressProgress={longPressProgress}
-            gachaPhase={gachaPhase}
-            onNormalConfirm={onNormalConfirm}
-            onNormalReject={onNormalReject}
-            onHighRiskYes={onHighRiskYes}
-            onPressStart={onLongPressStart}
-            onPressEnd={onLongPressEnd}
-          />
-        </div>
-      )}
-
-      <ComposerConfirmBubble
-        action={composerConfirmAction}
-        onConfirm={onComposerConfirm}
-        onCancel={onComposerCancel}
-      />
-
-      {/* ── 原有 Composer（聊天輸入區）── */}
-      <form
-        className="composer"
-        onSubmit={(event) => {
-          // submitComposerText 對空字串會 return；只有真的有文字送出時才連帶清縮圖，
-          // 純貼圖尚未送出時保留，避免誤刪使用者剛貼上的圖。
-          onSend(event, imagePreviews);
-          if (draft.trim() || hasSelectedFloatingCandidates) {
-            setImagePreviews([]);
-            setImageError('');
-          }
-        }}
-      >
-        {imagePreviews.length > 0 && (
-          <div className="composer-image-strip">
-            {imagePreviews.map((img) => (
-              <div className="composer-image-thumb" key={img.id}>
-                <img src={img.src} alt={img.name || t('composer.imagePreview')} />
-                <button type="button" onClick={() => removeImage(img.id)} aria-label={t('composer.removeImage')}>×</button>
-              </div>
-            ))}
-          </div>
-        )}
-        {imageError && <div className="composer-image-error">{imageError}</div>}
-        <button
-          className={`attach-btn task-stop-btn ${taskActive ? 'task-stop-active' : ''}`}
-          type="button"
-          title={taskActive ? t('composer.stopTask') : t('composer.noActiveTask')}
-          aria-label={taskActive ? t('composer.stopTask') : t('composer.noActiveTask')}
-          disabled={!taskActive}
-          onClick={() => onCancelTask?.()}
-        >
-          <span aria-hidden="true">■</span>
-        </button>
-        <button
-          className={`voice-btn ${voiceRecording ? 'voice-btn-recording' : ''}`}
-          type="button"
-          title={voiceTitle}
-          aria-label={voiceTitle}
-          disabled={voiceDisabled}
-          onPointerDown={(event) => {
-            event.preventDefault();
-            event.currentTarget.setPointerCapture?.(event.pointerId);
-            onVoicePressStart?.();
-          }}
-          onPointerUp={(event) => {
-            event.preventDefault();
-            event.currentTarget.releasePointerCapture?.(event.pointerId);
-            onVoicePressEnd?.();
-          }}
-          onPointerCancel={() => onVoiceCancel?.()}
-        >
-          <MicIcon />
-        </button>
-        <button
-          className="image-insert-btn"
-          type="button"
-          title={t('composer.insertImage')}
-          aria-label={t('composer.insertImage')}
-          onClick={() => imageInputRef.current?.click()}
-        >
-          <span aria-hidden="true">▧</span>
-        </button>
-        <input
-          ref={imageInputRef}
-          className="composer-image-file"
-          type="file"
-          accept="image/*"
-          multiple
-          onChange={(event) => {
-            addImageFiles(event.target.files);
-            event.target.value = '';
-          }}
-        />
-        <div
-          className="input-wrap"
-          onDrop={handleComposerDrop}
-          onDragOver={(event) => event.preventDefault()}
-        >
-          <textarea
-            value={draft}
-            rows={1}
-            placeholder={t('composer.placeholder')}
-            onChange={(event) => onDraftChange(event.target.value)}
-            onPaste={handleComposerPaste}
-            onCompositionStart={() => {
-              // 中文/日文 IME 組字期間，Enter 先保留給選字。
-              composerComposingRef.current = true;
-            }}
-            onCompositionEnd={() => {
-              composerComposingRef.current = false;
-            }}
-            onKeyDown={(event) => {
-              const composing = composerComposingRef.current
-                || event.isComposing
-                || event.nativeEvent?.isComposing
-                || event.nativeEvent?.keyCode === 229;
-              if (event.key === 'Enter' && !event.shiftKey && !composing) {
-                event.preventDefault();
-                event.currentTarget.form.requestSubmit();
-              }
-            }}
-          />
-          <button className={`send-btn ${composerReady ? 'send-btn-enabled' : ''} ${hasSelectedFloatingCandidates ? 'send-btn-ready' : ''}`} type="submit"><span>◢</span>{t('composer.send')}</button>
-        </div>
-        {(voiceStatus || voiceError || voiceState?.status !== 'ready') && (
-          <div className={`voice-status ${voiceError ? 'voice-status-error' : ''}`}>
-            {voiceError || voiceStatus || voiceStatusLabel(voiceState?.status)}
-          </div>
-        )}
-        <div className="composer-ai-disclaimer">
-          {t('composer.aiDisclaimer')}
-        </div>
-        {/* §12A.5B Dispatch 狀態提示 */}
-        {Object.values(dispatchStatus).length > 0 && (
-          <div className="dispatch-status-area">
-            {Object.values(dispatchStatus).map((ds) => {
-              if (!ds) return null;
-              if (ds.done && ds.overall === 'success') {
-                return <span key={ds.dispatchId} className="dispatch-status dispatch-success">{t('composer.sent')}</span>;
-              }
-              if (ds.done && ds.overall === 'partial_fail') {
-                const failedSegs = (ds.segments || []).filter(s => s.error);
-                return (
-                  <span key={ds.dispatchId} className="dispatch-status dispatch-partial-fail">
-                    {t('composer.sentPartialFail', { success: `${(ds.segments || []).length - failedSegs.length}/${(ds.segments || []).length}`, failed: failedSegs.map(s => s.part_index + 1).join(',') })}
-                    <button className="dispatch-retry-btn" type="button" onClick={() => {}}>{t('composer.retry')}</button>
-                  </span>
-                );
-              }
-              if (ds.done && ds.overall === 'failed') {
-                return (
-                  <span key={ds.dispatchId} className="dispatch-status dispatch-fail">
-                    {t('composer.sendFailed')}
-                    <button className="dispatch-retry-btn" type="button" onClick={() => {}}>{t('composer.retry')}</button>
-                  </span>
-                );
-              }
-              return <span key={ds.dispatchId} className="dispatch-status dispatch-sending">{t('composer.sending', { current: ds.partIndex + 1, total: ds.totalParts })}</span>;
-            })}
-          </div>
-        )}
-      </form>
-    </section>
-  );
-}
-
-// Review details are portaled to the viewport so conversation panels never cover them.
 function ReviewPanel({
   activePopup, dagRun, onPopupChange, reviewState, onSkillSelect, onSnooze,
   onSnoozeHoursChange, snoozeHours, onAcknowledgeDigestItem, onConfirmSkillBuild,
@@ -14591,999 +13713,4 @@ function categorizePendingDigest(digest) {
 // ---------------------------------------------------------------------------
 // I-4: Safari Runtime Notice Modal
 // ---------------------------------------------------------------------------
-// 模型失效退回本機 regex 時，給使用者的明確提示，避免誤以為模型變笨。
-const SCHEDULER_DEGRADED_NOTICE = '（提示：模型暫時無法使用，已改用本機規則解析排程，結果可能較簡略；模型恢復後會自動回到智慧判斷。）';
-const SCHEDULER_DEGRADED_NOTICE_SHORT = '模型暫時無法使用，已改用本機規則';
-
-const schedulerWeekdayMap = [
-  ['日', 0], ['天', 0], ['一', 1], ['二', 2], ['三', 3], ['四', 4], ['五', 5], ['六', 6],
-];
-const schedulerSlotLabels = {name: '標題', time: '時間'};
-const schedulerChineseNumberMap = {
-  零: 0,
-  〇: 0,
-  一: 1,
-  二: 2,
-  兩: 2,
-  三: 3,
-  四: 4,
-  五: 5,
-  六: 6,
-  七: 7,
-  八: 8,
-  九: 9,
-};
-
-function isSchedulerAffirmation(text) {
-  return /^(可以|可以了|好|好的|確認|確定|沒問題|ok|okay|yes|建立|寫入|送出|對|對的)$/i.test(String(text || '').trim());
-}
-
-function isSchedulerCancellation(text) {
-  return /^(取消|不要了|先不用|算了|停止)$/i.test(String(text || '').trim());
-}
-
-function schedulerDefaultPayload(title, actionText = '', summary = '') {
-  const cleanTitle = title || actionText || '提醒';
-  const cleanAction = actionText || cleanTitle;
-  const cleanSummary = summary || `在排程時間執行：${cleanAction}`;
-  return JSON.stringify({
-    event_name: 'scheduler:reminder',
-    data: {
-      title: cleanTitle,
-      action: cleanAction,
-      summary: cleanSummary,
-    },
-  });
-}
-
-function parseSchedulerChineseNumber(text) {
-  const raw = String(text || '').trim();
-  if (!raw) return null;
-  if (/^\d+$/.test(raw)) return Number(raw);
-  if (Object.prototype.hasOwnProperty.call(schedulerChineseNumberMap, raw)) return schedulerChineseNumberMap[raw];
-  if (raw === '十') return 10;
-  const tenIndex = raw.indexOf('十');
-  if (tenIndex < 0) return null;
-  const left = raw.slice(0, tenIndex);
-  const right = raw.slice(tenIndex + 1);
-  const tens = left ? schedulerChineseNumberMap[left] : 1;
-  const ones = right ? schedulerChineseNumberMap[right] : 0;
-  if (tens == null || ones == null) return null;
-  return tens * 10 + ones;
-}
-
-function normalizeSchedulerTimeNumerals(text) {
-  return String(text || '').replace(
-    /([零〇一二兩三四五六七八九十]{1,3})(?=\s*(?:點|:|：|分|日|號))/g,
-    (match) => {
-      const parsed = parseSchedulerChineseNumber(match);
-      return parsed == null ? match : String(parsed);
-    },
-  );
-}
-
-function hasSchedulerClockText(text) {
-  return /(?:上午|早上|中午|下午|晚上)?\s*\d{1,2}(?:[:：]\d{2}|點(?:半|\d{1,2}分?)?)/.test(normalizeSchedulerTimeNumerals(text));
-}
-
-function hasSchedulerTimeText(text) {
-  const raw = normalizeSchedulerTimeNumerals(text);
-  const hasClock = hasSchedulerClockText(raw);
-  const hasWeekly = /(?:每\s*)?(?:週|周|星期|禮拜)[日天一二三四五六]/.test(raw);
-  const hasMonthly = /每\s*月\s*\d{1,2}\s*(?:日|號)?/.test(raw);
-  return /@(?:hourly|daily|weekly|monthly|yearly)/i.test(raw)
-    || /\d{1,2}\s+\d{1,2}\s+\*|\*\s+\*\s+\*/.test(raw)
-    || /每\s*(小時|一小時|個小時)|hourly/i.test(raw)
-    || ((/每天|每日|每\s*(天|日)/.test(raw) || hasWeekly || hasMonthly) && hasClock);
-}
-
-function stripSchedulerTimeText(text) {
-  return normalizeSchedulerTimeNumerals(text)
-    .replace(/@(?:hourly|daily|weekly|monthly|yearly)/ig, ' ')
-    .replace(/(?:上午|早上|中午|下午|晚上)?\s*\d{1,2}(?:[:：]\d{2}|點(?:半|\d{1,2}分?)?)?/g, ' ')
-    .replace(/每\s*(小時|一小時|個小時)|每天|每日|每週|每周|每月|星期[日天一二三四五六]|禮拜[日天一二三四五六]|週[日天一二三四五六]|周[日天一二三四五六]/g, ' ')
-    .replace(/每\s*月\s*\d{1,2}\s*(?:日|號)?/g, ' ');
-}
-
-function extractSchedulerDeliveryText(text) {
-  const raw = String(text || '').trim();
-  const match = raw.match(/(?:幫我|請|再|並|然後)?\s*(?:做成|整理成|產出|生成|製作成)\s*(?:一個|一份|一張|一套)?\s*([^，,。；;\n]+)/);
-  if (!match?.[1]) return '';
-  return `整理成${match[1].trim()}`;
-}
-
-function removeSchedulerDeliveryClauses(text) {
-  return String(text || '')
-    .replace(/(?:，|,|。|；|;)?\s*(?:幫我|請|再|並|然後)?\s*(?:做成|整理成|產出|生成|製作成)\s*(?:一個|一份|一張|一套)?\s*[^，,。；;\n]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function parseSchedulerTimeText(text, fallback = '') {
-  const raw = normalizeSchedulerTimeNumerals(text);
-  const shortcut = raw.match(/@(hourly|daily|weekly|monthly|yearly)/i);
-  if (shortcut) return `@${shortcut[1].toLowerCase()}`;
-  const cron = raw.match(/(?:^|\s)(\S+\s+\S+\s+\S+\s+\S+\s+\S+)(?:\s|$)/);
-  if (cron && /^[\d*,\-\/]+\s+[\d*,\-\/]+\s+[\d*,\-\/]+\s+[\d*,\-\/]+\s+[\d*,\-\/]+$/.test(cron[1])) return cron[1];
-  const hasClock = hasSchedulerClockText(raw);
-  if (!hasSchedulerTimeText(raw) && !hasClock) return fallback;
-  const timeMatch = raw.match(/(?:上午|早上|中午|下午|晚上)?\s*(\d{1,2})(?:[:：](\d{2})|點(?:(半)|(\d{1,2})分?)?)/);
-  let hour = 9;
-  let minute = 0;
-  if (timeMatch) {
-    hour = Math.min(23, Math.max(0, Number(timeMatch[1])));
-    minute = timeMatch[2]
-      ? Math.min(59, Math.max(0, Number(timeMatch[2])))
-      : (timeMatch[3] ? 30 : (timeMatch[4] ? Math.min(59, Math.max(0, Number(timeMatch[4]))) : 0));
-    if ((raw.includes('下午') || raw.includes('晚上')) && hour < 12) hour += 12;
-    if (raw.includes('中午') && hour < 11) hour += 12;
-  }
-  if (/每\s*(小時|一小時|個小時)|hourly/i.test(raw)) return '@hourly';
-  const weekdayToken = schedulerWeekdayMap.find(([label]) => new RegExp(`(?:每\\s*)?(?:週|周|星期|禮拜)${label}`).test(raw));
-  if (weekdayToken) return `${minute} ${hour} * * ${weekdayToken[1]}`;
-  const monthMatch = raw.match(/每\s*月\s*(\d{1,2})\s*(?:日|號)?/);
-  if (monthMatch) return `${minute} ${hour} ${Math.min(31, Math.max(1, Number(monthMatch[1])))} * *`;
-  if (/每天|每日|daily/i.test(raw)) return `${minute} ${hour} * * *`;
-  if (hasClock) return `${minute} ${hour} * * *`;
-  return fallback;
-}
-
-function cleanSchedulerNameText(text) {
-  const raw = removeSchedulerDeliveryClauses(stripSchedulerTimeText(text));
-  const cleaned = String(raw || '')
-    .replace(/我想要|想要|我要|我想|請|幫我|幫忙|新增|建立|規劃|排程|排定|安排|任務|提醒/g, ' ')
-    .replace(/一個|一項|一筆|一下/g, ' ')
-    .replace(/時間(改成|改為|為|是).*/g, ' ')
-    .replace(/動作(改成|改為|為|是).*/g, ' ')
-    .replace(/的$/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return cleaned.slice(0, 32);
-}
-
-function parseSchedulerActionText(text) {
-  const raw = removeSchedulerDeliveryClauses(String(text || '').trim());
-  const channelMatch = raw.match(/(?:要)?(?:用|以)\s*(.+?)\s*(?:提醒我|通知我|叫我)$/);
-  if (channelMatch?.[1]) return `${channelMatch[1].trim()}提醒`;
-  const remindMeSuffix = raw.match(/(.+?)\s*(?:提醒我|通知我|叫我)$/);
-  if (remindMeSuffix?.[1]) return remindMeSuffix[1].trim();
-  const notifyMatch = raw.match(/(?:提醒我|叫我|通知我)\s*(.+)$/);
-  if (notifyMatch?.[1]) return notifyMatch[1].trim();
-  const runMatch = raw.match(/(?:執行|做|跑)\s*(.+)$/);
-  if (runMatch?.[1]) return runMatch[1].trim();
-  const actionMatch = raw.match(/動作(?:改成|改為|為|是|:|：)\s*(.+)$/);
-  if (actionMatch?.[1]) return actionMatch[1].trim();
-  const quoted = raw.match(/[「『"]([^」』"]+)[」』"]/);
-  if (quoted?.[1]) return quoted[1].trim();
-  return cleanSchedulerNameText(raw);
-}
-
-function formatSchedulerSummary(draft) {
-  const delivery = draft?.deliveryText || extractSchedulerDeliveryText(draft?.sourceText || '');
-  const task = String(draft?.actionText || draft?.name || '提醒').trim();
-  const output = delivery ? `，${delivery}` : '';
-  return `在設定時間執行「${task}」${output}。`;
-}
-
-function normalizeSchedulerDraft(draft) {
-  const actionText = String(draft.actionText || '').trim();
-  const name = draft.name || actionText;
-  const summary = String(draft.summary || '').trim();
-  const finalSummary = summary || formatSchedulerSummary({...draft, name, actionText});
-  return {
-    name: String(name || '').trim(),
-    cronExpr: String(draft.cronExpr || '').trim(),
-    actionText,
-    summary: finalSummary,
-    deliveryText: String(draft.deliveryText || '').trim(),
-    sourceText: String(draft.sourceText || '').trim(),
-    actionPayload: draft.actionPayload || (name || actionText ? schedulerDefaultPayload(name || '提醒', actionText || name, finalSummary) : ''),
-  };
-}
-
-function schedulerMissingSlots(draft) {
-  const normalized = normalizeSchedulerDraft(draft || {});
-  return ['name', 'time'].filter((slot) => {
-    if (slot === 'name') return !normalized.name;
-    if (slot === 'time') return !normalized.cronExpr;
-    return false;
-  });
-}
-
-function schedulerQuestionForMissing(missing) {
-  const labels = missing.map((slot) => schedulerSlotLabels[slot]).filter(Boolean);
-  return `Ai:目前缺少「${labels.join('、')}」，請幫我補齊。`;
-}
-
-function schedulerConfirmationMessage(draft, mode = 'create', job = null) {
-  const normalized = normalizeSchedulerDraft(draft);
-  const title = mode === 'update' ? `準備修改排程「${job?.name || normalized.name}」` : '準備寫入排程';
-  const displayTime = formatSchedulerCronNextTime(normalized.cronExpr);
-  return [
-    `Ai:${title}，請確認：`,
-    `標題：${normalized.name}`,
-    `時間：${displayTime}`,
-    `摘要：${normalized.summary}`,
-    '如果正確，按下方「確定」或回覆「可以」我就寫入；要改的話直接說「改時間為…」或「改標題為…」。',
-  ].join('\n');
-}
-
-function buildSchedulerComposerConfirmAction(conversation, busy = false) {
-  if (!conversation || conversation.phase !== 'confirm') return null;
-  const normalized = normalizeSchedulerDraft(conversation.draft);
-  return {
-    type: 'scheduler',
-    title: conversation.mode === 'update' ? '確認修改排程' : '確認寫入排程',
-    primaryLabel: busy ? '寫入中' : '確定',
-    cancelLabel: '取消',
-    busy,
-    lines: [
-      `標題：${normalized.name}`,
-      `時間：${formatSchedulerCronNextTime(normalized.cronExpr)}`,
-      `摘要：${normalized.summary}`,
-    ],
-    summary: normalized.summary,
-  };
-}
-
-function mergeSchedulerSlotsFromText(currentDraft, text, preferredSlot = '') {
-  const raw = String(text || '').trim();
-  const next = {...(currentDraft || {})};
-  const actionText = parseSchedulerActionText(raw);
-  const cleanedName = cleanSchedulerNameText(raw);
-  const deliveryText = extractSchedulerDeliveryText(raw);
-  const explicitAction = /提醒|提醒我|叫我|通知我|動作|執行|做|跑/.test(raw);
-
-  if (preferredSlot === 'name' && raw) next.name = raw.slice(0, 32);
-  if (preferredSlot === 'action' && raw) next.actionText = raw.slice(0, 80);
-  if (preferredSlot === 'time' && (hasSchedulerTimeText(raw) || hasSchedulerClockText(raw))) next.cronExpr = parseSchedulerTimeText(raw, next.cronExpr || '');
-
-  if (hasSchedulerTimeText(raw)) next.cronExpr = parseSchedulerTimeText(raw, next.cronExpr || '');
-  if (/名稱|標題/.test(raw) && cleanedName) next.name = cleanedName;
-  if (explicitAction && actionText) next.actionText = actionText.slice(0, 80);
-  if (!next.name && (cleanedName || actionText)) next.name = (actionText || cleanedName).slice(0, 32);
-  if (!next.actionText && (cleanedName || actionText)) next.actionText = (actionText || cleanedName).slice(0, 80);
-  if (deliveryText) next.deliveryText = deliveryText;
-  if (raw) next.sourceText = [next.sourceText, raw].filter(Boolean).join('\n').slice(-500);
-
-  const normalized = normalizeSchedulerDraft(next);
-  normalized.actionPayload = normalized.actionText
-    ? schedulerDefaultPayload(normalized.name || '提醒', normalized.actionText, normalized.summary)
-    : '';
-  return normalized;
-}
-
-function findSchedulerJobFromText(text, jobs = []) {
-  const raw = String(text || '');
-  const indexWords = [
-    ['第一', 0], ['第1', 0], ['1', 0],
-    ['第二', 1], ['第2', 1], ['2', 1],
-    ['第三', 2], ['第3', 2], ['3', 2],
-    ['第四', 3], ['第4', 3], ['4', 3],
-    ['第五', 4], ['第5', 4], ['5', 4],
-  ];
-  const indexed = indexWords.find(([word]) => raw.includes(`${word}個任務`) || raw.includes(`${word}個排程`) || raw.includes(`${word}任務`) || raw.includes(`${word}排程`));
-  if (indexed) {
-    const targetNo = indexed[1] + 1;
-    return jobs.find((job, index) => schedulerJobNo(job, index) === targetNo) || null;
-  }
-  const hashNo = raw.match(/#\s*(\d+)|編號\s*(\d+)/);
-  if (hashNo) {
-    const targetNo = Number(hashNo[1] || hashNo[2]);
-    return jobs.find((job, index) => schedulerJobNo(job, index) === targetNo) || null;
-  }
-  return jobs.find((job) => job?.name && raw.includes(job.name)) || null;
-}
-
-function parseSchedulerConversationIntent(text, jobs = []) {
-  const raw = String(text || '').trim();
-  if (!/(排程|排定|定時|提醒|規劃|每小時|每天|每日|每週|每周|禮拜|星期)/.test(raw)) return null;
-  const isUpdate = /(修改|更改|改成|改為|變更|調整)/.test(raw);
-  if (isUpdate) {
-    const job = findSchedulerJobFromText(raw, jobs);
-    if (!job) return {type: 'open', message: '我找不到你想修改的排程，先打開清單讓你確認編號。'};
-    const nextName = /名稱/.test(raw) ? (cleanSchedulerNameText(raw) || job.name) : job.name;
-    const nextCron = hasSchedulerTimeText(raw)
-      ? parseSchedulerTimeText(raw, job.cron_expr)
-      : job.cron_expr;
-    const nextActionText = /動作/.test(raw) ? parseSchedulerActionText(raw) : '';
-    const nextPayload = nextActionText ? schedulerDefaultPayload(nextName, nextActionText) : job.action_payload;
-    return {
-      type: 'update',
-      job,
-      patch: {
-        name: nextName,
-        cronExpr: nextCron,
-        actionType: job.action_type || 'event',
-        actionPayload: nextPayload,
-      },
-    };
-  }
-  const draft = mergeSchedulerSlotsFromText({}, raw);
-  return {
-    type: 'create',
-    draft,
-  };
-}
-
-function formatSchedulerTime(value) {
-  if (!value) return '尚未排定';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return formatSchedulerDateKey(date);
-}
-
-function formatSchedulerDateKey(value) {
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value || '');
-  const pad = (number) => String(number).padStart(2, '0');
-  return [
-    date.getFullYear(),
-    pad(date.getMonth() + 1),
-    pad(date.getDate()),
-    pad(date.getHours()),
-    pad(date.getMinutes()),
-  ].join('-');
-}
-
-function schedulerCronPartNumber(part) {
-  const raw = String(part || '').trim();
-  return /^\d{1,2}$/.test(raw) ? Number(raw) : null;
-}
-
-function schedulerCronPartMatches(part, value) {
-  const raw = String(part || '').trim();
-  if (raw === '*' || raw === '') return true;
-  const number = schedulerCronPartNumber(raw);
-  return number == null ? false : number === value;
-}
-
-function nextSchedulerFireDate(cronExpr, baseDate = new Date()) {
-  const raw = String(cronExpr || '').trim();
-  if (!raw) return null;
-  const base = new Date(baseDate);
-  if (Number.isNaN(base.getTime())) return null;
-  if (/^@hourly$/i.test(raw)) {
-    const next = new Date(base);
-    next.setMinutes(0, 0, 0);
-    next.setHours(next.getHours() + 1);
-    return next;
-  }
-  if (/^@daily$/i.test(raw)) return nextSchedulerFireDate('0 9 * * *', base);
-  if (/^@weekly$/i.test(raw)) return nextSchedulerFireDate('0 9 * * 1', base);
-  if (/^@monthly$/i.test(raw)) return nextSchedulerFireDate('0 9 1 * *', base);
-  const parts = raw.split(/\s+/);
-  if (parts.length !== 5) return null;
-  const minute = schedulerCronPartNumber(parts[0]);
-  const hour = schedulerCronPartNumber(parts[1]);
-  if (minute == null || hour == null) return null;
-  const start = new Date(base);
-  start.setSeconds(0, 0);
-  for (let offset = 0; offset <= 370; offset += 1) {
-    const candidate = new Date(start);
-    candidate.setDate(start.getDate() + offset);
-    candidate.setHours(hour, minute, 0, 0);
-    if (candidate <= start) continue;
-    const dayOfMonth = candidate.getDate();
-    const month = candidate.getMonth() + 1;
-    const weekday = candidate.getDay();
-    if (!schedulerCronPartMatches(parts[2], dayOfMonth)) continue;
-    if (!schedulerCronPartMatches(parts[3], month)) continue;
-    if (!schedulerCronPartMatches(parts[4], weekday)) continue;
-    return candidate;
-  }
-  return null;
-}
-
-function formatSchedulerCronNextTime(cronExpr, fallback = '') {
-  const next = nextSchedulerFireDate(cronExpr);
-  return next ? formatSchedulerDateKey(next) : (fallback || cronExpr || '尚未排定');
-}
-
-function formatSchedulerJobNextTime(job) {
-  const nextFire = job?.next_fire || job?.nextFire || '';
-  if (nextFire) return formatSchedulerTime(nextFire);
-  return formatSchedulerCronNextTime(job?.cron_expr || job?.cronExpr || '');
-}
-
-// 排程清單／摘要只顯示「下次會啟動的時間」：停用或無 next_fire 一律留空，
-// 讓使用者一眼看出沒有排程；每日/每週/每月等 cron 規則不顯示給使用者。
-function schedulerActiveNextLabel(job) {
-  if (!job || job.enabled === false) return '';
-  const nextFire = job.next_fire || job.nextFire || '';
-  return nextFire ? formatSchedulerTime(nextFire) : '';
-}
-
-function formatSchedulerTimeLong(value) {
-  if (!value) return '尚未排定';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString('zh-TW', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function formatSchedulerPayload(payload, fallback = '提醒') {
-  const parsed = parseSchedulerPayload(payload);
-  return parsed.action || parsed.title || parsed.event || payload || fallback;
-}
-
-function formatSchedulerPayloadSummary(payload, fallback = '尚無摘要') {
-  const parsed = parseSchedulerPayload(payload);
-  return parsed.summary || parsed.action || parsed.title || payload || fallback;
-}
-
-function parseSchedulerPayload(payload) {
-  try {
-    const parsed = JSON.parse(payload || '{}');
-    return {
-      title: parsed?.data?.title || '',
-      action: parsed?.data?.action || '',
-      summary: parsed?.data?.summary || '',
-      event: parsed?.event_name || '',
-    };
-  } catch {
-    return {title: '', action: String(payload || ''), summary: '', event: ''};
-  }
-}
-
-function schedulerJobNo(job, fallbackIndex = 0) {
-  const no = Number(job?.schedule_no ?? job?.scheduleNo ?? 0);
-  return no > 0 ? no : fallbackIndex + 1;
-}
-
-function SchedulerPanel({
-  clock,
-  jobs,
-  draft,
-  busy,
-  error,
-  onDraftChange,
-  onRefresh,
-  onCreate,
-  onJobAction,
-  onBootstrapSkill,
-  onClose,
-}) {
-  const t = useI18n(s => s.t);
-  const cronPresets = [
-    {label: t('scheduler.presetHourly'), value: '@hourly'},
-    {label: t('scheduler.presetDaily0900'), value: '0 9 * * *'},
-    {label: t('scheduler.presetWeeklyMon0900'), value: '0 9 * * 1'},
-  ];
-  const hasDraft = Boolean(draft.name || draft.actionPayload);
-  const [summaryJob, setSummaryJob] = useState(null);
-  const summaryText = summaryJob ? formatSchedulerPayloadSummary(summaryJob.action_payload, summaryJob.name || t('scheduler.noSummary')) : '';
-  const updateDraft = (patch) => onDraftChange((current) => ({...current, ...patch}));
-
-  return createPortal(
-    <div className="scheduler-overlay" role="dialog" aria-modal="true" aria-label={t('scheduler.dialogLabel')}>
-      <section className="scheduler-panel">
-        <header className="scheduler-header">
-          <div>
-            <span className="scheduler-kicker">Scheduler</span>
-            <h3>{t('scheduler.title')}</h3>
-          </div>
-          <button className="scheduler-close" type="button" onClick={onClose} aria-label={t('common.close')}>×</button>
-        </header>
-
-        <div className="scheduler-clock-band">
-          <div>
-            <span>{t('scheduler.systemTime')}</span>
-            <strong>{clock?.local_time || t('scheduler.syncing')}</strong>
-          </div>
-          <div>
-            <span>{t('scheduler.timezone')}</span>
-            <strong>{[clock?.timezone, clock?.utc_offset].filter(Boolean).join(' ') || t('scheduler.local')}</strong>
-          </div>
-          <button type="button" onClick={onRefresh} disabled={busy}>{t('scheduler.sync')}</button>
-        </div>
-
-        {hasDraft && (
-          <div className="scheduler-draft-strip">
-            <div className="scheduler-draft-fields">
-              <label>
-                <span>{t('scheduler.draftName')}</span>
-                <input
-                  type="text"
-                  value={draft.name}
-                  onChange={(event) => updateDraft({name: event.target.value})}
-                  placeholder={t('scheduler.draftNamePlaceholder')}
-                />
-              </label>
-              <label>
-                <span>{t('scheduler.rule')}</span>
-                <input
-                  type="text"
-                  value={draft.cronExpr}
-                  onChange={(event) => updateDraft({cronExpr: event.target.value})}
-                  placeholder="0 9 * * *"
-                />
-              </label>
-              <label>
-                <span>{t('scheduler.summary')}</span>
-                <textarea
-                  value={formatSchedulerPayloadSummary(draft.actionPayload, '')}
-                  onChange={(event) => updateDraft({actionPayload: schedulerDefaultPayload(draft.name || t('scheduler.defaultReminder'), draft.name || t('scheduler.defaultReminder'), event.target.value)})}
-                  placeholder={t('scheduler.summaryPlaceholder')}
-                  rows={2}
-                />
-              </label>
-            </div>
-            <div className="scheduler-preset-row">
-              {cronPresets.map((preset) => (
-                <button type="button" key={preset.value} onClick={() => updateDraft({cronExpr: preset.value})}>
-                  {preset.label}
-                </button>
-              ))}
-              <button className="scheduler-create-btn" type="button" onClick={onCreate} disabled={busy}>
-                {busy ? t('scheduler.busy') : t('scheduler.create')}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {error && <p className="scheduler-error">{error}</p>}
-
-        <div className="scheduler-table">
-          <div className="scheduler-table-scroll">
-            <div className="scheduler-table-head">
-              <span>#</span>
-              <span>{t('scheduler.tableTitle')}</span>
-              <span>{t('scheduler.tableTime')}</span>
-              <span>{t('scheduler.tableStatus')}</span>
-              <span></span>
-            </div>
-            {jobs.length === 0 ? (
-              <div className="scheduler-empty">{t('scheduler.empty')}</div>
-            ) : jobs.map((job, index) => (
-              <article className="scheduler-job" key={job.id}>
-                <span className="scheduler-job-index">{schedulerJobNo(job, index)}</span>
-                <div className="scheduler-job-name">
-                  <strong>{job.name}</strong>
-                </div>
-                <span>{schedulerActiveNextLabel(job)}</span>
-                <small>{job.enabled ? t('scheduler.enabled') : t('scheduler.paused')}</small>
-                <div className="scheduler-job-actions">
-                  <button type="button" disabled={busy} onClick={() => setSummaryJob(job)}>{t('scheduler.summary')}</button>
-                  {job.enabled ? (
-                    <button type="button" disabled={busy} onClick={() => onJobAction(job.id, 'pause')}>{t('scheduler.pause')}</button>
-                  ) : (
-                    <button type="button" disabled={busy} onClick={() => onJobAction(job.id, 'resume')}>{t('scheduler.resume')}</button>
-                  )}
-                  <button type="button" disabled={busy} onClick={() => onJobAction(job.id, 'delete')}>{t('scheduler.delete')}</button>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
-
-        {summaryJob && (
-          <div className="scheduler-summary-modal" role="dialog" aria-label={t('scheduler.summary')}>
-            <section className="scheduler-summary-card">
-              <header>
-                <div>
-                  <span>{t('scheduler.summary')}</span>
-                  <h4>{summaryJob.name || t('scheduler.unnamed')}</h4>
-                </div>
-                <button type="button" onClick={() => setSummaryJob(null)} aria-label={t('scheduler.closeSummary')}>×</button>
-	              </header>
-	              <p>{summaryText}</p>
-	              <dl>
-	                <div>
-	                  <dt>{t('scheduler.tableTime')}</dt>
-	                  <dd>{schedulerActiveNextLabel(summaryJob)}</dd>
-	                </div>
-	                <div>
-	                  <dt>{t('scheduler.tableStatus')}</dt>
-	                  <dd>{summaryJob.enabled ? t('scheduler.enabled') : t('scheduler.paused')}</dd>
-	                </div>
-	                <div>
-	                  <dt>Skill</dt>
-	                  <dd>{summaryJob.skill_id || t('scheduler.notCreated')}</dd>
-	                </div>
-	                <div>
-	                  <dt>Sub</dt>
-	                  <dd>{summaryJob.source_sub_id || ''}</dd>
-	                </div>
-	              </dl>
-	              {!summaryJob.skill_id && (
-	                <button
-	                  className="scheduler-create-btn"
-	                  type="button"
-	                  disabled={busy}
-	                  onClick={async () => {
-	                    await onBootstrapSkill?.(summaryJob);
-	                    setSummaryJob(null);
-	                  }}
-	                >
-	                  {busy ? t('scheduler.busy') : t('scheduler.createAutoSkill')}
-	                </button>
-	              )}
-	            </section>
-	          </div>
-	        )}
-      </section>
-    </div>,
-    document.body,
-  );
-}
-
-// v3.3.2 P0.3 — RightRail renders tool visibility state.
-// Available=false → lightning-fracture overlay; never greyed-out / hidden.
-/* i18n: right rail */
-function RightRail({
-  isLearningEnabled,
-  isRecordingEnabled,
-  isToolPopupOpen,
-  learningDigestReady,
-  sourceTrustHint,
-  referenceFiles,
-  activeCodeFileName = '',
-  sharedLinks = [],
-  sharedListings = [],
-  onLearningToggle,
-  onRecordingToggle,
-  onReferenceFileDrop,
-  onReferenceFileDragOut,
-  onReferenceFileReorder,
-  onReferenceInternalDrag,
-  onReferenceLinkOpen,
-  onReferenceCardDoubleClick,
-  onReferenceFailedRemove,
-  onSharedSourceDragOut,
-  onScheduleOpen,
-  onToolFavorite,
-  onToolPopupToggle,
-}) {
-  const t = useI18n(s => s.t);
-  const [draggedReferenceKey, setDraggedReferenceKey] = useState('');
-  const draggedReferenceKeyRef = useRef('');
-  const [draggedSharedSourceKey, setDraggedSharedSourceKey] = useState('');
-  const draggedSharedSourceKeyRef = useRef('');
-  // 共用資料夾 → 第一層檔案清單（後端只讀該層，不遞迴）
-  const listingByPath = {};
-  (Array.isArray(sharedListings) ? sharedListings : []).forEach((listing) => {
-    if (listing?.path) listingByPath[listing.path] = listing;
-  });
-
-  function handleReferenceDragStart(event, file) {
-    const fileKey = referenceFileKey(file);
-    if (!fileKey) {
-      event.preventDefault();
-      return;
-    }
-    // §M3+ 失敗 entry：三層保險阻止 OS 拿到任何 drag payload
-    const isFailed = file?.status === 'error' || file?.source !== 'library';
-    if (isFailed) {
-      try {
-        // 1. 清空 dataTransfer 內容（避免 text/plain 變 .textClipping）
-        event.dataTransfer?.clearData?.();
-        if (event.dataTransfer) {
-          event.dataTransfer.effectAllowed = 'none';
-          event.dataTransfer.setData('text/plain', '');
-        }
-      } catch (_) { /* old browsers */ }
-      // 2. 阻止預設 drag 行為
-      event.preventDefault();
-      event.stopPropagation();
-      // 3. 立即從 state 移除（即使 drag 真的被啟動，state 也已乾淨）
-      onReferenceFailedRemove?.(fileKey);
-      return false;
-    }
-    draggedReferenceKeyRef.current = fileKey;
-    onReferenceInternalDrag?.(true);
-    setDraggedReferenceKey(fileKey);
-    event.dataTransfer.effectAllowed = 'copyMove';
-    // §M3+ 不用 text/plain（macOS 會把 path-like text 升級成 file drag、誤觸 import）。
-    // 改用 custom MIME；OS 不認得，drop 在外面也不會建桌面假檔；reorder 只看 draggedReferenceKeyRef。
-    try { event.dataTransfer.setData('application/x-ai-console-ref-key', fileKey); } catch (_) {}
-    void onReferenceFileDragOut?.(file);
-  }
-
-  function handleReferenceDragOver(event, file) {
-    const draggedKey = draggedReferenceKeyRef.current;
-    const targetKey = referenceFileKey(file);
-    if (!draggedKey || !targetKey || draggedKey === targetKey) return;
-    event.preventDefault();
-    event.stopPropagation();
-    event.dataTransfer.dropEffect = 'move';
-    const rect = event.currentTarget.getBoundingClientRect();
-    const placement = event.clientY > rect.top + (rect.height / 2) ? 'after' : 'before';
-    onReferenceFileReorder?.(draggedKey, targetKey, placement);
-  }
-
-  function finishReferenceDrag(event) {
-    event?.stopPropagation?.();
-    draggedReferenceKeyRef.current = '';
-    onReferenceInternalDrag?.(false);
-    setDraggedReferenceKey('');
-  }
-
-  function handleSharedSourceDragStart(event, link) {
-    const key = sharedSourceKey(link);
-    if (!key) {
-      event.preventDefault();
-      return;
-    }
-    draggedSharedSourceKeyRef.current = key;
-    setDraggedSharedSourceKey(key);
-    event.dataTransfer.effectAllowed = 'move';
-    try { event.dataTransfer.clearData(); } catch (_) {}
-    try { event.dataTransfer.setData('application/x-ai-console-shared-source-key', key); } catch (_) {}
-  }
-
-  function finishSharedSourceDrag(event, link) {
-    const key = draggedSharedSourceKeyRef.current;
-    draggedSharedSourceKeyRef.current = '';
-    setDraggedSharedSourceKey('');
-    if (!key) return;
-    const leftWindow =
-      event.clientX <= 0 ||
-      event.clientY <= 0 ||
-      event.clientX >= window.innerWidth ||
-      event.clientY >= window.innerHeight;
-    const droppedOutside = leftWindow || (event.clientX === 0 && event.clientY === 0);
-    if (droppedOutside) {
-      onSharedSourceDragOut?.(link);
-    }
-  }
-
-  function handleReferenceDrop(event) {
-    // 只把內部 reference 排序拖曳吃掉；外部檔案仍要進圖片/引用分流。
-    if (draggedReferenceKeyRef.current) {
-      event?.preventDefault?.();
-      finishReferenceDrag(event);
-      return;
-    }
-    if (event?.dataTransfer?.files?.length) {
-      event.preventDefault();
-      event.stopPropagation();
-      onReferenceFileDrop?.(Array.from(event.dataTransfer.files));
-    }
-  }
-
-  return (
-    <aside
-      className="right-panel"
-      onDragOver={(event) => {
-        if (
-          event.dataTransfer.files?.length
-          || Array.from(event.dataTransfer.types).includes('Files')
-          || Array.from(event.dataTransfer.types).includes('application/x-ai-console-tool-id')
-        ) {
-          event.preventDefault();
-          event.dataTransfer.dropEffect = event.dataTransfer.files?.length || Array.from(event.dataTransfer.types).includes('Files') ? 'copy' : 'move';
-        }
-      }}
-      onDrop={(event) => {
-        // §M3+ 內部 reorder drag 不應觸發 import；以 draggedReferenceKeyRef 為憑。
-        if (draggedReferenceKeyRef.current) {
-          event.preventDefault();
-          finishReferenceDrag(event);
-          return;
-        }
-        if (event.dataTransfer.files?.length) {
-          event.preventDefault();
-          event.stopPropagation();
-          onReferenceFileDrop(Array.from(event.dataTransfer.files));
-          return;
-        }
-        const toolId = event.dataTransfer.getData('application/x-ai-console-tool-id');
-        if (!toolId) return;
-        event.preventDefault();
-        onToolFavorite(toolId);
-      }}
-    >
-      <button className="tool-card tool-amber reference-link-card" type="button" onClick={onReferenceLinkOpen}>
-        <span>▤</span>
-        <span>{t('rightRail.citeLink')}</span>
-      </button>
-      <button className="tool-card tool-amber tool-schedule-card" type="button" onClick={onScheduleOpen}>
-        <span>◴</span>
-        <span>{t('rightRail.schedule')}</span>
-      </button>
-      {sourceTrustHint && (
-        <div
-          className="source-trust-chip source-trust-rail-chip"
-          data-level={sourceTrustHint.level}
-          title={sourceTrustHint.text}
-        >
-          <span className="source-trust-icon">{sourceTrustHint.level === 'trusted' ? '✓' : sourceTrustHint.level === 'blocked' ? '✕' : '⚠'}</span>
-          <span className="source-trust-label">{sourceTrustHint.text}</span>
-        </div>
-      )}
-      <div className="rail-mode-row">
-        <button
-          className={`rail-mode-btn rail-mode-learning ${isLearningEnabled ? 'rail-mode-active' : ''} ${learningDigestReady ? 'rail-mode-notify' : ''}`}
-          type="button"
-          onClick={onLearningToggle}
-          title={t('rightRail.learningTooltip')}
-        >
-          <span>{t('rightRail.learning')}</span>
-          <small>{learningDigestReady ? t('rightRail.hasUpdate') : isLearningEnabled ? t('rightRail.editing') : t('rightRail.close')}</small>
-        </button>
-        <button
-          className={`rail-mode-btn rail-mode-record ${isRecordingEnabled ? 'rail-mode-active rail-mode-recording' : ''}`}
-          type="button"
-          onClick={onRecordingToggle}
-          title={t('rightRail.recordTooltip')}
-        >
-          <span>{t('rightRail.record')}</span>
-          <small>{isRecordingEnabled ? t('rightRail.recording') : t('rightRail.close')}</small>
-        </button>
-      </div>
-      <div
-        className="tool-card shared-link-card"
-        aria-label={`${t('rightRail.sharedLink')} - ${t('rightRail.sharedLinkHint')}`}
-      >
-        <span>◎</span>
-        <span>{t('rightRail.sharedLink')}</span>
-        <div className="rail-hint-popover" role="tooltip">
-          <strong>{t('rightRail.sharedLink')}</strong>
-          <small>{t('rightRail.sharedLinkHint')}</small>
-        </div>
-      </div>
-      {Array.isArray(sharedLinks) && sharedLinks.length > 0 && (
-        <div className="shared-source-list" aria-label={t('rightRail.sharedLink')}>
-          {sharedLinks.map((link, index) => {
-            const sourcePath = link?.url || link?.URL || '';
-            const label = link?.label || link?.Label || fileBaseName(sourcePath) || t('rightRail.sharedLink');
-            const sourceKey = sharedSourceKey(link) || `${sourcePath}-${index}`;
-            const isDragging = draggedSharedSourceKey === sourceKey;
-            const listing = listingByPath[sourcePath];
-            const listingFiles = listing?.is_dir ? (listing.files || []) : [];
-            const showListing = Boolean(listing && (listing.is_dir || listing.error));
-            return (
-              <React.Fragment key={sourceKey}>
-                <div
-                  className={`shared-source-name${isDragging ? ' shared-source-dragging' : ''}`}
-                  data-draggable="true"
-                  draggable
-                  title={sourcePath}
-                  onDragStart={(event) => handleSharedSourceDragStart(event, link)}
-                  onDragEnd={(event) => finishSharedSourceDrag(event, link)}
-                >
-                  <span className="reference-file-title">
-                    {twoLineFileName(label, t('rightRail.sharedLink')).map((line, lineIndex) => <span key={lineIndex}>{line}</span>)}
-                  </span>
-                  {sourcePath && <small className="reference-file-detail">{sourcePath}</small>}
-                </div>
-                {showListing && (
-                  <div className="shared-source-files" aria-label={`${label} - ${t('rightRail.sharedFolderTopOnly')}`}>
-                    {listing.is_dir && <small className="shared-source-scope-hint">{t('rightRail.sharedFolderTopOnly')}</small>}
-                    {listing.error ? (
-                      <small className="shared-source-file-empty">{t('rightRail.sharedFolderUnreadable')}</small>
-                    ) : listingFiles.length === 0 ? (
-                      <small className="shared-source-file-empty">{t('rightRail.sharedFolderEmpty')}</small>
-                    ) : (
-                      listingFiles.map((file) => (
-                        <div className="shared-source-file-row" key={file.path} title={file.path}>
-                          <span className="shared-source-file-name">{file.name}</span>
-                          {file.ext && <span className="reference-file-ext-badge">{file.ext}</span>}
-                        </div>
-                      ))
-                    )}
-                    {listing.truncated && (
-                      <small className="shared-source-file-empty">{t('rightRail.sharedFolderMore', {count: listingFiles.length})}</small>
-                    )}
-                  </div>
-                )}
-              </React.Fragment>
-            );
-          })}
-        </div>
-      )}
-      <div
-        className="tool-card reference-file-card"
-        aria-label={`${t('rightRail.citeFile')} - ${t('rightRail.citeFileHint')}`}
-        onDragOver={(event) => {
-          event.preventDefault();
-          event.dataTransfer.dropEffect = 'copy';
-        }}
-        onDrop={(event) => {
-          handleReferenceDrop(event);
-        }}
-      >
-        <span>▤</span>
-        <span>{t('rightRail.citeFile')}</span>
-        <div className="rail-hint-popover" role="tooltip">
-          <strong>{t('rightRail.citeFile')}</strong>
-          <small>{t('rightRail.citeFileHint')}</small>
-        </div>
-      </div>
-      <div
-        className="reference-file-list"
-        onDragOver={(event) => {
-          if (!draggedReferenceKeyRef.current) return;
-          event.preventDefault();
-          event.stopPropagation();
-          event.dataTransfer.dropEffect = 'move';
-        }}
-        onDrop={handleReferenceDrop}
-      >
-        {referenceFiles.map((file, index) => {
-          const fileKey = referenceFileKey(file) || `${file.path}-${index}`;
-          const isDragging = draggedReferenceKey === fileKey;
-          const isActiveCode = Boolean(activeCodeFileName) && file.name === activeCodeFileName;
-          return (
-            <div
-              className={`reference-file-name${isDragging ? ' reference-file-dragging' : ''}${isActiveCode ? ' reference-file-code-active' : ''}`}
-              data-status={file.status || 'ready'}
-              data-draggable="true"
-              draggable
-              key={fileKey}
-              title={file.detail || file.path}
-              onDragStart={(event) => handleReferenceDragStart(event, file)}
-              onDragOver={(event) => handleReferenceDragOver(event, file)}
-              onDrop={handleReferenceDrop}
-              onDragEnd={(event) => {
-                // §M3+ 失敗 entry 拖到 window 外 → 移除（同 ToolPopup 的 leftWindow pattern）
-                const leftWindow =
-                  event.clientX <= 0 ||
-                  event.clientY <= 0 ||
-                  event.clientX >= window.innerWidth ||
-                  event.clientY >= window.innerHeight;
-                const droppedOutside = leftWindow || (event.clientX === 0 && event.clientY === 0);
-                const isFailed = file?.status === 'error' || file?.source !== 'library';
-                finishReferenceDrag(event);
-                if (droppedOutside && isFailed) {
-                  onReferenceFailedRemove?.(referenceFileKey(file));
-                }
-              }}
-              onDoubleClick={(event) => {
-                event.preventDefault();
-                const rect = event.currentTarget.getBoundingClientRect();
-                onReferenceCardDoubleClick?.(file, rect);
-              }}
-            >
-              <div className="reference-file-main">
-                <span className="reference-file-title">
-                  {twoLineFileName(file.name, t('rightRail.unnamedFile')).map((line, lineIndex) => <span key={lineIndex}>{line}</span>)}
-                </span>
-                <small className="reference-file-status">{referenceFileStatusLabel(file.status, t)}</small>
-                {file.addedVia === 'floating_avatar' && (
-                  <small className="reference-file-source-badge">{t('floatingAvatar.addedViaFloating')}</small>
-                )}
-              </div>
-              {shouldShowReferenceFileDetail(file) && <small className="reference-file-detail">{file.detail}</small>}
-              {fileExtLabel(file.name) && <span className="reference-file-ext-badge">{fileExtLabel(file.name)}</span>}
-            </div>
-          );
-        })}
-      </div>
-      <button className="tool-card tool-use-bottom" type="button" onClick={onToolPopupToggle}>
-        <span>{isToolPopupOpen ? '×' : '⌕'}</span>
-        <span>{isToolPopupOpen ? t('rightRail.close') : t('rightRail.useTools')}</span>
-      </button>
-    </aside>
-  );
-}
-
-// §3.1.11 影片副檔名判斷：拖入時用來分流到 data/videos
-function isVideoPath(p) {
-  return /\.(mp4|mov|m4v|webm|mkv|avi|wmv|flv|mpe?g|3gp|ogv)$/i.test(String(p || ''));
-}
-
-// §3.1.10 檔案方框右下角的副檔名角標（txt / md / jpeg / wmv …）
-function fileExtLabel(name) {
-  const m = /\.([A-Za-z0-9]+)$/.exec(String(name || ''));
-  return m ? m[1].toLowerCase() : '';
-}
-
-function fileBaseName(path) {
-  return String(path || '').split(/[\\/]/).filter(Boolean).pop() || '';
-}
-
-function twoLineFileName(name, fallback = 'Unnamed File') {
-  const chars = Array.from(String(name || fallback));
-  const first = chars.slice(0, 20).join('');
-  const second = chars.slice(20, 40).join('');
-  return second ? [first, second] : [first];
-}
-
 export default App;

@@ -2,16 +2,56 @@
 // 啟動時由 app.go 呼叫 RegisterDocumentBuiltins，不寫磁碟。
 package skill_step
 
-// RegisterDocumentBuiltins 註冊全部 7 個內建 manifest。
+// RegisterDocumentBuiltins 註冊全部內建 manifest。
 // TASK 31 / Phase 0.4：每個 builtin 缺 lifecycle，註冊前補安全預設——
 // 低風險唯讀的 auto_execute=true；workspace_write/medium（write/export/scheduler）為 false。
 func RegisterDocumentBuiltins(r *Router) {
 	for _, m := range []*SkillManifest{
 		builtinDocImport(), builtinDocRead(), builtinDocWrite(), builtinDocExport(),
 		builtinLocalSearch(), builtinWebSearch(), builtinScheduler(), builtinGitStatus(),
+		builtinTranslation(),
 	} {
 		EnsureLifecycle(m) // nil → DefaultLifecycle(依風險/權限決定 auto_execute)
 		r.RegisterBuiltin(m)
+	}
+}
+
+// builtinTranslation 是純文字轉換能力，不需要網路、檔案或程式執行權限。
+// 多語 action tags 讓使用者切換介面語言後仍能穩定路由到同一個 skill。
+func builtinTranslation() *SkillManifest {
+	return &SkillManifest{
+		SchemaVersion: "skill_manifest.v1",
+		SkillID:       "builtin.translation",
+		DisplayName:   "翻譯",
+		Description:   "將使用者提供的文字忠實翻譯成指定語言，保留格式、專有名詞與插值參數。",
+		Version:       "1.0.0",
+		Tags: SkillTags{
+			PurposeTag: []string{"transform"},
+			ActionTag: []string{
+				"翻譯", "翻成", "譯成", "translate", "translation",
+				"翻訳", "번역", "traducir", "traduzir", "แปล", "ترجمة",
+			},
+			DomainTag: []string{
+				"language", "translation", "multilingual", "text", "localization",
+				"語言", "文字", "多語", "在地化",
+			},
+			RiskTag: []string{"low"},
+		},
+		Permissions: SkillPermissions{
+			Network: "none", Filesystem: "none", Execution: "none",
+		},
+		Routing: SkillRouting{
+			ActionPatterns: []string{
+				"翻譯ㄌ文字", "翻成ㄌ英文", "translateㄌtext", "translationㄌtext",
+				"翻訳ㄌテキスト", "번역ㄌ텍스트", "traducirㄌtexto", "traduzirㄌtexto",
+				"แปลㄌข้อความ", "ترجمةㄌالنص",
+			},
+			TargetAliases: []string{
+				"文字", "內容", "語言", "text", "content", "language",
+				"英文", "中文", "日文", "韓文", "西班牙文", "葡萄牙文", "泰文", "阿拉伯文",
+			},
+			MinimumAutoScore: 0.8,
+		},
 	}
 }
 

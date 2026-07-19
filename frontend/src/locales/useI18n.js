@@ -1,6 +1,6 @@
 // ============================================================
 // i18n 核心模組 — 基於 Zustand，零額外依賴
-// 支援語系：zh-TW（預設）、en、ja、pt-PT、es、th（尚未建立時自動 fallback）
+// 支援語系：zh-TW（預設）、en、ja、pt-PT、es、th、ko、ar
 // ============================================================
 
 import { create } from 'zustand';
@@ -15,6 +15,7 @@ import ptPT from './pt-PT.json';
 import es from './es.json';
 import th from './th.json';
 import ko from './ko.json';
+import ar from './ar.json';
 
 // ----------------------------------------------------------
 // 語系對照表
@@ -27,12 +28,17 @@ const TRANSLATION_MAP = {
   es,
   th,
   ko,
+  ar,
 };
 
 // ----------------------------------------------------------
 // RTL 語系清單（保留給未來阿拉伯語等右至左語言使用）
 // ----------------------------------------------------------
 const RTL_LANGUAGES = ['ar', 'he', 'fa', 'ur'];
+
+export function getLanguageDirection(lang) {
+  return RTL_LANGUAGES.includes(lang) ? 'rtl' : 'ltr';
+}
 
 // ----------------------------------------------------------
 // 工具函式：從 localStorage 讀取目前語系，預設 zh-TW
@@ -96,7 +102,7 @@ const _initialTranslations = TRANSLATION_MAP[_initialLanguage] ?? {};
 function applyDocumentLanguage(lang) {
   if (typeof document === 'undefined') return;
   document.documentElement.lang = lang;
-  document.documentElement.dir = RTL_LANGUAGES.includes(lang) ? 'rtl' : 'ltr';
+  document.documentElement.dir = getLanguageDirection(lang);
 }
 
 // ----------------------------------------------------------
@@ -125,7 +131,7 @@ const useI18n = create((set, get) => ({
 
   /* getDirection()：文字方向（預留 RTL） */
   getDirection: () => {
-    return RTL_LANGUAGES.includes(get().language) ? 'rtl' : 'ltr';
+    return getLanguageDirection(get().language);
   },
 }));
 

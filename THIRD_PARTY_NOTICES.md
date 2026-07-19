@@ -81,7 +81,7 @@ All listed licenses are permissive (MIT / BSD / Apache-2.0 / ISC) except
 | Component | Role | License |
 |---|---|---|
 | YOLOX-S model (`assets/models/yolox_button_s.{onnx,mlmodelc}`) | UI element detection | Apache-2.0 |
-| whisper.cpp `whisper-cli` runner | Speech-to-text (user-provided binary, not bundled) | MIT |
+| whisper.cpp `whisper-cli` runner | Speech-to-text (optional managed/bundled binary; fixed SHA-256) | MIT |
 | OpenAI Whisper `ggml-base.bin` model | Speech-to-text weights | MIT |
 | Kokoro voice pack | Text-to-speech (optional, not yet pinned) | Apache-2.0 |
 

@@ -4,10 +4,11 @@ import {statusrail} from '../models';
 import {tools} from '../models';
 import {main} from '../models';
 import {dag} from '../models';
+import {blackboard} from '../models';
 import {llm_context} from '../models';
 import {skill_step} from '../models';
-import {source_trust} from '../models';
 import {voice} from '../models';
+import {source_trust} from '../models';
 import {onboarding} from '../models';
 import {credential} from '../models';
 import {review} from '../models';
@@ -64,6 +65,34 @@ export function ApproveTaskStep(arg1:string):Promise<dag.DAGRun>;
 
 export function AutoDetectCLI():Promise<any>;
 
+export function BlackboardAppend(arg1:string,arg2:string):Promise<string>;
+
+export function BlackboardAppendMessage(arg1:string):Promise<string>;
+
+export function BlackboardApproveDeletion(arg1:string):Promise<string>;
+
+export function BlackboardArchiveNow():Promise<blackboard.ArchiveResult>;
+
+export function BlackboardClose():Promise<main.BlackboardStatusDTO>;
+
+export function BlackboardConfigureTrust(arg1:string,arg2:string,arg3:string):Promise<main.BlackboardStatusDTO>;
+
+export function BlackboardDisableCoordinator():Promise<main.BlackboardStatusDTO>;
+
+export function BlackboardEnableCoordinator(arg1:string,arg2:number):Promise<main.BlackboardStatusDTO>;
+
+export function BlackboardOpen(arg1:string,arg2:string,arg3:string,arg4:number):Promise<main.BlackboardStatusDTO>;
+
+export function BlackboardRenderState():Promise<string>;
+
+export function BlackboardRequestDeletion(arg1:string,arg2:string):Promise<string>;
+
+export function BlackboardState():Promise<blackboard.MeetingState>;
+
+export function BlackboardStatus():Promise<main.BlackboardStatusDTO>;
+
+export function BlackboardSync():Promise<main.BlackboardStatusDTO>;
+
 export function BootstrapScheduledSkill(arg1:string):Promise<main.SchedulerSkillBootstrapResult>;
 
 export function BuildCodeContext(arg1:string,arg2:boolean):Promise<any>;
@@ -85,6 +114,8 @@ export function CancelPreview():Promise<any>;
 export function CancelScheduledJob(arg1:string):Promise<void>;
 
 export function CancelTaskProgress(arg1:string,arg2:string):Promise<dag.DAGRun>;
+
+export function CancelVoiceProbes():Promise<voice.EngineStatus>;
 
 export function ClarifyDagIntent(arg1:string,arg2:string,arg3:string):Promise<skill_step.CLIResponse>;
 
@@ -566,6 +597,10 @@ export function PreviewLearningRunExport(arg1:string):Promise<main.LearningRunEx
 
 export function PreviewSubPackage(arg1:string):Promise<main.SubPackagePreview>;
 
+export function PreviewVoiceProfile(arg1:string):Promise<voice.VoiceJob>;
+
+export function PreviewVoiceProfileText(arg1:string,arg2:string):Promise<voice.VoiceJob>;
+
 export function PromoteDraftToPending(arg1:string,arg2:string):Promise<string>;
 
 export function ProposeRegions(arg1:Array<number>,arg2:number,arg3:number):Promise<any>;
@@ -786,6 +821,10 @@ export function SetToolPreference(arg1:string,arg2:string,arg3:string,arg4:numbe
 
 export function SetTrustDomAndClick(arg1:boolean):Promise<void>;
 
+export function SetVoiceOutputEnabled(arg1:boolean):Promise<voice.State>;
+
+export function SpeakVoiceLine(arg1:string,arg2:string):Promise<voice.VoiceJob>;
+
 export function StageSessionImages(arg1:string,arg2:Array<string>):Promise<number>;
 
 export function StartDraftSandbox(arg1:string):Promise<string>;
@@ -814,6 +853,8 @@ export function StopSidecar():Promise<void>;
 
 export function StopURLVisualLearning():Promise<any>;
 
+export function StopVoiceOutput():Promise<voice.EngineStatus>;
+
 export function SubmitTaskLoopInput(arg1:string,arg2:string,arg3:string):Promise<dag.DAGRun>;
 
 export function SuggestGGUFFiles(arg1:string):Promise<Array<main.GGUFSuggestion>>;
@@ -839,6 +880,12 @@ export function UpdateScheduledJob(arg1:string,arg2:string,arg3:string,arg4:stri
 export function ValidateMemoryItem(arg1:string):Promise<memory.ValidationResult>;
 
 export function VerifyMediaFile(arg1:string):Promise<any>;
+
+export function VoiceOutputStatus():Promise<voice.EngineStatus>;
+
+export function VoicePackCatalog():Promise<Array<voice.VoiceCatalogEntry>>;
+
+export function VoiceProfiles():Promise<Array<voice.VoiceProfile>>;
 
 export function WakeLocalAdapter(arg1:string):Promise<any>;
 

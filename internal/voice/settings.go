@@ -27,6 +27,7 @@ type Settings struct {
 	LanguageMode   string `json:"languageMode"`
 	ManualLanguage string `json:"manualLanguage"`
 	CommandMode    bool   `json:"commandMode"`
+	TTSEnabled     bool   `json:"ttsEnabled"`
 	WhisperBinPath string `json:"whisperBinPath"`
 	ModelPath      string `json:"modelPath"`
 }
@@ -50,6 +51,9 @@ type Service struct {
 	resources string
 	store     *storage.JSONStore[Settings]
 	current   Settings
+
+	outputEngineOnce sync.Once
+	outputEngine     *Engine
 }
 
 func NewService(root, cwd string, program string, resources string) *Service {
@@ -78,6 +82,7 @@ func isZeroSettings(s Settings) bool {
 		s.LanguageMode == "" &&
 		s.ManualLanguage == "" &&
 		!s.CommandMode &&
+		!s.TTSEnabled &&
 		s.WhisperBinPath == "" &&
 		s.ModelPath == ""
 }
@@ -187,6 +192,8 @@ func WhisperLanguageFromPanel(panelLanguage string) string {
 		return "ja"
 	case strings.Contains(value, "韓") || strings.HasPrefix(value, "ko"):
 		return "ko"
+	case strings.Contains(value, "阿拉伯") || strings.Contains(value, "العربية") || strings.Contains(value, "arabic") || strings.HasPrefix(value, "ar"):
+		return "ar"
 	case strings.Contains(value, "繁") || strings.Contains(value, "簡") || strings.Contains(value, "中文") || strings.HasPrefix(value, "zh"):
 		return "zh"
 	default:
@@ -232,15 +239,29 @@ func (s *Service) bundledRunnerPath() string {
 	return filepath.Join(s.resources, "voice", ManagedRunnerFile)
 }
 
+func (s *Service) developmentRunnerPath() string {
+	if strings.TrimSpace(s.cwd) == "" {
+		return ""
+	}
+	return filepath.Join(s.cwd, "build", "voice", ManagedRunnerFile)
+}
+
 func (s *Service) ensureManagedRunner() (string, error) {
-	source := s.bundledRunnerPath()
-	if source == "" {
-		return "", fmt.Errorf("voice: bundled runner missing")
-	}
-	if err := verifyFileSHA256(source, BundledRunnerSHA256); err != nil {
-		return "", fmt.Errorf("voice: bundled runner checksum: %w", err)
-	}
 	target := s.ManagedRunnerPath()
+	// A verified managed copy is sufficient for local/dev launches. This also
+	// keeps wails dev usable when the packager has not populated Resources yet;
+	// an arbitrary PATH binary is still never accepted.
+	if path, ok := existingTrustedRunner(target, BundledRunnerSHA256); ok {
+		_ = os.Chmod(path, 0o700)
+		return path, nil
+	}
+	source, ok := firstTrustedRunner(
+		[]string{s.bundledRunnerPath(), s.developmentRunnerPath()},
+		BundledRunnerSHA256,
+	)
+	if !ok {
+		return "", fmt.Errorf("voice: verified bundled/development runner missing")
+	}
 	if filepath.Clean(source) == filepath.Clean(target) {
 		return source, nil
 	}
@@ -266,6 +287,25 @@ func (s *Service) ensureManagedRunner() (string, error) {
 		return "", fmt.Errorf("voice: install runner: %w", err)
 	}
 	return target, nil
+}
+
+func existingTrustedRunner(path, wantSHA256 string) (string, bool) {
+	if strings.TrimSpace(path) == "" || strings.TrimSpace(wantSHA256) == "" {
+		return "", false
+	}
+	if err := verifyFileSHA256(path, wantSHA256); err != nil {
+		return "", false
+	}
+	return path, true
+}
+
+func firstTrustedRunner(candidates []string, wantSHA256 string) (string, bool) {
+	for _, candidate := range candidates {
+		if path, ok := existingTrustedRunner(candidate, wantSHA256); ok {
+			return path, true
+		}
+	}
+	return "", false
 }
 
 func copyFile(source, target string, perm os.FileMode) error {
@@ -326,4 +366,20 @@ func firstExistingFile(paths []string) string {
 		}
 	}
 	return ""
+}
+
+// TTSOutputEnabled reports whether voice output is enabled in settings.
+func (s *Service) TTSOutputEnabled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.current.TTSEnabled
+}
+
+// OutputEngine returns the shared OS-native voice output engine, creating it
+// on first use. Playback is gated by the ttsEnabled setting at enqueue time.
+func (s *Service) OutputEngine() *Engine {
+	s.outputEngineOnce.Do(func() {
+		s.outputEngine = NewEngine(newPlatformSynthesizer(), s.TTSOutputEnabled)
+	})
+	return s.outputEngine
 }

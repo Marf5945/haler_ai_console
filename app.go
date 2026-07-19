@@ -2298,7 +2298,12 @@ func shouldRepairAdapterModelChoice(adapterID, currentModel, publicErr string) b
 			strings.Contains(publicErr, "not supported") ||
 			strings.Contains(publicErr, "找不到或目前帳號不支援") ||
 			strings.Contains(publicErr, "not available") ||
-			strings.Contains(publicErr, "unsupported")
+			strings.Contains(publicErr, "unsupported") ||
+			// Gemini CLI 拒收模型時回 `invalid --model "<name>"`；
+			// 各家 CLI 也常見 invalid model / unknown model 措辭。
+			strings.Contains(publicErr, "invalid --model") ||
+			strings.Contains(publicErr, "invalid model") ||
+			strings.Contains(publicErr, "unknown model")
 	default:
 		return false
 	}
@@ -3902,6 +3907,8 @@ func (a *App) replyLanguageField() string {
 		return "語言=日本語（必ず日本語のみで返信。中国語や他の言語に切り替えないこと）"
 	case "ko", "韓文", "韓語", "한국어", "Korean":
 		return "語言=한국어（항상 한국어로만 답변하고, 중국어나 다른 언어로 바꾸지 마세요）"
+	case "ar", "ar-SA", "Arabic", "العربية", "عربي", "阿拉伯文", "阿拉伯語":
+		return "اللغة=العربية（أجب دائمًا باللغة العربية الفصحى فقط، ولا تنتقل إلى الصينية أو أي لغة أخرى）"
 	case "pt", "pt-PT", "Português", "葡萄牙文":
 		return "語言=Português de Portugal（responda sempre em português de Portugal; nunca mude para outro idioma）"
 	case "es", "Español", "西班牙文":

@@ -19,19 +19,10 @@ var assets embed.FS
 
 // cspMiddleware 注入 Content-Security-Policy header。
 // SEC-12: 防止 XSS / 注入攻擊。
+// 政策內容依 build tag 分流：production 走 csp_policy_prod.go（嚴格版），
+// `wails dev` 走 csp_policy_dev.go（放行 vite devserver 所需）。
 func cspMiddleware(next http.Handler) http.Handler {
-	// style-src 'unsafe-inline': Wails runtime 及部分 UI 框架需要 inline style。
-	// img-src data:/blob: : 前端可能使用 data URI 或 blob 圖片。
-	// script-src 'wasm-unsafe-eval': Inochi2D avatar runtime (inox2d) 需要編譯
-	// WebAssembly；此指令只放行 wasm 編譯，JS eval() 仍被禁止。
-	const csp = "default-src 'self'; " +
-		"script-src 'self' 'wasm-unsafe-eval'; " +
-		"style-src 'self' 'unsafe-inline'; " +
-		"connect-src 'self'; " +
-		"img-src 'self' data: blob:; " +
-		"font-src 'self' data:; " +
-		"object-src 'none'; " +
-		"base-uri 'self'"
+	csp := contentSecurityPolicy()
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", csp)

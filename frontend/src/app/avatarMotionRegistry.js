@@ -5,6 +5,7 @@ const manifestModules = import.meta.glob('../assets/persona_motion/*/manifest.js
 
 const motionAssetUrls = import.meta.glob([
   '../assets/persona_motion/**/*.png',
+  '!../assets/persona_motion/uncle_bust/**/*.png',
   '!../assets/persona_motion/**/_source/**/*.png',
   '!../assets/persona_motion/**/old/**/*.png',
   '!../assets/persona_motion/**/generated/**/*.png',

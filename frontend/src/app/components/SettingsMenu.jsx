@@ -1,5 +1,6 @@
-import {useState} from 'react';
+import {useEffect, useState} from 'react';
 import useI18n from '../../locales/useI18n';
+import {VoicePackCatalog} from '../../../wailsjs/go/main/App';
 import SettingPopupSelect from './SettingPopupSelect';
 import {
   _fontPresetLabelMap,
@@ -17,6 +18,11 @@ import {
   voiceStatusLabel,
 } from '../../lib/panelSettings';
 
+function localizedVoicePackName(entry, t) {
+  if (entry?.voiceId === 'kokoro_zh') return t('settings.voicePackKokoroZh');
+  return entry?.displayName || entry?.voiceId || '';
+}
+
 export default function SettingsMenu({
   panel, onPanelChange, voiceState, voiceInstallBusy,
   onVoiceSettingsChange, onVoiceSettingsRefresh, onVoiceModelInstall, onVoiceModelRemove, onRestoreDefaults,
@@ -27,6 +33,10 @@ export default function SettingsMenu({
   const roleLanguageValue = localizeBackendLabel(panel.roleLanguage, _roleLangLabelMap);
   const fontPresetValue = localizeBackendLabel(panel.fontPreset, _fontPresetLabelMap);
   const [orderedStyleOptions, setOrderedStyleOptions] = useState(loadStyleOptionOrder);
+  const [voiceCatalog, setVoiceCatalog] = useState([]);
+  useEffect(() => {
+    VoicePackCatalog().then((list) => setVoiceCatalog(Array.isArray(list) ? list : [])).catch(() => {});
+  }, []);
   const [draggedStyleOption, setDraggedStyleOption] = useState('');
 
   const voiceSettings = voiceState?.settings || {languageMode: 'auto', manualLanguage: '', debugMode: false, commandMode: false};
@@ -49,14 +59,14 @@ export default function SettingsMenu({
           icon="◎"
           label={t('settings.panelLanguage')}
           value={panelLanguageValue}
-          options={[t('settings.langZhTW'), t('settings.langEn'), t('settings.langJa'), t('settings.langPt'), t('settings.langEs'), t('settings.langTh')]}
+          options={[t('settings.langZhTW'), t('settings.langEn'), t('settings.langJa'), t('settings.langPt'), t('settings.langEs'), t('settings.langTh'), t('settings.langKo'), t('settings.langAr')]}
           onSelect={(lang) => onPanelChange({panelLanguage: lang})}
         />
         <SettingPopupSelect
           icon="♙"
           label={t('settings.roleLanguage')}
           value={roleLanguageValue}
-          options={[t('settings.roleLangAuto'), t('settings.langZhTW'), t('settings.langEn'), t('settings.langJa'), t('settings.langPt'), t('settings.langEs'), t('settings.langTh')]}
+          options={[t('settings.roleLangAuto'), t('settings.langZhTW'), t('settings.langEn'), t('settings.langJa'), t('settings.langPt'), t('settings.langEs'), t('settings.langTh'), t('settings.langKo'), t('settings.langAr')]}
           onSelect={(lang) => onPanelChange({roleLanguage: lang})}
         />
         <SettingPopupSelect
@@ -134,6 +144,21 @@ export default function SettingsMenu({
           >
             {t('settings.command')} {voiceSettings.commandMode ? 'on' : 'off'}
           </button>
+        </div>
+      </div>
+      <div className="settings-voice-block settings-voice-output-block">
+        <div className="settings-voice-catalog">
+          <small className="settings-voice-subtitle">{t('settings.voicePackCatalog')}</small>
+          {voiceCatalog.filter((entry) => entry.optional).map((entry) => (
+            <div className="settings-voice-preview-row" key={entry.voiceId}>
+              <span className="settings-voice-preview-name">{localizedVoicePackName(entry, t)}</span>
+              <small className="settings-voice-pack-status">
+                {t('settings.voicePackOptional')}
+                ・
+                {entry.installed ? t('settings.voicePackInstalled') : t('settings.voicePackNotInstalled')}
+              </small>
+            </div>
+          ))}
         </div>
       </div>
       <div className="settings-restore-block">

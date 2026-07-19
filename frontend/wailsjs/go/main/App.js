@@ -82,6 +82,62 @@ export function AutoDetectCLI() {
   return window['go']['main']['App']['AutoDetectCLI']();
 }
 
+export function BlackboardAppend(arg1, arg2) {
+  return window['go']['main']['App']['BlackboardAppend'](arg1, arg2);
+}
+
+export function BlackboardAppendMessage(arg1) {
+  return window['go']['main']['App']['BlackboardAppendMessage'](arg1);
+}
+
+export function BlackboardApproveDeletion(arg1) {
+  return window['go']['main']['App']['BlackboardApproveDeletion'](arg1);
+}
+
+export function BlackboardArchiveNow() {
+  return window['go']['main']['App']['BlackboardArchiveNow']();
+}
+
+export function BlackboardClose() {
+  return window['go']['main']['App']['BlackboardClose']();
+}
+
+export function BlackboardConfigureTrust(arg1, arg2, arg3) {
+  return window['go']['main']['App']['BlackboardConfigureTrust'](arg1, arg2, arg3);
+}
+
+export function BlackboardDisableCoordinator() {
+  return window['go']['main']['App']['BlackboardDisableCoordinator']();
+}
+
+export function BlackboardEnableCoordinator(arg1, arg2) {
+  return window['go']['main']['App']['BlackboardEnableCoordinator'](arg1, arg2);
+}
+
+export function BlackboardOpen(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['BlackboardOpen'](arg1, arg2, arg3, arg4);
+}
+
+export function BlackboardRenderState() {
+  return window['go']['main']['App']['BlackboardRenderState']();
+}
+
+export function BlackboardRequestDeletion(arg1, arg2) {
+  return window['go']['main']['App']['BlackboardRequestDeletion'](arg1, arg2);
+}
+
+export function BlackboardState() {
+  return window['go']['main']['App']['BlackboardState']();
+}
+
+export function BlackboardStatus() {
+  return window['go']['main']['App']['BlackboardStatus']();
+}
+
+export function BlackboardSync() {
+  return window['go']['main']['App']['BlackboardSync']();
+}
+
 export function BootstrapScheduledSkill(arg1) {
   return window['go']['main']['App']['BootstrapScheduledSkill'](arg1);
 }
@@ -124,6 +180,10 @@ export function CancelScheduledJob(arg1) {
 
 export function CancelTaskProgress(arg1, arg2) {
   return window['go']['main']['App']['CancelTaskProgress'](arg1, arg2);
+}
+
+export function CancelVoiceProbes() {
+  return window['go']['main']['App']['CancelVoiceProbes']();
 }
 
 export function ClarifyDagIntent(arg1, arg2, arg3) {
@@ -1086,6 +1146,14 @@ export function PreviewSubPackage(arg1) {
   return window['go']['main']['App']['PreviewSubPackage'](arg1);
 }
 
+export function PreviewVoiceProfile(arg1) {
+  return window['go']['main']['App']['PreviewVoiceProfile'](arg1);
+}
+
+export function PreviewVoiceProfileText(arg1, arg2) {
+  return window['go']['main']['App']['PreviewVoiceProfileText'](arg1, arg2);
+}
+
 export function PromoteDraftToPending(arg1, arg2) {
   return window['go']['main']['App']['PromoteDraftToPending'](arg1, arg2);
 }
@@ -1526,6 +1594,14 @@ export function SetTrustDomAndClick(arg1) {
   return window['go']['main']['App']['SetTrustDomAndClick'](arg1);
 }
 
+export function SetVoiceOutputEnabled(arg1) {
+  return window['go']['main']['App']['SetVoiceOutputEnabled'](arg1);
+}
+
+export function SpeakVoiceLine(arg1, arg2) {
+  return window['go']['main']['App']['SpeakVoiceLine'](arg1, arg2);
+}
+
 export function StageSessionImages(arg1, arg2) {
   return window['go']['main']['App']['StageSessionImages'](arg1, arg2);
 }
@@ -1582,6 +1658,10 @@ export function StopURLVisualLearning() {
   return window['go']['main']['App']['StopURLVisualLearning']();
 }
 
+export function StopVoiceOutput() {
+  return window['go']['main']['App']['StopVoiceOutput']();
+}
+
 export function SubmitTaskLoopInput(arg1, arg2, arg3) {
   return window['go']['main']['App']['SubmitTaskLoopInput'](arg1, arg2, arg3);
 }
@@ -1632,6 +1712,18 @@ export function ValidateMemoryItem(arg1) {
 
 export function VerifyMediaFile(arg1) {
   return window['go']['main']['App']['VerifyMediaFile'](arg1);
+}
+
+export function VoiceOutputStatus() {
+  return window['go']['main']['App']['VoiceOutputStatus']();
+}
+
+export function VoicePackCatalog() {
+  return window['go']['main']['App']['VoicePackCatalog']();
+}
+
+export function VoiceProfiles() {
+  return window['go']['main']['App']['VoiceProfiles']();
 }
 
 export function WakeLocalAdapter(arg1) {

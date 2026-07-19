@@ -1,4 +1,5 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
+import {GetGoProgramAuthoringSourcePreview} from '../../../wailsjs/go/main/App';
 import {callWails} from '../../lib/callWails';
 
 export const GO_PROGRAM_SOURCE_EVENT = 'ai-console:open-go-program-source';
@@ -54,11 +55,10 @@ export default function GoCodePreviewDock() {
   async function loadPreview(runID) {
     setBrowser({runID, loading: true, error: '', preview: null});
     try {
-      const mod = await import('../../../wailsjs/go/main/App');
-      if (typeof mod.GetGoProgramAuthoringSourcePreview !== 'function') {
+      if (typeof GetGoProgramAuthoringSourcePreview !== 'function') {
         throw new Error('Wails binding GetGoProgramAuthoringSourcePreview 尚未產生');
       }
-      const preview = await callWails(() => mod.GetGoProgramAuthoringSourcePreview(runID));
+      const preview = await callWails(() => GetGoProgramAuthoringSourcePreview(runID));
       setBrowser({runID, loading: false, error: '', preview});
     } catch (error) {
       setBrowser({runID, loading: false, error: error?.message || String(error), preview: null});

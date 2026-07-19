@@ -31,10 +31,10 @@ import (
 
 const systemMarksFilename = "system_marks.json"
 const systemMarksPendingFilename = "system_marks_pending.json"
-const systemMarkMaxPerMessage = 12               // 資源耗盡防護：每則訊息最多抽幾個暗標
-const systemMarkMinBatch = 5                     // 佇列不足此數不啟動整理（省本地模型呼叫）
-const systemMarkMaxPendingAge = 30 * time.Minute // 但最舊項超過此時限就照跑，避免久積不整理
-const systemMarkBatchSize = 8                    // 一次本地模型呼叫最多合併幾則訊息
+const systemMarkMaxPerMessage = 12 // 資源耗盡防護：每則訊息最多抽幾個暗標
+const systemMarkMinBatch = 5                       // 佇列不足此數不啟動整理（省本地模型呼叫）
+const systemMarkMaxPendingAge = 30 * time.Minute   // 但最舊項超過此時限就照跑，避免久積不整理
+const systemMarkBatchSize = 8                      // 一次本地模型呼叫最多合併幾則訊息
 
 // ───────────────────────── 路徑 ─────────────────────────
 

@@ -9,14 +9,11 @@
 // 不影響 §22 使用者標註；後端未綁定時自動 no-op。
 
 import { useEffect, useRef } from 'react';
+import * as AppBindings from '../../../wailsjs/go/main/App';
 import { messageDomId } from './messageId';
 
 async function bindings() {
-  try {
-    return await import('../../../wailsjs/go/main/App');
-  } catch (_) {
-    return {};
-  }
+  return AppBindings;
 }
 
 const FINALIZE_DEBOUNCE_MS = 3000;  // 最後一則訊息靜止幾秒視為定稿

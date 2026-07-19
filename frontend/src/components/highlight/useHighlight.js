@@ -10,15 +10,12 @@
 // 另外 body-mount 一條「重點群組」列，可把同色群組拖出成文檔。
 
 import { useEffect, useRef, useCallback } from 'react';
+import * as AppBindings from '../../../wailsjs/go/main/App';
 import { createHighlightLayer, COLOR_SLOTS } from './highlightCore';
 import { createGroupsBar } from './groupsBar';
 
 async function bindings() {
-  try {
-    return await import('../../../wailsjs/go/main/App');
-  } catch (_) {
-    return {};
-  }
+  return AppBindings;
 }
 
 const SUMMARY_DEBOUNCE_MS = 4000;

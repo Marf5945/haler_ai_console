@@ -6,6 +6,7 @@
  *  2. Key completeness (zh-TW ↔ target parity)
  *  3. Interpolation variable matching ({var} in both files)
  *  4. String length warnings (target > 2× zh-TW length)
+ *  5. Newly localized chat-system messages are not Chinese placeholders
  *
  * Usage: node verify-i18n.js
  * Exit code: 0 = pass, 1 = errors found
@@ -16,7 +17,7 @@ const path = require('path');
 
 const LOCALES_DIR = __dirname;
 const SOURCE_FILE = 'zh-TW.json';
-const TARGET_FILES = ['en.json', 'ja.json', 'es.json', 'pt-PT.json', 'th.json', 'ko.json'];
+const TARGET_FILES = ['en.json', 'ja.json', 'es.json', 'pt-PT.json', 'th.json', 'ko.json', 'ar.json'];
 
 let errors = 0;
 let warnings = 0;
@@ -37,6 +38,31 @@ function flattenKeys(obj, prefix = '') {
 function extractInterpolationVars(str) {
   const matches = str.match(/\{(\w+)\}/g) || [];
   return matches.sort();
+}
+
+const CHAT_SYSTEM_LOCALIZED_ROOTS = [
+  'chatSystem.scheduler.',
+  'chatSystem.learning.',
+];
+const CHAT_SYSTEM_LOCALIZED_KEYS = new Set([
+  'chatSystem.taskStarted',
+  'chatSystem.taskProgress',
+  'chatSystem.replyInterrupted',
+  'chatSystem.taskClarification',
+]);
+const CHAT_SYSTEM_STRUCTURAL_KEYS = new Set([
+  'chatSystem.learning.catalogItem',
+  'chatSystem.learning.catalogItemWithMeta',
+  'chatSystem.learning.planStep',
+]);
+const JAPANESE_SAME_GLYPH_KEYS = new Set([
+  'chatSystem.scheduler.slotTime', // 時間
+  'chatSystem.learning.coordinatesLabel', // 座標
+]);
+
+function isLocalizedChatSystemKey(key) {
+  return CHAT_SYSTEM_LOCALIZED_KEYS.has(key)
+    || CHAT_SYSTEM_LOCALIZED_ROOTS.some(root => key.startsWith(root));
 }
 
 // 1. Load and validate JSON
@@ -132,6 +158,37 @@ for (const [tf, data] of Object.entries(targets)) {
     console.log('  ✓ No excessive length differences');
   } else {
     warnings += lengthWarnings;
+  }
+
+  // 5. Guard against copying the source Chinese into a target locale just to
+  // satisfy key parity. Structural templates intentionally contain only
+  // interpolation/layout, and two Japanese labels are valid same-glyph words.
+  console.log(`\n[5] Chat-System Translation Coverage: ${tf}`);
+  const allowedEqual = new Set(CHAT_SYSTEM_STRUCTURAL_KEYS);
+  if (tf === 'ja.json') {
+    for (const key of JAPANESE_SAME_GLYPH_KEYS) allowedEqual.add(key);
+  }
+  const untranslated = Object.keys(sourceKeys).filter(key =>
+    isLocalizedChatSystemKey(key)
+      && !allowedEqual.has(key)
+      && key in targetKeys
+      && sourceKeys[key] === targetKeys[key]
+  );
+  const hanLeaks = tf === 'ja.json' ? [] : Object.keys(sourceKeys).filter(key =>
+    isLocalizedChatSystemKey(key)
+      && key in targetKeys
+      && /[\u3400-\u9fff]/u.test(targetKeys[key])
+  );
+  if (untranslated.length === 0 && hanLeaks.length === 0) {
+    console.log('  ✓ No untranslated Chinese placeholders');
+  } else {
+    for (const key of untranslated) {
+      console.error(`  ✗ ${key}: target still equals ${SOURCE_FILE}`);
+    }
+    for (const key of hanLeaks) {
+      console.error(`  ✗ ${key}: target still contains Han characters`);
+    }
+    errors += untranslated.length + hanLeaks.length;
   }
 }
 

@@ -2,6 +2,7 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import AnimatedFullBodyAvatar from './AnimatedFullBodyAvatar.jsx';
 import InochiAvatarStage from './InochiAvatarStage.jsx';
 import PixiAvatarStage from './PixiAvatarStage.jsx';
+import {voiceStatusLabel} from '../../lib/panelSettings';
 
 // Pixi 動態舞台的最後防線：掛載/渲染期任何例外都不往上冒——
 // 一旦冒到 root，整片浮窗會被錯誤畫面（近黑底）蓋掉，看起來就是「大黑塊」。
@@ -97,6 +98,15 @@ export default function FloatingAvatarMode({
   onSubmit,
   onPhoto,
   photoBusy = false,
+  voiceState = null,
+  voiceRecording = false,
+  voiceBusy = false,
+  voiceChatEnabled = false,
+  voiceSyncActive = false,
+  voiceSyncPhase = 'idle',
+  onVoicePressStart,
+  onVoicePressEnd,
+  onVoiceCancel,
   onChatModeChange,
   onChatModeToggle,
   onSwitchAgent,
@@ -183,6 +193,19 @@ export default function FloatingAvatarMode({
   const petLoveTimerRef = useRef(null);
   const previousFrameRef = useRef(null);
   const shakeRef = useRef({startedAt: 0, lastPoint: null, distance: 0, previewFired: false, vomitFired: false});
+  const voiceReady = voiceState?.status === 'ready';
+  const micAvailable = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
+  const voiceDisabled = voiceBusy || !voiceReady || !micAvailable;
+  const voiceTitle = !voiceReady
+    ? voiceStatusLabel(voiceState?.status)
+    : voiceChatEnabled
+      ? (voiceSyncActive ? t('composer.voiceSyncStop') : t('composer.voiceSyncTap'))
+      : t('composer.voiceHold');
+  const voiceLabel = voiceBusy
+    ? t('floatingAvatar.voiceBusy')
+    : (voiceRecording || voiceSyncActive)
+      ? t('floatingAvatar.voiceListening')
+      : t('floatingAvatar.voice');
 
   const clampedPosition = useMemo(() => {
     const maxX = Math.max(edgeGap, window.innerWidth - avatarFrameWidth - edgeGap);
@@ -984,6 +1007,29 @@ export default function FloatingAvatarMode({
               </div>
             ) : (
               <div className="floating-avatar-panel-actions">
+                {onVoicePressStart && (
+                  <button
+                    type="button"
+                    className={`floating-avatar-voice-btn ${voiceRecording ? 'floating-avatar-voice-recording' : ''} ${voiceSyncActive ? `floating-avatar-voice-sync floating-avatar-voice-sync-${voiceSyncPhase}` : ''}`}
+                    disabled={voiceDisabled}
+                    title={voiceTitle}
+                    aria-label={voiceTitle}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      noteAction();
+                      event.currentTarget.setPointerCapture?.(event.pointerId);
+                      onVoicePressStart?.();
+                    }}
+                    onPointerUp={(event) => {
+                      event.preventDefault();
+                      event.currentTarget.releasePointerCapture?.(event.pointerId);
+                      onVoicePressEnd?.();
+                    }}
+                    onPointerCancel={() => onVoiceCancel?.()}
+                  >
+                    {voiceLabel}
+                  </button>
+                )}
                 {onPhoto && (
                   <button
                     type="button"

@@ -17,13 +17,13 @@ import (
 )
 
 var adapterModelPresets = map[string][]string{
+	// 只保留各版 Gemini CLI 普遍接受的 2.5 家族；更新的型號一律由
+	// bundle-scan 從實際安裝的 CLI 讀出，避免 preset 引導使用者選到
+	// 本機 CLI 拒收的 model（invalid --model）。首位同時是修復 fallback。
 	"gemini-cli": {
-		"gemini-3.5-flash",
 		"gemini-2.5-flash",
 		"gemini-2.5-flash-lite",
 		"gemini-2.5-pro",
-		"gemini-3.1-flash-lite",
-		"gemini-3.1-pro-preview",
 	},
 	"claude-cli": {"sonnet", "opus", "haiku", "fable"},
 	"codex-cli":  {"gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2"},
@@ -289,10 +289,23 @@ func geminiCLIBundleRoots(cliPath string) []string {
 	if cliPath == "" {
 		return nil
 	}
-	dirs := []string{
-		filepath.Join(filepath.Dir(cliPath), "..", "@google", "gemini-cli", "bundle"),
-		filepath.Join(filepath.Dir(cliPath), "..", "..", "@google", "gemini-cli", "bundle"),
-		filepath.Join(filepath.Dir(cliPath), "node_modules", "@google", "gemini-cli", "bundle"),
+	// homebrew / npm -g 的 bin 是 symlink（bin/gemini →
+	// ../lib/node_modules/@google/gemini-cli/...），先解開再組候選路徑，
+	// 兩種基底都掃，避免 bundle-scan 落空退回 preset。
+	bases := []string{filepath.Dir(cliPath)}
+	if resolved, err := filepath.EvalSymlinks(cliPath); err == nil {
+		if dir := filepath.Dir(resolved); dir != bases[0] {
+			bases = append(bases, dir)
+		}
+	}
+	dirs := []string{}
+	for _, base := range bases {
+		dirs = append(dirs,
+			filepath.Join(base, "..", "@google", "gemini-cli", "bundle"),
+			filepath.Join(base, "..", "..", "@google", "gemini-cli", "bundle"),
+			filepath.Join(base, "node_modules", "@google", "gemini-cli", "bundle"),
+			filepath.Join(base, "..", "lib", "node_modules", "@google", "gemini-cli", "bundle"),
+		)
 	}
 	out := make([]string, 0, len(dirs))
 	seen := map[string]bool{}
@@ -720,6 +733,11 @@ func codexProbeWorkdir() string {
 func normalizeAdapterModelChoice(adapterID, model string) string {
 	id := strings.ToLower(strings.TrimSpace(adapterID))
 	m := strings.TrimSpace(model)
+	if id == "gemini-cli" && strings.EqualFold(m, "gemini-3.5-flash") {
+		// This value was briefly offered by the app but is rejected by the
+		// installed Gemini CLI. Repair persisted choices during hydration.
+		return "gemini-2.5-flash"
+	}
 	if id == "codex-cli" {
 		switch strings.ToLower(m) {
 		case "gpt-5", "gpt-5-codex":

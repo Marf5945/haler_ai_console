@@ -157,6 +157,7 @@ export default function BrowserSettingsSection({
             >
               <option value="zh">{t('settings.chinese')}</option>
               <option value="en">English</option>
+              <option value="ar">العربية</option>
               <option value="ja">{t("settings.langJa")}</option>
               <option value="ko">한국어</option>
             </select>

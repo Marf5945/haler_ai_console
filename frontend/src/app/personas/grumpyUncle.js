@@ -1,0 +1,57 @@
+import {patrolOption} from './definition';
+
+export default {
+  id: 'persona-b', icon: '♚', pixelPack: 'uncle',
+  avatar: {
+    card: new URL('../../assets/persona_avatars/persona-b.svg', import.meta.url).href,
+    states: {
+      idle: new URL('../../assets/persona_avatars/uncle_bust/idle.png', import.meta.url).href,
+      thinking: new URL('../../assets/persona_avatars/uncle_bust/thinking.png', import.meta.url).href,
+      working: new URL('../../assets/persona_avatars/uncle_bust/working.png', import.meta.url).href,
+      happy: new URL('../../assets/persona_avatars/uncle_bust/happy.png', import.meta.url).href,
+      warning: new URL('../../assets/persona_avatars/uncle_bust/warning.png', import.meta.url).href,
+      blocked: new URL('../../assets/persona_avatars/uncle_bust/blocked.png', import.meta.url).href,
+      sleepy: new URL('../../assets/persona_avatars/uncle_bust/sleepy.png', import.meta.url).href,
+      sad: new URL('../../assets/persona_avatars/uncle_bust/sad.png', import.meta.url).href,
+      speechless: new URL('../../assets/persona_avatars/uncle_bust/speechless.png', import.meta.url).href,
+    },
+    fullBody: {
+      idle: new URL('../../assets/persona_fullbody/uncle_bust/fullbody_idle.png', import.meta.url).href,
+      thinking: new URL('../../assets/persona_fullbody/uncle_bust/fullbody_thinking.png', import.meta.url).href,
+      working: new URL('../../assets/persona_fullbody/uncle_bust/fullbody_working.png', import.meta.url).href,
+      working_reaction: new URL('../../assets/persona_fullbody/uncle_bust/fullbody_working.png', import.meta.url).href,
+      happy: new URL('../../assets/persona_fullbody/uncle_bust/fullbody_happy.png', import.meta.url).href,
+      sleepy: new URL('../../assets/persona_fullbody/uncle_bust/fullbody_idle_madao_sleepy_akimbo.png', import.meta.url).href,
+      warning: new URL('../../assets/persona_fullbody/uncle_bust/fullbody_warning_madao_swimbrief_nearly_rip_step.png', import.meta.url).href,
+      blocked: new URL('../../assets/persona_fullbody/uncle_bust/fullbody_blocked.png', import.meta.url).href,
+      sad: new URL('../../assets/persona_fullbody/uncle_bust/fullbody_sad.png', import.meta.url).href,
+      speechless: new URL('../../assets/persona_fullbody/uncle_bust/fullbody_speechless.png', import.meta.url).href,
+    },
+  },
+  display: {key: 'persona.defaultNameB', legacyNames: ['人格 B', '厭世叔', '厭世大叔', 'Grumpy Uncle', 'Tío Gruñón', 'Tio Rabugento', '不機嫌おじさん', '심술쟁이 아저씨', 'ลุงขี้บ่น']},
+  copy: {
+    nameKey: 'persona.defaultNameB', identityKey: 'persona.defaultIdentityB',
+    legacyNames: ['人格 B', '厭世叔', '厭世大叔', 'Grumpy Uncle', 'Tío Gruñón', 'Tio Rabugento', '不機嫌おじさん', '심술쟁이 아저씨', 'ลุงขี้บ่น'],
+    legacyIdentities: ['厭世社畜但帥帥的粗眉硬漢助手', 'A world-weary office drone — still handsome, thick-browed, and tough'],
+    legacyPersonalities: [''],
+  },
+  patrol: {
+    variant: 'male', label: 'Grumpy Uncle', names: ['厭世大叔', '帥氣大叔', 'grumpy uncle', 'uncle', 'persona-b'],
+    options: [
+      patrolOption('老子在這邊，今天終於要開始了嗎？', '等待', {initial: true}),
+      patrolOption('老子可以幫忙，休息一下，不繞遠路陪你處理好。', '休息', {idleAfterMinutes: 25}),
+      patrolOption('老子知道假期結束了，別提醒老子！', '行動'),
+      patrolOption('剛剛是休息的鐘聲，對吧？', '開心'),
+      patrolOption('老子幫忙讓正常的工作量剩一半，那之後一半工作量是正常嗎?', '思索'),
+      patrolOption('怎麼又輪到老子處理？', '行動'),
+      patrolOption('老子都賠到沒衣服穿了，你是有甚麼建議嗎？', '悲傷'),
+      patrolOption('唉，老子只剩一條命，不然還能怎樣？', '悲傷'),
+      patrolOption('老子會在這裡等你，畢竟沒地方可去了！'),
+      patrolOption('不管啦！老子就想休息！', '禁止'),
+      patrolOption('要老子道歉？好啦，對不起啦！'),
+      patrolOption('哈哈，老子也是能做出不錯的成績的！別小看老子！', '開心'),
+      patrolOption('因為......老子也很喜歡你這傢伙！', '開心', {rare: true, rareChance: 0.1}),
+      patrolOption('老子什麼大風大浪沒看，這個......也太大了吧？', '無言', {rare: true, rareChance: 0.1}),
+    ],
+  },
+};

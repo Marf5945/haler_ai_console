@@ -1697,6 +1697,26 @@
     background: linear-gradient(180deg, #5c3109, #2b1604);
   }
 
+  .command-voice-chat {
+    @apply relative transition-[border-color,color,filter,box-shadow] duration-200;
+  }
+
+  .command-voice-chat-status {
+    @apply ml-auto h-2 w-2 shrink-0 rounded-full border border-white/20 bg-white/20;
+    box-shadow: 0 0 0 2px rgba(255,255,255,.04);
+  }
+
+  .command-voice-chat-active {
+    @apply border-[#ffb830] text-[#fff4d1];
+    background: linear-gradient(180deg, #7a4708, #351d02);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 0 16px rgba(255,174,30,.38), 0 8px 20px rgba(0,0,0,.28);
+  }
+
+  .command-voice-chat-active .command-voice-chat-status {
+    @apply border-[#fff0a8] bg-[#ffd34e];
+    box-shadow: 0 0 8px #ffbf24, 0 0 0 3px rgba(255,191,36,.16);
+  }
+
   .workspace {
     @apply relative grid min-h-0 gap-3;
     grid-template-rows: 262px minmax(0, 1fr);
@@ -5118,6 +5138,45 @@
 
   .persona-tone-custom {
     @apply h-[36px] w-full min-w-0;
+  }
+
+  .persona-scenario-stack {
+    @apply flex min-w-0 flex-col gap-2;
+  }
+
+  .persona-voice-row {
+    @apply flex h-[36px] min-w-0 items-stretch gap-2;
+  }
+
+  .persona-voice-row .settings-select-row {
+    @apply min-w-0 flex-1;
+  }
+
+  .persona-voice-row .settings-select-label {
+    @apply sr-only;
+  }
+
+  .persona-voice-row .settings-select-row > button,
+  .persona-voice-preview-btn {
+    @apply h-[36px] min-h-[36px] rounded-[8px] border border-white/30 px-4 text-[15px] font-black text-white outline-none;
+    background: linear-gradient(135deg, rgba(61,35,14,.98), rgba(35,20,9,.98));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 7px 16px rgba(65,30,0,.22);
+  }
+
+  .persona-voice-row .settings-select-row > button {
+    @apply flex w-full items-center justify-between gap-2;
+  }
+
+  .persona-voice-row .settings-select-value {
+    @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap;
+  }
+
+  .persona-voice-preview-btn {
+    @apply w-[76px] flex-none text-[13px] text-[#ffd281];
+  }
+
+  .persona-voice-preview-btn:disabled {
+    @apply cursor-wait opacity-55;
   }
 
   .role-strength-trigger {
@@ -9047,6 +9106,12 @@
   --i18n-letter-spacing: 0.01em;
 }
 
+[data-lang="ar"] {
+  --i18n-font: "Geeza Pro", "Noto Sans Arabic", Tahoma, sans-serif;
+  --i18n-line-height: 1.8;
+  --i18n-letter-spacing: normal;
+}
+
 /* Apply language typography to shell */
 .console-shell {
   font-family: var(--i18n-font, var(--font-console));
@@ -9105,27 +9170,43 @@
   transform: none;
 }
 
-/* -- RTL scaffold (reserved for Arabic/Hebrew/Farsi/Urdu) -- */
+/* -- RTL layout: grid/flex start and end edges follow the document direction. -- */
 [dir="rtl"] .console-shell {
   text-align: right;
-}
-
-[dir="rtl"] .sidebar,
-[dir="rtl"] .left-rail {
-  order: 2;
-}
-
-[dir="rtl"] .main-content {
-  order: 1;
-}
-
-[dir="rtl"] .chat-input-row {
-  flex-direction: row-reverse;
 }
 
 [dir="rtl"] .tool-popup {
   left: auto;
   right: 0;
+}
+
+[dir="rtl"] .message-row > span,
+[dir="rtl"] .settings-popup-option {
+  text-align: right;
+}
+
+[dir="rtl"] .message-text {
+  unicode-bidi: plaintext;
+}
+
+/* Technical tokens keep their natural LTR order inside an Arabic shell. */
+[dir="rtl"] code,
+[dir="rtl"] pre,
+[dir="rtl"] kbd,
+[dir="rtl"] samp,
+[dir="rtl"] input[type="url"],
+[dir="rtl"] input[type="email"],
+[dir="rtl"] .reference-file-detail,
+[dir="rtl"] .shared-source-file-name,
+[dir="rtl"] .code-artifact-content {
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: isolate;
+}
+
+[dir="rtl"] .vl-panel {
+  right: auto;
+  left: 18px;
 }
 
 /* RTL: flip directional icons and margins */
@@ -9161,7 +9242,9 @@
 [data-lang="th"] .command-btn > span:last-child,
 [data-lang="th"] .adapter-name,
 [data-lang="ko"] .command-btn > span:last-child,
-[data-lang="ko"] .adapter-name {
+[data-lang="ko"] .adapter-name,
+[data-lang="ar"] .command-btn > span:last-child,
+[data-lang="ar"] .adapter-name {
   font-size: clamp(10.5px, 0.86vw, 16px);
 }
 
@@ -9979,7 +10062,7 @@
 .reference-file-name { position: relative; }
 .reference-file-ext-badge {
   position: absolute;
-  right: 3px;
+  inset-inline-end: 3px;
   bottom: 2px;
   font-size: 8px;
   line-height: 1;
@@ -9995,48 +10078,108 @@
   white-space: nowrap;
 }
 
-/* ── SettingPopupSelect 下拉清單（settings-popup-list）主題配色 ──
-   修正：消極白主題下，選項按鈕繼承面板深色文字、疊在深色彈窗上看不見。 */
-.console-shell .settings-popup-list {
-  background: rgba(20, 13, 7, 0.98);
+/* SettingPopupSelect 使用 portal 掛在 document.body，不是 .console-shell 子層。
+   清單與每個 option 都必須有實色底，避免下層設定標籤穿透後吃掉文字。 */
+.settings-popup-list-portal {
+  background: #140d07;
   border: 1px solid rgba(255, 255, 255, 0.16);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
   color: #fff8ef;
+  isolation: isolate;
 }
-.console-shell .settings-popup-list button.settings-popup-option {
+.settings-popup-list-portal button.settings-popup-option {
   width: 100%;
-  text-align: left;
+  text-align: start;
   padding: 7px 10px;
   border-radius: 7px;
   border: none;
   cursor: pointer;
   font: inherit;
   color: inherit;
-  background: transparent;
+  background: #21170f;
 }
-.console-shell .settings-popup-list button.settings-popup-option:hover {
-  background: rgba(255, 255, 255, 0.07);
+.settings-popup-list-portal button.settings-popup-option:hover,
+.settings-popup-list-portal button.settings-popup-option:focus-visible {
+  background: #382719;
+  outline: 2px solid #ffb45a;
+  outline-offset: -2px;
 }
-.console-shell .settings-popup-list button.settings-popup-option.active {
-  background: rgba(255, 255, 255, 0.14);
+.settings-popup-list-portal button.settings-popup-option.active {
+  background: #51321a;
 }
 
-/* 消極白：下拉改亮底深字 */
-.console-shell[data-theme="white"] .settings-popup-list {
-  background: #ffffff;
+/* 消極白 */
+.settings-popup-list-portal[data-theme="white"] {
+  background: #f3f3f3;
   border-color: #e0e0e0;
   color: #202020;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
 }
-.console-shell[data-theme="white"] .settings-popup-list button.settings-popup-option {
+.settings-popup-list-portal[data-theme="white"] button.settings-popup-option {
   color: #202020;
-  background: transparent;
+  background: #ffffff;
 }
-.console-shell[data-theme="white"] .settings-popup-list button.settings-popup-option:hover {
-  background: rgba(0, 0, 0, 0.06);
+.settings-popup-list-portal[data-theme="white"] button.settings-popup-option:hover,
+.settings-popup-list-portal[data-theme="white"] button.settings-popup-option:focus-visible {
+  background: #e5e5e5;
+  outline-color: #a55f08;
 }
-.console-shell[data-theme="white"] .settings-popup-list button.settings-popup-option.active {
-  background: rgba(0, 0, 0, 0.10);
+.settings-popup-list-portal[data-theme="white"] button.settings-popup-option.active {
+  background: #d8d8d8;
+}
+
+/* 粉切黑 */
+.settings-popup-list-portal[data-theme="pink-black"] {
+  background: #080408;
+  border-color: #7a2355;
+  color: #fff4fb;
+}
+.settings-popup-list-portal[data-theme="pink-black"] button.settings-popup-option {
+  background: #171015;
+}
+.settings-popup-list-portal[data-theme="pink-black"] button.settings-popup-option:hover,
+.settings-popup-list-portal[data-theme="pink-black"] button.settings-popup-option:focus-visible {
+  background: #351126;
+  outline-color: #ff3aa9;
+}
+.settings-popup-list-portal[data-theme="pink-black"] button.settings-popup-option.active {
+  background: #551039;
+}
+
+/* 原諒青 */
+.settings-popup-list-portal[data-theme="green"] {
+  background: #fff4d2;
+  border-color: #8e7c46;
+  color: #193015;
+}
+.settings-popup-list-portal[data-theme="green"] button.settings-popup-option {
+  background: #f2e2ad;
+}
+.settings-popup-list-portal[data-theme="green"] button.settings-popup-option:hover,
+.settings-popup-list-portal[data-theme="green"] button.settings-popup-option:focus-visible {
+  background: #dfcd90;
+  outline-color: #2d5a27;
+}
+.settings-popup-list-portal[data-theme="green"] button.settings-popup-option.active {
+  background: #cdbb7d;
+}
+
+/* 敗北藍 */
+.settings-popup-list-portal[data-theme="blue"] {
+  background: #10223c;
+  border-color: #3f7894;
+  color: #dff8ff;
+}
+.settings-popup-list-portal[data-theme="blue"] button.settings-popup-option {
+  background: #173452;
+}
+.settings-popup-list-portal[data-theme="blue"] button.settings-popup-option:hover,
+.settings-popup-list-portal[data-theme="blue"] button.settings-popup-option:focus-visible {
+  background: #245878;
+  outline-color: #64ffda;
+}
+.settings-popup-list-portal[data-theme="blue"] button.settings-popup-option.active {
+  background: #286b83;
 }
 
 /* Floating avatar background mode */
@@ -10370,7 +10513,32 @@
   color: #d6fff9;
 }
 
+.floating-avatar-panel-actions .floating-avatar-voice-btn {
+  min-width: 64px;
+  border: 1px solid rgba(255, 146, 190, .58);
+  background: rgba(255, 146, 190, .13);
+  color: #ffe4ef;
+}
+
+.floating-avatar-panel-actions .floating-avatar-voice-recording,
+.floating-avatar-panel-actions .floating-avatar-voice-sync {
+  border-color: rgba(255, 75, 131, .82);
+  box-shadow: 0 0 0 3px rgba(255, 75, 131, .16), inset 0 0 18px rgba(255, 75, 131, .18);
+}
+
+.floating-avatar-panel-actions .floating-avatar-voice-sync-short_pause,
+.floating-avatar-panel-actions .floating-avatar-voice-sync-committing {
+  border-color: rgba(250, 204, 21, .72);
+  background: rgba(250, 204, 21, .14);
+  color: #fef3c7;
+}
+
 .floating-avatar-panel-actions .floating-avatar-photo-btn[disabled] {
+  opacity: .55;
+  cursor: default;
+}
+
+.floating-avatar-panel-actions .floating-avatar-voice-btn[disabled] {
   opacity: .55;
   cursor: default;
 }
@@ -11074,4 +11242,85 @@
   padding: 6px 12px;
   border-top: 1px solid rgba(255,255,255,.1);
   background: rgba(0,0,0,.25);
+}
+
+/* ── 語音聊天模式（voice chat mode）── */
+.voice-chat-hint-bubble {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  margin: 0 14px 8px;
+  padding: 6px 12px;
+  border-radius: 18px;
+  background: var(--panel-bg, rgba(38, 38, 46, 0.96));
+  border: 1px solid var(--panel-border, rgba(130, 130, 150, 0.35));
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.28);
+  animation: voice-chat-hint-in 0.18s ease-out;
+}
+@keyframes voice-chat-hint-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.voice-chat-hint-btn {
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+}
+.voice-chat-hint-btn:hover { text-decoration: underline; }
+.voice-chat-hint-close {
+  border: none;
+  background: none;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+}
+.voice-chat-hint-close:hover { opacity: 1; }
+.voice-chat-toggle-btn {
+  border: 1px solid var(--panel-border, rgba(130, 130, 150, 0.35));
+  background: var(--accent-soft, rgba(90, 140, 255, 0.18));
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 6px 9px;
+  margin-left: 6px;
+}
+.voice-chat-toggle-btn:hover { filter: brightness(1.15); }
+
+/* ── 設定面板：語音輸出區 ── */
+.settings-voice-output-block { margin-top: 8px; }
+.settings-voice-subtitle { display: block; opacity: 0.65; margin: 6px 0 2px; }
+.settings-voice-preview-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+}
+.settings-voice-preview-name { font-size: 12px; }
+.settings-voice-pack-status { opacity: 0.65; }
+
+/* ── Voice Sync 聆聽狀態 ── */
+.voice-btn-sync {
+  border-color: var(--accent, #5a8cff) !important;
+}
+.voice-btn-sync-listening {
+  animation: voice-sync-pulse 1.6s ease-in-out infinite;
+}
+.voice-btn-sync-short_pause {
+  animation: voice-sync-pulse 0.8s ease-in-out infinite;
+}
+.voice-btn-sync-committing {
+  opacity: 0.6;
+}
+@keyframes voice-sync-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(90, 140, 255, 0.45); }
+  50% { box-shadow: 0 0 0 6px rgba(90, 140, 255, 0.05); }
 }

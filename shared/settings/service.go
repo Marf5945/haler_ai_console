@@ -27,6 +27,7 @@ type Persona struct {
 	Icon           string `json:"icon"`
 	AvatarURL      string `json:"avatarUrl"`
 	Identity       string `json:"identity"`
+	VoiceID        string `json:"voiceId,omitempty"`
 	ReplyStrategy  string `json:"replyStrategy"`
 	RoleStrength   string `json:"roleStrength"`
 	Personality    string `json:"personality"`

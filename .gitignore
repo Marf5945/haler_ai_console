@@ -172,3 +172,38 @@ frontend/src/assets/persona_motion/**/sequences/**/sequence.json
 /reference/*.png
 /wolf_ui.png
 /tmp/
+
+# === Local design, review, and asset-authoring material ===
+# Product documentation such as README, SECURITY, and THIRD_PARTY_NOTICES stays
+# tracked; these patterns cover working specifications and review artifacts only.
+/AI_Console_Spec*.md
+/AI_Console_UI*.md
+/BLACKBOARD_SPEC.md
+/YULESAKU_IDLE_LINKED_IMAGES.md
+/docs_review/
+/*設計文件*.md
+/*設計與實作*.md
+/inochi_test*.html
+/open_inochi2d_build.command
+/frontend/scripts/validate-yulesaku-motion-pack.js
+/scripts/go_lite_check.py
+/scripts/monitor_link.sh
+/frontend/src/assets/persona_motion/**/*.py
+/frontend/src/assets/persona_motion/**/__pycache__/
+/frontend/src/assets/persona_motion/**/tmp/
+/frontend/src/assets/persona_motion/uncle_bust/
+/frontend/src/assets/persona_motion/**/inochi2d/README.md
+/frontend/src/assets/persona_motion/**/inochi2d/audit/
+/frontend/src/assets/persona_motion/**/inochi2d/**/layers/
+/frontend/src/assets/persona_motion/**/inochi2d/**/masks/
+/frontend/src/assets/persona_motion/**/inochi2d/**/meta.json
+/frontend/src/assets/persona_motion/**/inochi2d/**/preview_*.png
+/frontend/src/assets/persona_motion/**/inochi2d/**/reference.png
+/frontend/src/assets/persona_motion/**/inochi2d/*.html
+/frontend/src/assets/persona_motion/**/inochi2d/*.command
+/frontend/src/assets/persona_motion/**/inochi2d/transitions/
+/frontend/src/assets/persona_motion/**/*review*plan*.md
+/frontend/src/**/*.test.js
+/frontend/src/**/*.test.jsx
+/frontend/src/app/components/BlackboardEventDiagnostics.jsx
+/frontend/src/assets/persona_motion/yulesaku/fullbody/Expressions/idle_fixed.png

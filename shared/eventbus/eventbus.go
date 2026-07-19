@@ -81,14 +81,25 @@ const (
 
 // Bus is the central event dispatcher. Holds the Wails context for EventsEmit.
 type Bus struct {
-	mu  sync.Mutex
-	ctx context.Context
+	mu   sync.Mutex
+	ctx  context.Context
+	sink Sink
 }
+
+// Sink is the small injection point used by in-process consumers and tests.
+// Production buses leave it nil and continue through Wails runtime.EventsEmit.
+type Sink func(eventName string, payload interface{})
 
 // New creates a Bus. Pass the context received in app.startup.
 // If ctx is nil (e.g. during unit tests), Emit becomes a no-op.
 func New(ctx context.Context) *Bus {
 	return &Bus{ctx: ctx}
+}
+
+// NewWithSink creates a bus whose events are delivered synchronously to sink.
+// This keeps event-condition tests independent from a live Wails runtime.
+func NewWithSink(sink Sink) *Bus {
+	return &Bus{sink: sink}
 }
 
 // SetContext allows deferred context injection (useful when Bus is created before startup).
@@ -104,7 +115,12 @@ func (b *Bus) SetContext(ctx context.Context) {
 func (b *Bus) Emit(eventName string, payload interface{}) {
 	b.mu.Lock()
 	ctx := b.ctx
+	sink := b.sink
 	b.mu.Unlock()
+	if sink != nil {
+		sink(eventName, payload)
+		return
+	}
 	if ctx == nil {
 		return // no-op in test or pre-startup
 	}

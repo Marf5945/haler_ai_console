@@ -285,6 +285,25 @@ else
   "${wails_bin}" build -ldflags "-extldflags=-Wl,-no_warn_duplicate_libraries"
 fi
 
+voice_runner_sha256="c01e6dea1165e459d73193a341db9f31e83e4dc01b8b17e169a00b2d396246fa"
+voice_runner_src="${VOICE_RUNNER_SOURCE:-${root_dir}/build/voice/whisper-cli}"
+voice_runner_dst="${root_dir}/build/bin/${app_name}.app/Contents/Resources/voice/whisper-cli"
+if [[ -f "${voice_runner_src}" ]]; then
+  actual_voice_runner_sha256="$(shasum -a 256 "${voice_runner_src}" | awk '{print $1}')"
+  if [[ "${actual_voice_runner_sha256}" != "${voice_runner_sha256}" ]]; then
+    echo "[ERROR] Refusing to package whisper-cli with an unexpected SHA256."
+    echo "        Expected: ${voice_runner_sha256}"
+    echo "        Actual:   ${actual_voice_runner_sha256}"
+    exit 1
+  fi
+  mkdir -p "$(dirname "${voice_runner_dst}")"
+  cp "${voice_runner_src}" "${voice_runner_dst}"
+  chmod 700 "${voice_runner_dst}"
+  echo "Packaged verified whisper-cli runner."
+else
+  echo "[WARN] Verified whisper-cli source not found at ${voice_runner_src}; voice input will stay unavailable."
+fi
+
 model_src="${root_dir}/assets/models/yolox_button_s.mlmodelc"
 model_dst="${root_dir}/build/bin/${app_name}.app/Contents/Resources/assets/models"
 if [[ -d "${model_src}" && -d "${root_dir}/build/bin/${app_name}.app" ]]; then
@@ -296,6 +315,10 @@ if [[ -d "${model_src}" && -d "${root_dir}/build/bin/${app_name}.app" ]]; then
   fi
 else
   echo "[WARN] assets/models/yolox_button_s.mlmodelc not found; Visual Learning CoreML model will be unavailable."
+fi
+
+if command -v codesign >/dev/null 2>&1 && [[ -d "${root_dir}/build/bin/${app_name}.app" ]]; then
+  codesign --force --deep --sign - "${root_dir}/build/bin/${app_name}.app" >/dev/null
 fi
 
 echo

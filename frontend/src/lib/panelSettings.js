@@ -45,11 +45,17 @@ export const _panelLangLabelMap = {
   '韓語': 'settings.langKo',
   'Korean': 'settings.langKo',
   'ko': 'settings.langKo',
+  'ar': 'settings.langAr',
+  'Arabic': 'settings.langAr',
+  'العربية': 'settings.langAr',
+  '阿拉伯文': 'settings.langAr',
+  '阿拉伯語': 'settings.langAr',
   // self-heal: raw i18n keys leaked by an older build
   'settings.langPt': 'settings.langPt',
   'settings.langEs': 'settings.langEs',
   'settings.langTh': 'settings.langTh',
   'settings.langKo': 'settings.langKo',
+  'settings.langAr': 'settings.langAr',
 };
 export const _roleLangLabelMap = {
   '自動': 'settings.roleLangAuto',
@@ -79,6 +85,12 @@ export const _roleLangLabelMap = {
   '韓語': 'settings.langKo',
   'Korean': 'settings.langKo',
   'ko': 'settings.langKo',
+  'ar': 'settings.langAr',
+  'Arabic': 'settings.langAr',
+  'العربية': 'settings.langAr',
+  '阿拉伯文': 'settings.langAr',
+  '阿拉伯語': 'settings.langAr',
+  'settings.langAr': 'settings.langAr',
 };
 export const _fontPresetLabelMap = {
   // 預設（沿用系統/語言字型，不覆寫）

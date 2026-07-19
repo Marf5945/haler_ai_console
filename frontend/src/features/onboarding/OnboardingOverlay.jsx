@@ -9,6 +9,7 @@ const LANGUAGE_OPTIONS = [
   {code: 'es', label: 'Español'},
   {code: 'th', label: 'ไทย'},
   {code: 'ko', label: '한국어'},
+  {code: 'ar', label: 'العربية'},
 ];
 
 const API_PROVIDER_OPTIONS = [

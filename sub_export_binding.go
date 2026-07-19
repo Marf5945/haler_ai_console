@@ -121,7 +121,7 @@ type ImportSubResult struct {
 	SubDir          string                   `json:"sub_dir"`
 	MemoryIntegrity *SubIndexIntegrity       `json:"memory_integrity,omitempty"`
 	ToolConflicts   []subexport.ToolConflict `json:"tool_conflicts"`
-	InstalledTools  []string                 `json:"installed_tools"`
+	InstalledTools []string                 `json:"installed_tools"`
 }
 
 type SubPackagePreview struct {
@@ -440,11 +440,11 @@ const subIndexIntegrityMaxTags = 20
 type SubIndexIntegrity struct {
 	SubID           string   `json:"sub_id"`
 	CheckedAt       string   `json:"checked_at"`
-	Merged          int      `json:"merged"`        // 驗證通過、併入 main 的條數
-	Dropped         int      `json:"dropped"`       // 段落對不上而整條丟棄的條數
-	TermsDropped    int      `json:"terms_dropped"` // 接地失敗被丟棄的關鍵詞數
+	Merged          int      `json:"merged"`             // 驗證通過、併入 main 的條數
+	Dropped         int      `json:"dropped"`            // 段落對不上而整條丟棄的條數
+	TermsDropped    int      `json:"terms_dropped"`      // 接地失敗被丟棄的關鍵詞數
 	DroppedTags     []string `json:"dropped_tags,omitempty"`
-	RebuildRequired bool     `json:"rebuild_required"` // 建議使用者重新建立索引與摘要
+	RebuildRequired bool     `json:"rebuild_required"`   // 建議使用者重新建立索引與摘要
 	Note            string   `json:"note,omitempty"`
 }
 
@@ -453,7 +453,6 @@ type SubIndexIntegrity struct {
 //  1. DeepTag 必須是合法 D-tag，且該段落真的存在於 sub 的 deep_memory.md——查無段落視為篡改，整條丟。
 //  2. KeyTerms 逐字對回段落原文（大小寫不敏感接地），對不上的詞丟棄。
 //  3. 已存在同 sub 同 D-tag 的 main 條目不重複併入。
-//
 // 回傳實際併入條數。
 func (a *App) absorbSubIndexCache(subID, subDir string) (*SubIndexIntegrity, error) {
 	subPipe := memory.NewPipeline(subDir)
